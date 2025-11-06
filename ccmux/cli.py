@@ -1229,7 +1229,15 @@ def meta(
     """
     common = Common(session=session)
     command, bound, _ = app.parse_args(tokens)
-    return command(*bound.args, **bound.kwargs, common=common)
+
+    # Check if the command accepts the common parameter
+    import inspect
+    sig = inspect.signature(command)
+    if "common" in sig.parameters:
+        return command(*bound.args, **bound.kwargs, common=common)
+    else:
+        # For commands like help that don't accept common parameter
+        return command(*bound.args, **bound.kwargs)
 
 
 def main():
