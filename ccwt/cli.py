@@ -397,21 +397,19 @@ def list(
 
 
 @app.command
-def destroy(
+def deactivate(
     name: Optional[str] = None,
     *,
     session: str = "claude-cluster",
-    remove_worktree: bool = False,
     all: bool = False,
     no_confirm: bool = False,
 ) -> None:
-    """Destroy Claude Code instance(s) (kill tmux window).
+    """Deactivate Claude Code instance(s) by killing tmux window (keeps worktree).
 
     Args:
-        name: Session name to destroy (auto-detects if running inside tmux)
+        name: Session name to deactivate (auto-detects if running inside tmux)
         session: Tmux session name (default: claude-cluster)
-        remove_worktree: Also remove the git worktree (default: False)
-        all: Destroy all active sessions (default: False)
+        all: Deactivate all active sessions (default: False)
         no_confirm: Skip confirmation prompt (default: False)
     """
     # Handle --all flag
@@ -424,97 +422,38 @@ def destroy(
         worktrees = get_all_worktrees(repo_root)
         tmux_windows = get_tmux_windows(session)
 
-        # Separate active and inactive worktrees
+        # Filter to only active worktrees
         active_worktrees = [wt for wt in worktrees if wt["name"] in tmux_windows]
-        inactive_worktrees = [wt for wt in worktrees if wt["name"] not in tmux_windows]
 
-        # Decide which worktrees to process based on flags
-        if remove_worktree:
-            # When removing worktrees, process both active and inactive
-            worktrees_to_process = worktrees
-            if not worktrees_to_process:
-                console.print("\n[yellow]No worktrees to destroy.[/yellow]")
+        if not active_worktrees:
+            console.print("\n[yellow]No active sessions to deactivate.[/yellow]")
+            return
+
+        console.print(f"\n[bold yellow]Found {len(active_worktrees)} active session(s):[/bold yellow]")
+        for wt in active_worktrees:
+            console.print(f"  • {wt['name']}")
+        console.print()
+
+        if not no_confirm:
+            if not Confirm.ask(f"Deactivate all {len(active_worktrees)} session(s)?", default=False):
+                console.print("[yellow]Cancelled.[/yellow]")
                 return
 
-            console.print(f"\n[bold yellow]Found {len(worktrees_to_process)} worktree(s):[/bold yellow]")
-            if active_worktrees:
-                console.print(f"  Active ({len(active_worktrees)}):")
-                for wt in active_worktrees:
-                    console.print(f"    • {wt['name']}")
-            if inactive_worktrees:
-                console.print(f"  Inactive ({len(inactive_worktrees)}):")
-                for wt in inactive_worktrees:
-                    console.print(f"    • {wt['name']}")
-            console.print()
-
-            if not no_confirm:
-                if not Confirm.ask(f"Destroy and remove all {len(worktrees_to_process)} worktree(s)?", default=False):
-                    console.print("[yellow]Cancelled.[/yellow]")
-                    return
-        else:
-            # Without --remove-worktree, only process active sessions
-            worktrees_to_process = active_worktrees
-            if not worktrees_to_process:
-                console.print("\n[yellow]No active sessions to destroy.[/yellow]")
-                return
-
-            console.print(f"\n[bold yellow]Found {len(worktrees_to_process)} active session(s):[/bold yellow]")
-            for wt in worktrees_to_process:
-                console.print(f"  • {wt['name']}")
-            console.print()
-
-            if not no_confirm:
-                if not Confirm.ask(f"Destroy all {len(worktrees_to_process)} session(s)?", default=False):
-                    console.print("[yellow]Cancelled.[/yellow]")
-                    return
-
-        # Process worktrees
-        destroyed_count = 0
-        removed_count = 0
-        for wt in worktrees_to_process:
+        deactivated_count = 0
+        for wt in active_worktrees:
             wt_name = wt["name"]
-            is_active = wt_name in tmux_windows
+            try:
+                subprocess.run(
+                    ["tmux", "kill-window", "-t", f"{session}:{wt_name}"],
+                    check=True,
+                    capture_output=True,
+                )
+                console.print(f"  [green]✓[/green] Deactivated '{wt_name}'")
+                deactivated_count += 1
+            except subprocess.CalledProcessError:
+                console.print(f"  [yellow]Window '{wt_name}' not found or already closed[/yellow]")
 
-            # Kill tmux window if active
-            if is_active:
-                try:
-                    subprocess.run(
-                        ["tmux", "kill-window", "-t", f"{session}:{wt_name}"],
-                        check=True,
-                        capture_output=True,
-                    )
-                    console.print(f"  [green]✓[/green] Killed tmux window '{wt_name}'")
-                    destroyed_count += 1
-                except subprocess.CalledProcessError:
-                    console.print(f"  [yellow]Window '{wt_name}' not found or already closed[/yellow]")
-
-            # Remove worktree if requested
-            if remove_worktree:
-                worktree_path = Path(wt["path"])
-                if worktree_exists(worktree_path):
-                    try:
-                        subprocess.run(
-                            ["git", "worktree", "remove", "--force", str(worktree_path)],
-                            check=True,
-                        )
-                        prefix = "    " if is_active else "  "
-                        console.print(f"{prefix}[green]✓[/green] Removed worktree '{wt_name}'")
-                        removed_count += 1
-                    except subprocess.CalledProcessError as e:
-                        prefix = "    " if is_active else "  "
-                        console.print(f"{prefix}[red]Error removing worktree:[/red] {e}")
-
-        # Summary message
-        summary_parts = []
-        if destroyed_count > 0:
-            summary_parts.append(f"{destroyed_count} session(s)")
-        if removed_count > 0:
-            summary_parts.append(f"{removed_count} worktree(s)")
-
-        if summary_parts:
-            console.print(f"\n[bold green]Success![/bold green] Destroyed {' and removed '.join(summary_parts)}.")
-        else:
-            console.print(f"\n[yellow]Nothing was destroyed.[/yellow]")
+        console.print(f"\n[bold green]Success![/bold green] Deactivated {deactivated_count} session(s).")
         return
 
     # Auto-detect name from tmux if not provided
@@ -530,7 +469,7 @@ def destroy(
             sys.exit(1)
 
     # Kill the tmux window
-    console.print(f"\n[bold yellow]Destroying Claude Code instance:[/bold yellow] {name}")
+    console.print(f"\n[bold yellow]Deactivating Claude Code instance:[/bold yellow] {name}")
 
     try:
         subprocess.run(
@@ -542,41 +481,179 @@ def destroy(
     except subprocess.CalledProcessError:
         console.print(f"  [yellow]Window '{name}' not found or already closed[/yellow]")
 
-    # Optionally remove worktree
-    if remove_worktree:
-        repo_root = get_repo_root()
-        if repo_root:
-            worktree_path = repo_root / ".worktrees" / name
-
-            if worktree_exists(worktree_path):
-                try:
-                    subprocess.run(
-                        ["git", "worktree", "remove", "--force", str(worktree_path)],
-                        check=True,
-                    )
-                    console.print(f"  [green]✓[/green] Removed worktree at {worktree_path}")
-                except subprocess.CalledProcessError as e:
-                    console.print(f"  [red]Error removing worktree:[/red] {e}")
-            else:
-                console.print(f"  [yellow]Worktree not found:[/yellow] {worktree_path}")
-
-    console.print(f"\n[bold green]Success![/bold green] Instance '{name}' destroyed.")
+    console.print(f"\n[bold green]Success![/bold green] Instance '{name}' deactivated.")
 
 
 @app.command
-def reopen(
+def remove(
     name: Optional[str] = None,
     *,
     session: str = "claude-cluster",
     all: bool = False,
     no_confirm: bool = False,
 ) -> None:
-    """Reopen a worktree in tmux (useful if tmux window was closed).
+    """Remove worktree(s) permanently (deactivates session and deletes worktree).
+
+    ⚠️  WARNING: This permanently deletes the worktree and any uncommitted changes!
 
     Args:
-        name: Worktree name to reopen
+        name: Worktree name to remove (auto-detects if running inside tmux)
         session: Tmux session name (default: claude-cluster)
-        all: Reopen all inactive worktrees (default: False)
+        all: Remove all worktrees (active and inactive) (default: False)
+        no_confirm: Skip confirmation prompt (default: False)
+    """
+    repo_root = get_repo_root()
+    if repo_root is None:
+        console.print("[red]Error:[/red] Not inside a git repository.", style="bold")
+        sys.exit(1)
+
+    worktrees = get_all_worktrees(repo_root)
+    tmux_windows = get_tmux_windows(session)
+
+    # Handle --all flag
+    if all:
+        if not worktrees:
+            console.print("\n[yellow]No worktrees to remove.[/yellow]")
+            return
+
+        # Separate active and inactive
+        active_worktrees = [wt for wt in worktrees if wt["name"] in tmux_windows]
+        inactive_worktrees = [wt for wt in worktrees if wt["name"] not in tmux_windows]
+
+        console.print(f"\n[bold red]⚠️  WARNING: This will permanently delete {len(worktrees)} worktree(s)[/bold red]")
+        console.print("[red]Any uncommitted changes will be lost![/red]\n")
+
+        if active_worktrees:
+            console.print(f"  Active ({len(active_worktrees)}):")
+            for wt in active_worktrees:
+                console.print(f"    • {wt['name']}")
+        if inactive_worktrees:
+            console.print(f"  Inactive ({len(inactive_worktrees)}):")
+            for wt in inactive_worktrees:
+                console.print(f"    • {wt['name']}")
+        console.print()
+
+        if not no_confirm:
+            if not Confirm.ask(f"[bold red]Permanently remove all {len(worktrees)} worktree(s)?[/bold red]", default=False):
+                console.print("[yellow]Cancelled.[/yellow]")
+                return
+
+        removed_count = 0
+        for wt in worktrees:
+            wt_name = wt["name"]
+            wt_path = Path(wt["path"])
+            is_active = wt_name in tmux_windows
+
+            # Deactivate if active
+            if is_active:
+                try:
+                    subprocess.run(
+                        ["tmux", "kill-window", "-t", f"{session}:{wt_name}"],
+                        check=True,
+                        capture_output=True,
+                    )
+                    console.print(f"  [green]✓[/green] Deactivated '{wt_name}'")
+                except subprocess.CalledProcessError:
+                    console.print(f"  [yellow]Window '{wt_name}' already closed[/yellow]")
+
+            # Remove worktree
+            if worktree_exists(wt_path):
+                try:
+                    subprocess.run(
+                        ["git", "worktree", "remove", "--force", str(wt_path)],
+                        check=True,
+                    )
+                    prefix = "    " if is_active else "  "
+                    console.print(f"{prefix}[green]✓[/green] Removed worktree '{wt_name}'")
+                    removed_count += 1
+                except subprocess.CalledProcessError as e:
+                    prefix = "    " if is_active else "  "
+                    console.print(f"{prefix}[red]Error removing worktree:[/red] {e}")
+
+        console.print(f"\n[bold green]Success![/bold green] Removed {removed_count} worktree(s).")
+        return
+
+    # Single worktree removal
+    if name is None:
+        # Auto-detect from tmux
+        current_window = get_current_tmux_window()
+        current_session = get_current_tmux_session()
+
+        if current_window and current_session == session:
+            name = current_window
+            console.print(f"[cyan]Auto-detected window:[/cyan] {name}")
+        else:
+            console.print("[red]Error:[/red] Not running inside a tmux window, please specify name.", style="bold")
+            sys.exit(1)
+
+    # Find the worktree
+    worktree = None
+    for wt in worktrees:
+        if wt["name"] == name:
+            worktree = wt
+            break
+
+    if worktree is None:
+        console.print(f"[red]Error:[/red] Worktree '{name}' not found.", style="bold")
+        console.print(f"List worktrees with: [cyan]ccwt list[/cyan]")
+        sys.exit(1)
+
+    wt_path = Path(worktree["path"])
+    is_active = name in tmux_windows
+
+    console.print(f"\n[bold red]⚠️  WARNING: Removing worktree '{name}'[/bold red]")
+    console.print("[red]This will permanently delete the worktree and any uncommitted changes![/red]")
+    console.print(f"  Path: {wt_path}")
+    console.print(f"  Status: {'Active' if is_active else 'Inactive'}\n")
+
+    if not no_confirm:
+        if not Confirm.ask(f"[bold red]Permanently remove worktree '{name}'?[/bold red]", default=False):
+            console.print("[yellow]Cancelled.[/yellow]")
+            return
+
+    # Deactivate if active
+    if is_active:
+        try:
+            subprocess.run(
+                ["tmux", "kill-window", "-t", f"{session}:{name}"],
+                check=True,
+                capture_output=True,
+            )
+            console.print(f"  [green]✓[/green] Deactivated '{name}'")
+        except subprocess.CalledProcessError:
+            console.print(f"  [yellow]Window '{name}' already closed[/yellow]")
+
+    # Remove worktree
+    if worktree_exists(wt_path):
+        try:
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", str(wt_path)],
+                check=True,
+            )
+            console.print(f"  [green]✓[/green] Removed worktree at {wt_path}")
+        except subprocess.CalledProcessError as e:
+            console.print(f"  [red]Error removing worktree:[/red] {e}")
+            sys.exit(1)
+    else:
+        console.print(f"  [yellow]Worktree not found:[/yellow] {wt_path}")
+
+    console.print(f"\n[bold green]Success![/bold green] Worktree '{name}' removed.")
+
+
+@app.command
+def activate(
+    name: Optional[str] = None,
+    *,
+    session: str = "claude-cluster",
+    all: bool = False,
+    no_confirm: bool = False,
+) -> None:
+    """Activate Claude Code in a worktree (useful if tmux window was closed).
+
+    Args:
+        name: Worktree name to activate
+        session: Tmux session name (default: claude-cluster)
+        all: Activate all inactive worktrees (default: False)
         no_confirm: Skip confirmation prompt (default: False)
     """
     repo_root = get_repo_root()
@@ -588,11 +665,11 @@ def reopen(
     tmux_windows = get_tmux_windows(session)
 
     if all:
-        # Reopen all inactive worktrees
+        # Activate all inactive worktrees
         inactive_worktrees = [wt for wt in worktrees if wt["name"] not in tmux_windows]
 
         if not inactive_worktrees:
-            console.print("\n[yellow]No inactive worktrees to reopen.[/yellow]")
+            console.print("\n[yellow]No inactive worktrees to activate.[/yellow]")
             return
 
         console.print(f"\n[bold cyan]Found {len(inactive_worktrees)} inactive worktree(s):[/bold cyan]")
@@ -601,11 +678,11 @@ def reopen(
         console.print()
 
         if not no_confirm:
-            if not Confirm.ask(f"Reopen all {len(inactive_worktrees)} worktree(s)?", default=True):
+            if not Confirm.ask(f"Activate all {len(inactive_worktrees)} worktree(s)?", default=True):
                 console.print("[yellow]Cancelled.[/yellow]")
                 return
 
-        reopened_count = 0
+        activated_count = 0
         for wt in inactive_worktrees:
             wt_name = wt["name"]
             wt_path = wt["path"]
@@ -624,7 +701,7 @@ def reopen(
             # Create new tmux window
             try:
                 launch_cmd = (
-                    f"echo 'Reopening Claude Code in {wt_path} (branch {wt_name})'; "
+                    f"echo 'Activating Claude Code in {wt_path} (branch {wt_name})'; "
                     f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
                 )
 
@@ -639,15 +716,15 @@ def reopen(
                     check=True,
                     capture_output=True,
                 )
-                console.print(f"  [green]✓[/green] Reopened '{wt_name}'")
-                reopened_count += 1
+                console.print(f"  [green]✓[/green] Activated '{wt_name}'")
+                activated_count += 1
             except subprocess.CalledProcessError as e:
-                console.print(f"  [red]Error reopening '{wt_name}':[/red] {e}")
+                console.print(f"  [red]Error activating '{wt_name}':[/red] {e}")
 
-        console.print(f"\n[bold green]Success![/bold green] Reopened {reopened_count} worktree(s).")
+        console.print(f"\n[bold green]Success![/bold green] Activated {activated_count} worktree(s).")
         return
 
-    # Reopen single worktree
+    # Activate single worktree
     if name is None:
         console.print("[red]Error:[/red] Please specify a worktree name or use --all.", style="bold")
         sys.exit(1)
@@ -671,7 +748,7 @@ def reopen(
 
     wt_path = worktree["path"]
 
-    console.print(f"\n[bold cyan]Reopening Claude Code instance:[/bold cyan] {name}")
+    console.print(f"\n[bold cyan]Activating Claude Code instance:[/bold cyan] {name}")
     console.print(f"  Worktree: {wt_path}")
 
     # Create or attach to tmux session
@@ -689,7 +766,7 @@ def reopen(
     # Create new tmux window
     try:
         launch_cmd = (
-            f"echo 'Reopening Claude Code in {wt_path} (branch {name})'; "
+            f"echo 'Activating Claude Code in {wt_path} (branch {name})'; "
             f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
         )
 
@@ -709,7 +786,7 @@ def reopen(
             check=True,
         )
 
-        console.print(f"  [green]✓[/green] Reopened Claude Code in tmux window '{name}'")
+        console.print(f"  [green]✓[/green] Activated Claude Code in tmux window '{name}'")
         console.print(f"\n[bold green]Success![/bold green] Claude Code is running.")
         console.print(f"Attach with: [cyan]tmux attach -t {session}[/cyan]")
 
@@ -720,7 +797,7 @@ def reopen(
                 os.execvp("tmux", ["tmux", "attach", "-t", session])
 
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]Error reopening Claude Code:[/red] {e}", style="bold")
+        console.print(f"[red]Error activating Claude Code:[/red] {e}", style="bold")
         sys.exit(1)
 
 
