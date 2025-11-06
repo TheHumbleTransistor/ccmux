@@ -397,11 +397,11 @@ def list(
 
     # Create Rich table
     table = Table(title=f"Claude Code Worktrees (session: {session})", show_header=True)
-    table.add_column("Worktree", style="cyan", no_wrap=True)
-    table.add_column("Tmux Window", style="blue")
     table.add_column("Repository", style="yellow")
+    table.add_column("Worktree", style="cyan", no_wrap=True)
     table.add_column("Branch", style="magenta")
     table.add_column("Status", style="bold")
+    table.add_column("Tmux Window", style="blue")
     table.add_column("Path", style="dim")
 
     active_count = 0
@@ -449,7 +449,7 @@ def list(
                 # Window doesn't exist anymore
                 pass
 
-        table.add_row(name, tmux_window_name, repo_name, branch, status, str(worktree_path))
+        table.add_row(repo_name, name, branch, status, tmux_window_name, str(worktree_path))
 
     console.print()
     console.print(table)
