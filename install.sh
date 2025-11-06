@@ -2,7 +2,7 @@
 set -euo pipefail
 
 echo "========================================"
-echo "Claude Code Worktrees - Installation"
+echo "Claude Code Multiplexer - Installation"
 echo "========================================"
 echo ""
 
@@ -73,7 +73,7 @@ echo "✓ Python $PYTHON_VERSION detected"
 echo ""
 
 # --- Install Python package ---
-echo "Installing ccwt Python package..."
+echo "Installing ccmux Python package..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Use pip or pip3, whichever is available
@@ -85,9 +85,9 @@ fi
 
 # Install in editable mode
 if "$PIP_CMD" install -e "$SCRIPT_DIR"; then
-  echo "✓ Installed ccwt package"
+  echo "✓ Installed ccmux package"
 else
-  echo "❌ Failed to install ccwt package"
+  echo "❌ Failed to install ccmux package"
   exit 1
 fi
 echo ""
@@ -97,7 +97,7 @@ echo "tmux configuration"
 echo "------------------"
 if [[ -f "$HOME/.tmux.conf" ]]; then
   echo "You already have a ~/.tmux.conf file."
-  read -p "Do you want to backup and replace it with ccwt's tmux.conf? [y/N] " -n 1 -r
+  read -p "Do you want to backup and replace it with ccmux's tmux.conf? [y/N] " -n 1 -r
   echo ""
   if [[ $REPLY =~ ^[Yy]$ ]]; then
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -128,11 +128,12 @@ echo "✓ Installation complete!"
 echo "========================================"
 echo ""
 echo "Usage:"
-echo "  ccwt new              # Create a worktree with a random animal name"
-echo "  ccwt new my-feature   # Create a worktree named 'my-feature'"
-echo "  ccwt list             # List all worktrees and their status"
-echo "  ccwt attach           # Attach to the tmux session"
-echo "  ccwt --help           # Show all available commands"
+echo "  ccmux new             # Create an instance in main repo with a random name"
+echo "  ccmux new my-feature  # Create an instance named 'my-feature'"
+echo "  ccmux new -w          # Create a worktree instance with a random name"
+echo "  ccmux list            # List all instances and their status"
+echo "  ccmux attach          # Attach to the tmux session"
+echo "  ccmux --help          # Show all available commands"
 echo ""
 echo "For more information, see: https://github.com/raykamp-tht/claude-code-worktrees"
 echo ""

@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ccwt"
+name = "ccmux"
 version = "2.0.0"
-description = "Claude Code Worktrees - Manage multiple Claude Code instances in git worktrees"
+description = "Claude Code Multiplexer - Manage multiple Claude Code instances"
 readme = "README.md"
 requires-python = ">=3.8"
 authors = [
@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ccwt = "ccwt.cli:main"
+ccmux = "ccmux.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -42,4 +42,4 @@ Homepage = "https://github.com/raykamp-tht/claude-code-worktrees"
 Repository = "https://github.com/raykamp-tht/claude-code-worktrees"
 
 [tool.setuptools.packages.find]
-include = ["ccwt*"]
+include = ["ccmux*"]

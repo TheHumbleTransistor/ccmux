@@ -1,12 +1,12 @@
-# Claude Code Worktrees (ccwt)
+# Claude Code Multiplexer (ccmux)
 
-A Python CLI for managing multiple Claude Code instances using git worktrees and tmux.
+A Python CLI for managing multiple Claude Code instances using git repositories and tmux.
 
 ## Features
 
-- Create isolated worktrees with Claude Code in one command
-- Track worktrees across sessions with persistent state
-- Manage multiple repositories simultaneously
+- Create Claude Code instances in main repository or isolated worktrees
+- Track instances across sessions with persistent state
+- Manage multiple repositories and instances simultaneously
 - Rich terminal interface with status indicators
 
 ## Installation
@@ -18,72 +18,74 @@ pip install -e .
 ## Quick Start
 
 ```bash
-# Create a worktree with a random name
-ccwt new
+# Create an instance in main repo with a random name
+ccmux new
 
-# Create a worktree with a specific name
-ccwt new feature-name
+# Create a worktree instance with a specific name
+ccmux new feature-name -w
 
-# List all worktrees
-ccwt list
+# List all instances
+ccmux list
 
-# Show current worktree info
-ccwt which
+# Show current instance info
+ccmux which
 
 # Attach to tmux session
-ccwt attach
+ccmux attach
 
-# Remove a worktree
-ccwt remove feature-name
+# Remove an instance
+ccmux remove feature-name
 ```
 
 ## Commands
 
-### `ccwt new [NAME]`
-Create a new git worktree and launch Claude Code in a tmux window.
+### `ccmux new [NAME]`
+Create a new Claude Code instance in the main repo or as a git worktree.
 
 Options:
-- `--session` - Tmux session name (default: `ccwt`)
+- `--session` - Tmux session name (default: `ccmux`)
+- `-w, --worktree` - Create instance as a git worktree
 
-### `ccwt list`
-List all worktrees with status, branch, and tmux window information.
+### `ccmux list`
+List all instances with status, type, branch, and tmux window information.
 
-### `ccwt which`
-Show which worktree the current tmux window is associated with.
+### `ccmux which`
+Show which instance the current tmux window is associated with.
 
-### `ccwt attach`
+### `ccmux attach`
 Attach to a tmux session.
 
 Options:
-- `--session` - ccwt session name (default: `ccwt`)
+- `--session` - ccmux session name (default: `ccmux`)
 
-### `ccwt activate [NAME]`
-Reopen Claude Code in a worktree's tmux window. Omit NAME to activate all inactive worktrees.
+### `ccmux activate [NAME]`
+Reopen Claude Code in an instance's tmux window. Omit NAME to activate all inactive instances.
 
 Options:
-- `--session` - ccwt session name (default: `ccwt`)
+- `--session` - ccmux session name (default: `ccmux`)
 - `--no-confirm` - Skip confirmation prompt
 
-### `ccwt deactivate [NAME]`
-Close tmux window without removing the worktree. Omit NAME to deactivate all active worktrees.
+### `ccmux deactivate [NAME]`
+Close tmux window without removing the instance. Omit NAME to deactivate all active instances.
 
 Options:
-- `--session` - ccwt session name (default: `ccwt`)
+- `--session` - ccmux session name (default: `ccmux`)
 - `--no-confirm` - Skip confirmation prompt
 
-### `ccwt remove [NAME]`
-Permanently delete a worktree. Omit NAME to remove all worktrees.
+### `ccmux remove [NAME]`
+Permanently delete an instance. Omit NAME to remove all instances.
 
 Options:
-- `--session` - ccwt session name (default: `ccwt`)
+- `--session` - ccmux session name (default: `ccmux`)
 - `--no-confirm` - Skip confirmation prompt
 
 ## How It Works
 
-- Worktrees are created in `.worktrees/<name>` in detached HEAD state
-- State is tracked in `~/.ccwt/state.json`
+- Instances can use the main repository or isolated worktrees
+- Worktree instances are created in `.worktrees/<name>` in detached HEAD state
+- State is tracked in `~/.ccmux/state.json`
 - Tmux session/window IDs are used for rename-resilient tracking
-- Each worktree gets its own tmux window in the specified session
+- Each instance gets its own tmux window in the specified session
 
 ## Development
 

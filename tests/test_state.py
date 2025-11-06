@@ -1,4 +1,4 @@
-"""Tests for ccwt.state module."""
+"""Tests for ccmux.state module."""
 
 import json
 import tempfile
@@ -7,7 +7,7 @@ from unittest import mock
 
 import pytest
 
-from ccwt import state
+from ccmux import state
 
 
 @pytest.fixture

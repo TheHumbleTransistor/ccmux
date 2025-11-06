@@ -1,1 +1,1 @@
-"""Tests for ccwt."""
+"""Tests for ccmux."""

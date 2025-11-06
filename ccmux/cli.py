@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code Worktrees CLI - Manage multiple Claude Code instances."""
+"""Claude Code Multiplexer CLI - Manage multiple Claude Code instances."""
 
 import os
 import random
@@ -16,10 +16,10 @@ from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
 
-from ccwt import state
+from ccmux import state
 
 # Default session name
-DEFAULT_SESSION = "ccwt"
+DEFAULT_SESSION = "ccmux"
 
 
 # Common parameters shared across all commands
@@ -35,8 +35,8 @@ CommonConfig = Annotated[Common, Parameter(parse=False, show=False)]
 
 console = Console()
 app = cyclopts.App(
-    name="ccwt",
-    help="Claude Code Worktrees - Manage multiple Claude Code instances in git worktrees",
+    name="ccmux",
+    help="Claude Code Multiplexer - Manage multiple Claude Code instances",
 )
 
 
@@ -246,12 +246,14 @@ def get_all_worktrees(repo_root: Path) -> list[dict[str, str]]:
 def new(
     name: Optional[str] = None,
     *,
+    worktree: Annotated[bool, Parameter(names=["-w", "--worktree"])] = False,
     common: CommonConfig,
 ) -> None:
-    """Create a new git worktree and launch Claude Code in a tmux window.
+    """Create a new Claude Code instance in main repo or as a git worktree.
 
     Args:
-        name: Name for the worktree/branch (generates random animal name if not provided)
+        name: Name for the instance (generates random animal name if not provided)
+        worktree: Create instance as a git worktree instead of using main repo
         common: Common parameters (session, etc.)
     """
     session = common.session
@@ -270,15 +272,36 @@ def new(
         console.print("[red]Error:[/red] Could not detect default branch (main/master).", style="bold")
         sys.exit(1)
 
+    # Check if creating a main repo instance when one already exists
+    create_as_worktree = worktree
+    instance_path = None
+
+    if not worktree:
+        # Check if main repo is already in use
+        existing_main = state.find_main_repo_instance(str(repo_root), session)
+        if existing_main:
+            console.print(f"[yellow]Warning:[/yellow] Main repository already has an instance: '{existing_main['name']}'")
+            if Confirm.ask("Create a worktree instead?", default=True):
+                create_as_worktree = True
+            else:
+                console.print("[red]Aborted:[/red] Main repository already in use.")
+                sys.exit(1)
+
     # Generate or sanitize name
     if name is None:
         # Try to find an unused random name
         for _ in range(20):
             candidate = sanitize_name(generate_animal_name())
-            worktree_path = repo_root / ".worktrees" / candidate
-            if not worktree_exists(worktree_path):
-                name = candidate
-                break
+            if create_as_worktree:
+                test_path = repo_root / ".worktrees" / candidate
+                if not worktree_exists(test_path):
+                    name = candidate
+                    break
+            else:
+                # For main repo, just check if the name is unused in state
+                if not state.get_worktree(session, candidate):
+                    name = candidate
+                    break
 
         # If still no name, add numeric suffix
         if name is None:
@@ -288,43 +311,54 @@ def new(
     else:
         name = sanitize_name(name)
 
-    worktree_path = repo_root / ".worktrees" / name
+    # Set instance path based on type
+    if create_as_worktree:
+        instance_path = repo_root / ".worktrees" / name
+        # Create .worktrees directory if needed
+        (repo_root / ".worktrees").mkdir(exist_ok=True)
+    else:
+        instance_path = repo_root
 
-    # Create .worktrees directory if needed
-    (repo_root / ".worktrees").mkdir(exist_ok=True)
-
-    # Create detached worktree based on default branch
+    # Create instance
     console.print(f"\n[bold cyan]Creating Claude Code instance:[/bold cyan] {name}")
     console.print(f"  Repo root: {repo_root}")
-    console.print(f"  Worktree:  {worktree_path}")
-    console.print(f"  Based on:  {default_branch} (detached)")
+    if create_as_worktree:
+        console.print(f"  Type:      Worktree")
+        console.print(f"  Path:      {instance_path}")
+        console.print(f"  Based on:  {default_branch} (detached)")
+    else:
+        console.print(f"  Type:      Main repository")
+        console.print(f"  Path:      {instance_path}")
 
-    try:
-        if worktree_exists(worktree_path):
-            console.print("  [yellow]Worktree already exists, reusing it.[/yellow]")
-        else:
-            # Create detached worktree based on default branch HEAD
-            subprocess.run(
-                ["git", "worktree", "add", "--detach", str(worktree_path), default_branch],
-                check=True,
-            )
-            console.print(f"  [green]✓[/green] Created detached worktree from {default_branch}")
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]Error creating worktree:[/red] {e}", style="bold")
-        sys.exit(1)
+    # Create worktree if needed
+    if create_as_worktree:
+        try:
+            if worktree_exists(instance_path):
+                console.print("  [yellow]Worktree already exists, reusing it.[/yellow]")
+            else:
+                # Create detached worktree based on default branch HEAD
+                subprocess.run(
+                    ["git", "worktree", "add", "--detach", str(instance_path), default_branch],
+                    check=True,
+                )
+                console.print(f"  [green]✓[/green] Created detached worktree from {default_branch}")
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]Error creating worktree:[/red] {e}", style="bold")
+            sys.exit(1)
 
-    # Check if this is the first worktree in the ccwt session
+    # Check if this is the first instance in the ccmux session
     session_data = state.get_session(session)
-    is_first_worktree = session_data is None
+    is_first_instance = session_data is None
 
     # Create or attach to tmux session
+    instance_type = "worktree" if create_as_worktree else "main repo"
     launch_cmd = (
-        f"echo 'Launching Claude Code in {worktree_path} (branch {name})'; "
+        f"echo 'Launching Claude Code in {instance_path} ({instance_type} instance: {name})'; "
         f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
     )
 
-    if is_first_worktree:
-        # First worktree: create session with this window as the only window
+    if is_first_instance:
+        # First instance: create session with this window as the only window
         try:
             subprocess.run(
                 [
@@ -332,7 +366,7 @@ def new(
                     "-d",
                     "-s", session,
                     "-n", name,
-                    "-c", str(worktree_path),
+                    "-c", str(instance_path),
                     launch_cmd,
                 ],
                 check=True,
@@ -342,14 +376,14 @@ def new(
             console.print(f"[red]Error creating tmux session:[/red] {e}", style="bold")
             sys.exit(1)
     else:
-        # Not the first worktree: add a new window to existing session
+        # Not the first instance: add a new window to existing session
         try:
             subprocess.run(
                 [
                     "tmux", "new-window",
                     "-t", f"{session}",
                     "-n", name,
-                    "-c", str(worktree_path),
+                    "-c", str(instance_path),
                     launch_cmd,
                 ],
                 check=True,
@@ -380,14 +414,15 @@ def new(
             check=True,
         ).stdout.strip()
 
-        # Save worktree to state
+        # Save instance to state
         state.add_worktree(
             session_name=session,
             worktree_name=name,
             repo_path=str(repo_root),
-            worktree_path=str(worktree_path),
+            worktree_path=str(instance_path),
             tmux_session_id=tmux_session_id,
-            tmux_window_id=tmux_window_id
+            tmux_window_id=tmux_window_id,
+            is_worktree=create_as_worktree
         )
     except subprocess.CalledProcessError:
         # If we can't get IDs, still save to state without them
@@ -395,12 +430,13 @@ def new(
             session_name=session,
             worktree_name=name,
             repo_path=str(repo_root),
-            worktree_path=str(worktree_path)
+            worktree_path=str(instance_path),
+            is_worktree=create_as_worktree
         )
 
     console.print(f"  [green]✓[/green] Launched Claude Code in tmux window '{name}'")
     console.print(f"\n[bold green]Success![/bold green] Claude Code is running.")
-    console.print(f"Attach with: [cyan]ccwt attach[/cyan]")
+    console.print(f"Attach with: [cyan]ccmux attach[/cyan]")
 
     # Auto-attach if not already in tmux
     if "TMUX" not in os.environ:
@@ -415,36 +451,41 @@ def _display_session_table(session: str) -> None:
     Args:
         session: Session name to display
     """
-    worktrees = state.get_all_worktrees(session)
+    instances = state.get_all_worktrees(session)
 
-    if not worktrees:
-        console.print(f"\n[yellow]No worktrees found in session '{session}'.[/yellow]")
+    if not instances:
+        console.print(f"\n[yellow]No instances found in session '{session}'.[/yellow]")
         return
 
     # Create Rich table
-    table = Table(title=f"Claude Code Worktrees (session: {session})", show_header=True)
+    table = Table(title=f"Claude Code Instances (session: {session})", show_header=True)
     table.add_column("Repository", style="yellow")
-    table.add_column("Worktree", style="cyan", no_wrap=True)
+    table.add_column("Instance", style="cyan", no_wrap=True)
+    table.add_column("Type", style="green")
     table.add_column("Branch", style="magenta")
     table.add_column("Status", style="bold")
     table.add_column("Tmux Window", style="blue")
     table.add_column("Path", style="dim")
 
     active_count = 0
-    for wt in worktrees:
-        name = wt["name"]
-        repo_path = Path(wt["repo_path"])
-        worktree_path = Path(wt["worktree_path"])
-        tmux_window_id = wt.get("tmux_window_id")
+    for inst in instances:
+        name = inst["name"]
+        repo_path = Path(inst["repo_path"])
+        instance_path = Path(inst["instance_path"])
+        tmux_window_id = inst.get("tmux_window_id")
+        is_worktree = inst.get("is_worktree", True)  # Default to True for backward compat
 
         # Get repository name
         repo_name = repo_path.name
 
-        # Get branch name from worktree
+        # Get instance type
+        instance_type = "worktree" if is_worktree else "root"
+
+        # Get branch name from instance
         branch = "(unknown)"
         try:
             result = subprocess.run(
-                ["git", "-C", str(worktree_path), "rev-parse", "--abbrev-ref", "HEAD"],
+                ["git", "-C", str(instance_path), "rev-parse", "--abbrev-ref", "HEAD"],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -475,15 +516,15 @@ def _display_session_table(session: str) -> None:
                 # Window doesn't exist anymore
                 pass
 
-        table.add_row(repo_name, name, branch, status, tmux_window_name, str(worktree_path))
+        table.add_row(repo_name, name, instance_type, branch, status, tmux_window_name, str(instance_path))
 
     console.print()
     console.print(table)
     console.print()
 
     # Show summary
-    total_count = len(worktrees)
-    console.print(f"Total: {total_count} worktrees, {active_count} active, {total_count - active_count} inactive")
+    total_count = len(instances)
+    console.print(f"Total: {total_count} instances, {active_count} active, {total_count - active_count} inactive")
     console.print()
 
 
@@ -493,11 +534,11 @@ def list(
     common: CommonConfig,
     all_sessions: Annotated[bool, Parameter(negative="", alias="-a")] = False,
 ) -> None:
-    """List all worktrees and their tmux session status.
+    """List all instances and their tmux session status.
 
     Args:
         common: Common parameters (session, etc.)
-        all_sessions: List worktrees for all sessions
+        all_sessions: List instances for all sessions
     """
     if all_sessions:
         # Display tables for all sessions
@@ -506,7 +547,7 @@ def list(
 
         if not sessions:
             console.print("\n[yellow]No sessions found.[/yellow]")
-            console.print(f"Create one with: [cyan]ccwt new[/cyan]")
+            console.print(f"Create one with: [cyan]ccmux new[/cyan]")
             return
 
         for session_name in sessions.keys():
@@ -514,11 +555,11 @@ def list(
     else:
         # Display table for single session
         session = common.session
-        worktrees = state.get_all_worktrees(session)
+        instances = state.get_all_worktrees(session)
 
-        if not worktrees:
-            console.print("\n[yellow]No worktrees found.[/yellow]")
-            console.print(f"Create one with: [cyan]ccwt new[/cyan]")
+        if not instances:
+            console.print("\n[yellow]No instances found.[/yellow]")
+            console.print(f"Create one with: [cyan]ccmux new[/cyan]")
             return
 
         _display_session_table(session)
@@ -531,28 +572,28 @@ def deactivate(
     common: CommonConfig,
     no_confirm: bool = False,
 ) -> None:
-    """Deactivate Claude Code instance(s) by killing tmux window (keeps worktree).
+    """Deactivate Claude Code instance(s) by killing tmux window (keeps instance).
 
-    If no name is provided, deactivates all active worktrees in the session.
+    If no name is provided, deactivates all active instances in the session.
 
     Args:
-        name: Worktree name to deactivate (omit to deactivate all)
+        name: Instance name to deactivate (omit to deactivate all)
         common: Common parameters (session, etc.)
         no_confirm: Skip confirmation prompt (default: False)
     """
     session = common.session
 
-    # Get worktrees from state
-    worktrees = state.get_all_worktrees(session)
+    # Get instances from state
+    instances = state.get_all_worktrees(session)
 
-    if not worktrees:
-        console.print(f"[yellow]No worktrees found in session '{session}'.[/yellow]")
+    if not instances:
+        console.print(f"[yellow]No instances found in session '{session}'.[/yellow]")
         sys.exit(0)
 
-    # Check which worktrees are active
-    active_worktrees = []
-    for wt in worktrees:
-        tmux_window_id = wt.get("tmux_window_id")
+    # Check which instances are active
+    active_instances = []
+    for inst in instances:
+        tmux_window_id = inst.get("tmux_window_id")
         if tmux_window_id:
             try:
                 result = subprocess.run(
@@ -562,30 +603,30 @@ def deactivate(
                     check=True,
                 )
                 if result.stdout.strip():
-                    active_worktrees.append(wt)
+                    active_instances.append(inst)
             except subprocess.CalledProcessError:
                 pass
 
     if name is None:
-        # Deactivate all active worktrees
-        if not active_worktrees:
-            console.print(f"\n[yellow]No active worktrees to deactivate in session '{session}'.[/yellow]")
+        # Deactivate all active instances
+        if not active_instances:
+            console.print(f"\n[yellow]No active instances to deactivate in session '{session}'.[/yellow]")
             return
 
-        console.print(f"\n[bold yellow]Deactivating {len(active_worktrees)} active worktree(s) in session '{session}':[/bold yellow]")
-        for wt in active_worktrees:
-            console.print(f"  • {wt['name']}")
+        console.print(f"\n[bold yellow]Deactivating {len(active_instances)} active instance(s) in session '{session}':[/bold yellow]")
+        for inst in active_instances:
+            console.print(f"  • {inst['name']}")
         console.print()
 
         if not no_confirm:
-            if not Confirm.ask(f"Deactivate all {len(active_worktrees)} worktree(s)?", default=False):
+            if not Confirm.ask(f"Deactivate all {len(active_instances)} instance(s)?", default=False):
                 console.print("[yellow]Cancelled.[/yellow]")
                 return
 
         deactivated_count = 0
-        for wt in active_worktrees:
-            wt_name = wt["name"]
-            tmux_window_id = wt.get("tmux_window_id")
+        for inst in active_instances:
+            inst_name = inst["name"]
+            tmux_window_id = inst.get("tmux_window_id")
             if tmux_window_id:
                 try:
                     subprocess.run(
@@ -593,33 +634,33 @@ def deactivate(
                         check=True,
                         capture_output=True,
                     )
-                    console.print(f"  [green]✓[/green] Deactivated '{wt_name}'")
+                    console.print(f"  [green]✓[/green] Deactivated '{inst_name}'")
                     deactivated_count += 1
                 except subprocess.CalledProcessError:
-                    console.print(f"  [yellow]Window '{wt_name}' not found or already closed[/yellow]")
+                    console.print(f"  [yellow]Window '{inst_name}' not found or already closed[/yellow]")
 
-        console.print(f"\n[bold green]Success![/bold green] Deactivated {deactivated_count} worktree(s).")
+        console.print(f"\n[bold green]Success![/bold green] Deactivated {deactivated_count} instance(s).")
         return
 
-    # Deactivate single worktree
-    worktree = None
-    for wt in worktrees:
-        if wt["name"] == name:
-            worktree = wt
+    # Deactivate single instance
+    instance = None
+    for inst in instances:
+        if inst["name"] == name:
+            instance = inst
             break
 
-    if worktree is None:
-        console.print(f"[red]Error:[/red] Worktree '{name}' not found in session '{session}'.", style="bold")
+    if instance is None:
+        console.print(f"[red]Error:[/red] Instance '{name}' not found in session '{session}'.", style="bold")
         sys.exit(1)
 
     # Check if it's active
-    if worktree not in active_worktrees:
-        console.print(f"[yellow]Worktree '{name}' is already inactive.[/yellow]")
+    if instance not in active_instances:
+        console.print(f"[yellow]Instance '{name}' is already inactive.[/yellow]")
         return
 
-    console.print(f"\n[bold yellow]Deactivating worktree '{name}' in session '{session}'[/bold yellow]")
+    console.print(f"\n[bold yellow]Deactivating instance '{name}' in session '{session}'[/bold yellow]")
 
-    tmux_window_id = worktree.get("tmux_window_id")
+    tmux_window_id = instance.get("tmux_window_id")
     if tmux_window_id:
         try:
             subprocess.run(
@@ -631,7 +672,7 @@ def deactivate(
         except subprocess.CalledProcessError:
             console.print(f"  [yellow]Window '{name}' not found or already closed[/yellow]")
 
-    console.print(f"\n[bold green]Success![/bold green] Worktree '{name}' deactivated.")
+    console.print(f"\n[bold green]Success![/bold green] Instance '{name}' deactivated.")
 
 
 @app.command
@@ -752,7 +793,7 @@ def remove(
 
     if worktree is None:
         console.print(f"[red]Error:[/red] Worktree '{name}' not found in session '{session}'.", style="bold")
-        console.print(f"List worktrees with: [cyan]ccwt list --session {session}[/cyan]")
+        console.print(f"List instances with: [cyan]ccmux list --session {session}[/cyan]")
         sys.exit(1)
 
     wt_path = Path(worktree["worktree_path"])
@@ -805,7 +846,7 @@ def remove(
 def which() -> None:
     """Show which worktree the current tmux window is associated with.
 
-    Run this from within a tmux window to see which ccwt worktree you're in.
+    Run this from within a tmux window to see which ccmux instance you're in.
     """
     # Check if we're in tmux
     if "TMUX" not in os.environ:
@@ -835,7 +876,7 @@ def which() -> None:
     result = state.find_worktree_by_tmux_ids(tmux_session_id, tmux_window_id)
 
     if result is None:
-        console.print("[yellow]This tmux window is not associated with any ccwt worktree.[/yellow]")
+        console.print("[yellow]This tmux window is not associated with any ccmux instance.[/yellow]")
         sys.exit(0)
 
     session_name, worktree_name, worktree_data = result
@@ -883,16 +924,16 @@ def attach(
     session_data = state.get_session(session)
 
     if session_data is None:
-        console.print(f"[red]Error:[/red] ccwt session '{session}' not found.", style="bold")
-        console.print(f"\nCreate a worktree with: [cyan]ccwt new --session {session}[/cyan]")
+        console.print(f"[red]Error:[/red] ccmux session '{session}' not found.", style="bold")
+        console.print(f"\nCreate an instance with: [cyan]ccmux new --session {session}[/cyan]")
         sys.exit(1)
 
     # Get tmux session ID from state
     tmux_session_id = session_data.get("tmux_session_id")
 
     if tmux_session_id is None:
-        console.print(f"[red]Error:[/red] No tmux session associated with ccwt session '{session}'.", style="bold")
-        console.print(f"\nCreate a worktree with: [cyan]ccwt new --session {session}[/cyan]")
+        console.print(f"[red]Error:[/red] No tmux session associated with ccmux session '{session}'.", style="bold")
+        console.print(f"\nCreate an instance with: [cyan]ccmux new --session {session}[/cyan]")
         sys.exit(1)
 
     # Check if tmux session still exists
@@ -904,7 +945,7 @@ def attach(
         )
     except subprocess.CalledProcessError:
         console.print(f"[red]Error:[/red] Tmux session no longer exists.", style="bold")
-        console.print(f"\nThe tmux session was closed. Activate worktrees with: [cyan]ccwt activate --session {session}[/cyan]")
+        console.print(f"\nThe tmux session was closed. Activate instances with: [cyan]ccmux activate --session {session}[/cyan]")
         sys.exit(1)
 
     # Use execvp to replace the current process with tmux attach
@@ -934,7 +975,7 @@ def activate(
 
     if not worktrees:
         console.print(f"[yellow]No worktrees found in session '{session}'.[/yellow]")
-        console.print(f"Create one with: [cyan]ccwt new --session {session}[/cyan]")
+        console.print(f"Create one with: [cyan]ccmux new --session {session}[/cyan]")
         sys.exit(0)
 
     # Check which worktrees are inactive (tmux window doesn't exist)
@@ -1071,7 +1112,7 @@ def activate(
 
     if worktree is None:
         console.print(f"[red]Error:[/red] Worktree '{name}' not found in session '{session}'.", style="bold")
-        console.print(f"List worktrees with: [cyan]ccwt list --session {session}[/cyan]")
+        console.print(f"List instances with: [cyan]ccmux list --session {session}[/cyan]")
         sys.exit(1)
 
     # Check if already active
@@ -1162,7 +1203,7 @@ def activate(
             pass  # Continue even if we can't update IDs
 
         console.print(f"\n[bold green]Success![/bold green] Claude Code is running.")
-        console.print(f"Attach with: [cyan]ccwt attach --session {session}[/cyan]")
+        console.print(f"Attach with: [cyan]ccmux attach --session {session}[/cyan]")
 
         # Auto-attach if not already in tmux
         if "TMUX" not in os.environ:
@@ -1184,7 +1225,7 @@ def meta(
 
     Args:
         tokens: Command tokens to parse
-        session: ccwt session name
+        session: ccmux session name
     """
     common = Common(session=session)
     command, bound, _ = app.parse_args(tokens)
