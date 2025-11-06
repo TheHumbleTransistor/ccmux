@@ -841,22 +841,42 @@ def activate(
 
     Args:
         name: Worktree name to activate
-        session: Tmux session name (default: claude-cluster)
+        session: ccwt session name (default: claude-cluster)
         all: Activate all inactive worktrees (default: False)
         no_confirm: Skip confirmation prompt (default: False)
     """
-    repo_root = get_repo_root()
-    if repo_root is None:
-        console.print("[red]Error:[/red] Not inside a git repository.", style="bold")
-        sys.exit(1)
+    # Get worktrees from state
+    worktrees = state.get_all_worktrees(session)
 
-    worktrees = get_all_worktrees(repo_root)
-    tmux_windows = get_tmux_windows(session)
+    if not worktrees:
+        console.print(f"[yellow]No worktrees found in session '{session}'.[/yellow]")
+        console.print(f"Create one with: [cyan]ccwt new --session {session}[/cyan]")
+        sys.exit(0)
+
+    # Check which worktrees are inactive (tmux window doesn't exist)
+    inactive_worktrees = []
+    for wt in worktrees:
+        tmux_window_id = wt.get("tmux_window_id")
+        is_active = False
+
+        if tmux_window_id:
+            try:
+                result = subprocess.run(
+                    ["tmux", "display-message", "-t", tmux_window_id, "-p", "#{window_name}"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                if result.stdout.strip():
+                    is_active = True
+            except subprocess.CalledProcessError:
+                pass
+
+        if not is_active:
+            inactive_worktrees.append(wt)
 
     if all:
         # Activate all inactive worktrees
-        inactive_worktrees = [wt for wt in worktrees if wt["name"] not in tmux_windows]
-
         if not inactive_worktrees:
             console.print("\n[yellow]No inactive worktrees to activate.[/yellow]")
             return
@@ -871,62 +891,85 @@ def activate(
                 console.print("[yellow]Cancelled.[/yellow]")
                 return
 
-        activated_count = 0
-        for wt in inactive_worktrees:
-            wt_name = wt["name"]
-            wt_path = wt["path"]
+        # Get session data and tmux session ID
+        session_data = state.get_session(session)
+        tmux_session_id = session_data.get("tmux_session_id") if session_data else None
 
-            # Create or attach to tmux session
-            if not tmux_session_exists(session):
-                try:
-                    subprocess.run(
-                        ["tmux", "new-session", "-d", "-s", session, "-n", "home"],
-                        check=True,
-                    )
-                except subprocess.CalledProcessError as e:
-                    console.print(f"[red]Error creating tmux session:[/red] {e}", style="bold")
-                    continue
-
-            # Create new tmux window
+        # Check if tmux session exists
+        tmux_session_exists_flag = False
+        if tmux_session_id:
             try:
-                launch_cmd = (
-                    f"echo 'Activating Claude Code in {wt_path} (branch {wt_name})'; "
-                    f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
-                )
-
                 subprocess.run(
-                    [
-                        "tmux", "new-window",
-                        "-t", f"{session}",
-                        "-n", wt_name,
-                        "-c", wt_path,
-                        launch_cmd,
-                    ],
+                    ["tmux", "has-session", "-t", tmux_session_id],
                     check=True,
                     capture_output=True,
                 )
+                tmux_session_exists_flag = True
+            except subprocess.CalledProcessError:
+                pass
+
+        activated_count = 0
+        for i, wt in enumerate(inactive_worktrees):
+            wt_name = wt["name"]
+            wt_path = wt["worktree_path"]
+
+            launch_cmd = (
+                f"echo 'Activating Claude Code in {wt_path}'; "
+                f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
+            )
+
+            try:
+                # If tmux session doesn't exist and this is the first worktree, create session with it
+                if not tmux_session_exists_flag and i == 0:
+                    subprocess.run(
+                        [
+                            "tmux", "new-session",
+                            "-d",
+                            "-s", session,
+                            "-n", wt_name,
+                            "-c", wt_path,
+                            launch_cmd,
+                        ],
+                        check=True,
+                        capture_output=True,
+                    )
+                    tmux_session_exists_flag = True
+                    console.print(f"  [green]✓[/green] Created tmux session and activated '{wt_name}'")
+                else:
+                    # Create new window in existing session
+                    subprocess.run(
+                        [
+                            "tmux", "new-window",
+                            "-t", session,
+                            "-n", wt_name,
+                            "-c", wt_path,
+                            launch_cmd,
+                        ],
+                        check=True,
+                        capture_output=True,
+                    )
+                    console.print(f"  [green]✓[/green] Activated '{wt_name}'")
 
                 # Update tmux IDs in state
                 try:
-                    tmux_session_id = subprocess.run(
+                    new_tmux_session_id = subprocess.run(
                         ["tmux", "display-message", "-t", f"{session}", "-p", "#{session_id}"],
                         capture_output=True,
                         text=True,
                         check=True,
                     ).stdout.strip()
 
-                    tmux_window_id = subprocess.run(
+                    new_tmux_window_id = subprocess.run(
                         ["tmux", "display-message", "-t", f"{session}:{wt_name}", "-p", "#{window_id}"],
                         capture_output=True,
                         text=True,
                         check=True,
                     ).stdout.strip()
 
-                    state.update_tmux_ids(session, wt_name, tmux_session_id, tmux_window_id)
+                    state.update_tmux_ids(session, wt_name, new_tmux_session_id, new_tmux_window_id)
                 except subprocess.CalledProcessError:
-                    pass  # Continue even if we can't update IDs
+                    pass
 
-                console.print(f"  [green]✓[/green] Activated '{wt_name}'")
                 activated_count += 1
             except subprocess.CalledProcessError as e:
                 console.print(f"  [red]Error activating '{wt_name}':[/red] {e}")
@@ -939,7 +982,7 @@ def activate(
         console.print("[red]Error:[/red] Please specify a worktree name or use --all.", style="bold")
         sys.exit(1)
 
-    # Find the worktree
+    # Find the worktree in state
     worktree = None
     for wt in worktrees:
         if wt["name"] == name:
@@ -947,54 +990,76 @@ def activate(
             break
 
     if worktree is None:
-        console.print(f"[red]Error:[/red] Worktree '{name}' not found.", style="bold")
-        console.print(f"List worktrees with: [cyan]ccwt list[/cyan]")
+        console.print(f"[red]Error:[/red] Worktree '{name}' not found in session '{session}'.", style="bold")
+        console.print(f"List worktrees with: [cyan]ccwt list --session {session}[/cyan]")
         sys.exit(1)
 
     # Check if already active
-    if name in tmux_windows:
+    is_active = worktree in [wt for wt in worktrees if wt not in inactive_worktrees]
+    if is_active:
         console.print(f"[yellow]Worktree '{name}' already has an active tmux window.[/yellow]")
         return
 
-    wt_path = worktree["path"]
+    wt_path = worktree["worktree_path"]
 
     console.print(f"\n[bold cyan]Activating Claude Code instance:[/bold cyan] {name}")
     console.print(f"  Worktree: {wt_path}")
 
-    # Create or attach to tmux session
-    if not tmux_session_exists(session):
+    # Get session data and tmux session ID
+    session_data = state.get_session(session)
+    tmux_session_id = session_data.get("tmux_session_id") if session_data else None
+
+    # Check if tmux session exists
+    tmux_session_exists_flag = False
+    if tmux_session_id:
         try:
             subprocess.run(
-                ["tmux", "new-session", "-d", "-s", session, "-n", "home"],
+                ["tmux", "has-session", "-t", tmux_session_id],
+                check=True,
+                capture_output=True,
+            )
+            tmux_session_exists_flag = True
+        except subprocess.CalledProcessError:
+            pass
+
+    launch_cmd = (
+        f"echo 'Activating Claude Code in {wt_path}'; "
+        f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
+    )
+
+    try:
+        # If tmux session doesn't exist, create it with this worktree
+        if not tmux_session_exists_flag:
+            subprocess.run(
+                [
+                    "tmux", "new-session",
+                    "-d",
+                    "-s", session,
+                    "-n", name,
+                    "-c", wt_path,
+                    launch_cmd,
+                ],
                 check=True,
             )
-            console.print(f"  [green]✓[/green] Created tmux session '{session}'")
-        except subprocess.CalledProcessError as e:
-            console.print(f"[red]Error creating tmux session:[/red] {e}", style="bold")
-            sys.exit(1)
+            console.print(f"  [green]✓[/green] Created tmux session and activated '{name}'")
+        else:
+            # Create new window in existing session
+            subprocess.run(
+                [
+                    "tmux", "new-window",
+                    "-t", session,
+                    "-n", name,
+                    "-c", wt_path,
+                    launch_cmd,
+                ],
+                check=True,
+            )
 
-    # Create new tmux window
-    try:
-        launch_cmd = (
-            f"echo 'Activating Claude Code in {wt_path} (branch {name})'; "
-            f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
-        )
-
-        subprocess.run(
-            [
-                "tmux", "new-window",
-                "-t", f"{session}",
-                "-n", name,
-                "-c", wt_path,
-                launch_cmd,
-            ],
-            check=True,
-        )
-
-        subprocess.run(
-            ["tmux", "select-window", "-t", f"{session}:{name}"],
-            check=True,
-        )
+            subprocess.run(
+                ["tmux", "select-window", "-t", f"{session}:{name}"],
+                check=True,
+            )
+            console.print(f"  [green]✓[/green] Activated '{name}'")
 
         # Update tmux IDs in state
         try:
@@ -1016,9 +1081,8 @@ def activate(
         except subprocess.CalledProcessError:
             pass  # Continue even if we can't update IDs
 
-        console.print(f"  [green]✓[/green] Activated Claude Code in tmux window '{name}'")
         console.print(f"\n[bold green]Success![/bold green] Claude Code is running.")
-        console.print(f"Attach with: [cyan]tmux attach -t {session}[/cyan]")
+        console.print(f"Attach with: [cyan]ccwt attach --session {session}[/cyan]")
 
         # Auto-attach if not already in tmux
         if "TMUX" not in os.environ:
