@@ -10,6 +10,14 @@ echo ""
 echo "Checking dependencies..."
 MISSING_DEPS=()
 
+if ! command -v python3 &>/dev/null; then
+  MISSING_DEPS+=("python3")
+fi
+
+if ! command -v pip3 &>/dev/null && ! command -v pip &>/dev/null; then
+  MISSING_DEPS+=("pip")
+fi
+
 if ! command -v git &>/dev/null; then
   MISSING_DEPS+=("git")
 fi
@@ -28,6 +36,12 @@ if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
   echo "Please install the missing dependencies:"
   for dep in "${MISSING_DEPS[@]}"; do
     case "$dep" in
+      python3)
+        echo "  - python3 (3.8+): https://www.python.org/downloads/"
+        ;;
+      pip)
+        echo "  - pip: https://pip.pypa.io/en/stable/installation/"
+        ;;
       git)
         echo "  - git: https://git-scm.com/downloads"
         ;;
@@ -45,53 +59,68 @@ fi
 echo "✓ All dependencies found"
 echo ""
 
-# --- Create ~/bin if needed ---
-if [[ ! -d "$HOME/bin" ]]; then
-  echo "Creating ~/bin directory..."
-  mkdir -p "$HOME/bin"
-  echo "✓ Created ~/bin"
-  echo ""
-  echo "⚠️  Note: You may need to add ~/bin to your PATH."
-  echo "   Add this to your ~/.bashrc or ~/.zshrc:"
-  echo "   export PATH=\"\$HOME/bin:\$PATH\""
-  echo ""
+# --- Check Python version ---
+PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+
+if [[ "$PYTHON_MAJOR" -lt 3 ]] || [[ "$PYTHON_MAJOR" -eq 3 && "$PYTHON_MINOR" -lt 8 ]]; then
+  echo "❌ Python 3.8 or higher is required (found $PYTHON_VERSION)"
+  exit 1
 fi
 
-# --- Backup existing files ---
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKED_UP=false
+echo "✓ Python $PYTHON_VERSION detected"
+echo ""
 
-if [[ -f "$HOME/bin/ccwt" ]]; then
-  BACKUP_PATH="$HOME/bin/ccwt.backup.$TIMESTAMP"
-  cp "$HOME/bin/ccwt" "$BACKUP_PATH"
-  echo "✓ Backed up existing ccwt to: $BACKUP_PATH"
-  BACKED_UP=true
-fi
-
-if [[ -f "$HOME/.tmux.conf" ]]; then
-  BACKUP_PATH="$HOME/.tmux.conf.backup.$TIMESTAMP"
-  cp "$HOME/.tmux.conf" "$BACKUP_PATH"
-  echo "✓ Backed up existing .tmux.conf to: $BACKUP_PATH"
-  BACKED_UP=true
-fi
-
-if [[ "$BACKED_UP" = true ]]; then
-  echo ""
-fi
-
-# --- Install files ---
-echo "Installing files..."
-
+# --- Install Python package ---
+echo "Installing ccwt Python package..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Install ccwt
-cp "$SCRIPT_DIR/ccwt" "$HOME/bin/ccwt"
-chmod +x "$HOME/bin/ccwt"
-echo "✓ Installed ccwt to ~/bin/ccwt"
+# Use pip or pip3, whichever is available
+if command -v pip &>/dev/null; then
+  PIP_CMD="pip"
+else
+  PIP_CMD="pip3"
+fi
 
-# Install tmux.conf
-cp "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
-echo "✓ Installed tmux.conf to ~/.tmux.conf"
+# Install in editable mode
+if "$PIP_CMD" install -e "$SCRIPT_DIR"; then
+  echo "✓ Installed ccwt package"
+else
+  echo "❌ Failed to install ccwt package"
+  exit 1
+fi
+echo ""
+
+# --- Optional: Install tmux.conf ---
+echo "tmux configuration"
+echo "------------------"
+if [[ -f "$HOME/.tmux.conf" ]]; then
+  echo "You already have a ~/.tmux.conf file."
+  read -p "Do you want to backup and replace it with ccwt's tmux.conf? [y/N] " -n 1 -r
+  echo ""
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    BACKUP_PATH="$HOME/.tmux.conf.backup.$TIMESTAMP"
+    cp "$HOME/.tmux.conf" "$BACKUP_PATH"
+    echo "✓ Backed up existing .tmux.conf to: $BACKUP_PATH"
+    cp "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
+    echo "✓ Installed tmux.conf to ~/.tmux.conf"
+  else
+    echo "Skipped tmux.conf installation"
+    echo "You can manually copy it later: cp $SCRIPT_DIR/tmux.conf ~/.tmux.conf"
+  fi
+else
+  read -p "Install tmux.conf to ~/.tmux.conf? [Y/n] " -n 1 -r
+  echo ""
+  if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+    cp "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
+    echo "✓ Installed tmux.conf to ~/.tmux.conf"
+  else
+    echo "Skipped tmux.conf installation"
+    echo "You can manually copy it later: cp $SCRIPT_DIR/tmux.conf ~/.tmux.conf"
+  fi
+fi
 
 echo ""
 echo "========================================"
@@ -99,12 +128,11 @@ echo "✓ Installation complete!"
 echo "========================================"
 echo ""
 echo "Usage:"
-echo "  ccwt              # Create a worktree with a random animal name"
-echo "  ccwt my-feature   # Create a worktree named 'my-feature'"
+echo "  ccwt new              # Create a worktree with a random animal name"
+echo "  ccwt new my-feature   # Create a worktree named 'my-feature'"
+echo "  ccwt list             # List all worktrees and their status"
+echo "  ccwt attach           # Attach to the tmux session"
+echo "  ccwt --help           # Show all available commands"
 echo ""
-echo "The script will:"
-echo "  - Create a git worktree in .worktrees/<name>"
-echo "  - Create a branch named <name>"
-echo "  - Open a tmux window in the 'claude-cluster' session"
-echo "  - Launch Claude Code in that worktree"
+echo "For more information, see: https://github.com/raykamp-tht/claude-code-worktrees"
 echo ""
