@@ -43,3 +43,6 @@ Repository = "https://github.com/raykamp-tht/claude-code-worktrees"
 
 [tool.setuptools.packages.find]
 include = ["ccmux*"]
+
+[tool.setuptools.package-data]
+ccmux = ["tmux.conf"]

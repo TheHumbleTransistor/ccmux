@@ -1,55 +1,24 @@
 """Tmux configuration management for ccmux."""
 
+import os
 import subprocess
+import tempfile
 import time
-from typing import List, Tuple
+from pathlib import Path
+from typing import Optional
 
 
-# Tmux configuration as a list of (option, value) tuples
-TMUX_CONFIG: List[Tuple[str, str]] = [
-    # Mouse support
-    ("mouse", "on"),
+def get_tmux_config_path() -> Path:
+    """Get the path to the tmux.conf file included in the package.
 
-    # Status bar color scheme - dark grey theme
-    ("status-style", "bg=colour235,fg=colour245"),  # Dark grey background, light grey text
-    ("status-left-style", "bg=colour235,fg=colour250"),
-    ("status-right-style", "bg=colour235,fg=colour250"),
-
-    # Window status formatting with separators
-    ("window-status-format", " #I:#W "),  # Inactive windows: index:name with padding
-    ("window-status-current-format", "#[bg=colour237,fg=colour250,bold] #I:#W #[default]"),  # Current window
-    ("window-status-separator", "│"),  # Separator between windows
-
-    # Window status styles
-    ("window-status-style", "bg=colour235,fg=colour245"),  # Inactive windows
-    ("window-status-current-style", "bg=colour237,fg=colour250,bold"),  # Current window
-
-    # Activity and bell monitoring
-    ("monitor-activity", "on"),
-    ("bell-action", "any"),
-    ("visual-activity", "on"),
-    ("visual-bell", "off"),
-
-    # Activity and bell styles
-    ("window-status-activity-style", "bold,underscore,fg=yellow"),
-    ("window-status-bell-style", "bold,reverse,fg=red"),
-
-    # Window titles
-    ("set-titles", "on"),
-    ("set-titles-string", "tmux:#S · #W"),
-]
-
-# Key bindings as a list of (key, command) tuples
-TMUX_KEYBINDINGS: List[Tuple[str, str]] = [
-    # Clear marks with Ctrl-L
-    ("C-l", 'display-message "Clearing marks" \\; set -g monitor-activity off \\; set -g monitor-activity on'),
-    # Last window with 'a'
-    ("a", "last-window"),
-]
+    Returns:
+        Path to the tmux.conf file
+    """
+    return Path(__file__).parent / "tmux.conf"
 
 
 def apply_tmux_config(session_name: str) -> bool:
-    """Apply tmux configuration to a specific session.
+    """Apply tmux configuration to a specific session by sourcing the config file.
 
     Args:
         session_name: Name of the tmux session to configure
@@ -60,78 +29,60 @@ def apply_tmux_config(session_name: str) -> bool:
     # Small delay to ensure tmux session is ready
     time.sleep(0.1)
 
-    errors = []
-    success_count = 0
+    config_path = get_tmux_config_path()
 
-    # Apply each configuration option
-    for option, value in TMUX_CONFIG:
-        try:
-            result = subprocess.run(
-                ["tmux", "set-option", "-t", session_name, "-g", option, value],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            success_count += 1
-        except subprocess.CalledProcessError as e:
-            errors.append(f"Option {option}: {e.stderr}")
+    if not config_path.exists():
+        # Config file not found, but session still works
+        return False
 
-    # Apply key bindings (global, not session-specific)
-    for key, command in TMUX_KEYBINDINGS:
-        try:
-            result = subprocess.run(
-                ["tmux", "bind-key", key, command],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            success_count += 1
-        except subprocess.CalledProcessError as e:
-            errors.append(f"Binding {key}: {e.stderr}")
-
-    # Return True if at least some options were set successfully
-    return success_count > 0
+    try:
+        # Source the config file in the tmux session
+        # Using source-file command to load the configuration
+        subprocess.run(
+            ["tmux", "source-file", str(config_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        # Fail silently - the session still works without custom config
+        return False
 
 
 def get_tmux_config_content() -> str:
-    """Get the tmux configuration as a .tmux.conf file content.
+    """Get the tmux configuration as a string.
 
     Returns:
-        String containing the tmux configuration in .tmux.conf format
+        String containing the tmux configuration, or error message if not found
     """
-    lines = [
-        "# ccmux tmux configuration",
-        "# This configuration is automatically applied when creating ccmux sessions",
-        "",
-        "# Mouse support",
-        "set -g mouse on",
-        "",
-        "# Status bar color scheme - dark grey theme",
-    ]
+    config_path = get_tmux_config_path()
 
-    # Add configuration options
-    for option, value in TMUX_CONFIG:
-        if option == "mouse":
-            continue  # Already added above
-        lines.append(f"set -g {option} \"{value}\"")
+    if not config_path.exists():
+        return "# tmux.conf not found in package\n"
 
-        # Add section comments
-        if option == "status-right-style":
-            lines.extend(["", "# Window status formatting with separators"])
-        elif option == "window-status-separator":
-            lines.extend(["", "# Window status styles"])
-        elif option == "window-status-current-style":
-            lines.extend(["", "# Activity and bell monitoring"])
-        elif option == "visual-bell":
-            lines.extend(["", "# Activity and bell styles"])
-        elif option == "window-status-bell-style":
-            lines.extend(["", "# Window titles"])
+    try:
+        return config_path.read_text()
+    except Exception as e:
+        return f"# Error reading tmux.conf: {e}\n"
 
-    # Add key bindings
-    lines.extend(["", "# Key bindings"])
-    for key, command in TMUX_KEYBINDINGS:
-        # Unescape the command for file output
-        clean_command = command.replace("\\;", ";")
-        lines.append(f"bind-key {key} {clean_command}")
 
-    return "\n".join(lines) + "\n"
+def export_tmux_config(output_path: Optional[Path] = None) -> tuple[bool, str]:
+    """Export the tmux configuration to a file or return its content.
+
+    Args:
+        output_path: Optional path to write the config to
+
+    Returns:
+        Tuple of (success, message/content)
+    """
+    content = get_tmux_config_content()
+
+    if output_path:
+        try:
+            output_path.write_text(content)
+            return True, f"Exported tmux configuration to {output_path}"
+        except Exception as e:
+            return False, f"Error writing file: {e}"
+    else:
+        return True, content
