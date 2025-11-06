@@ -748,8 +748,13 @@ def remove(
         removed_count = 0
         for wt in worktrees:
             wt_name = wt["name"]
-            wt_path = Path(wt["worktree_path"])
+            wt_path = Path(wt["instance_path"])
             is_active = wt in active_worktrees
+
+            # Safety check: Only allow removal of worktrees, not main repos
+            if not wt.get("is_worktree", True):  # Default to True for backward compatibility
+                console.print(f"  [red]✗[/red] Skipping '{wt_name}' - cannot remove main repository")
+                continue
 
             # Deactivate if active
             if is_active:
@@ -796,8 +801,14 @@ def remove(
         console.print(f"List instances with: [cyan]ccmux list --session {session}[/cyan]")
         sys.exit(1)
 
-    wt_path = Path(worktree["worktree_path"])
+    wt_path = Path(worktree["instance_path"])
     is_active = worktree in active_worktrees
+
+    # Safety check: Only allow removal of worktrees, not main repos
+    if not worktree.get("is_worktree", True):  # Default to True for backward compatibility
+        console.print(f"\n[red]Error:[/red] Cannot remove '{name}' - it is a main repository, not a worktree.")
+        console.print("[yellow]Main repositories cannot be removed through ccmux.[/yellow]")
+        sys.exit(1)
 
     console.print(f"\n[bold red]⚠️  WARNING: Removing worktree '{name}' from session '{session}'[/bold red]")
     console.print("[red]This will permanently delete the worktree and any uncommitted changes![/red]")
@@ -886,7 +897,7 @@ def which() -> None:
     repo_name = repo_path.name
 
     # Get current branch
-    worktree_path = Path(worktree_data["worktree_path"])
+    worktree_path = Path(worktree_data["instance_path"])
     try:
         branch_result = subprocess.run(
             ["git", "-C", str(worktree_path), "rev-parse", "--abbrev-ref", "HEAD"],
@@ -1036,7 +1047,7 @@ def activate(
         activated_count = 0
         for i, wt in enumerate(inactive_worktrees):
             wt_name = wt["name"]
-            wt_path = wt["worktree_path"]
+            wt_path = wt["instance_path"]
 
             launch_cmd = (
                 f"echo 'Activating Claude Code in {wt_path}'; "
@@ -1121,7 +1132,7 @@ def activate(
         console.print(f"[yellow]Worktree '{name}' already has an active tmux window.[/yellow]")
         return
 
-    wt_path = worktree["worktree_path"]
+    wt_path = worktree["instance_path"]
 
     console.print(f"\n[bold cyan]Activating Claude Code instance:[/bold cyan] {name}")
     console.print(f"  Worktree: {wt_path}")
