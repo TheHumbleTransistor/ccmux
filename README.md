@@ -30,6 +30,9 @@ ccwt list
 # Show current worktree info
 ccwt which
 
+# Attach to tmux session
+ccwt attach
+
 # Remove a worktree
 ccwt remove feature-name
 ```
@@ -47,6 +50,12 @@ List all worktrees with status, branch, and tmux window information.
 
 ### `ccwt which`
 Show which worktree the current tmux window is associated with.
+
+### `ccwt attach`
+Attach to a tmux session.
+
+Options:
+- `--session` - ccwt session name (default: `claude-cluster`)
 
 ### `ccwt activate [NAME]`
 Reopen Claude Code in a worktree's tmux window.

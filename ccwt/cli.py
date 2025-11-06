@@ -776,6 +776,48 @@ def which() -> None:
 
 
 @app.command
+def attach(
+    *,
+    session: str = "claude-cluster",
+) -> None:
+    """Attach to a tmux session.
+
+    Args:
+        session: ccwt session name (default: claude-cluster)
+    """
+    # Get session from state
+    session_data = state.get_session(session)
+
+    if session_data is None:
+        console.print(f"[red]Error:[/red] ccwt session '{session}' not found.", style="bold")
+        console.print(f"\nCreate a worktree with: [cyan]ccwt new --session {session}[/cyan]")
+        sys.exit(1)
+
+    # Get tmux session ID from state
+    tmux_session_id = session_data.get("tmux_session_id")
+
+    if tmux_session_id is None:
+        console.print(f"[red]Error:[/red] No tmux session associated with ccwt session '{session}'.", style="bold")
+        console.print(f"\nCreate a worktree with: [cyan]ccwt new --session {session}[/cyan]")
+        sys.exit(1)
+
+    # Check if tmux session still exists
+    try:
+        subprocess.run(
+            ["tmux", "has-session", "-t", tmux_session_id],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError:
+        console.print(f"[red]Error:[/red] Tmux session no longer exists.", style="bold")
+        console.print(f"\nThe tmux session was closed. Activate a worktree with: [cyan]ccwt activate --all --session {session}[/cyan]")
+        sys.exit(1)
+
+    # Use execvp to replace the current process with tmux attach
+    os.execvp("tmux", ["tmux", "attach", "-t", tmux_session_id])
+
+
+@app.command
 def activate(
     name: Optional[str] = None,
     *,
