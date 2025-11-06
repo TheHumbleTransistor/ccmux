@@ -6,24 +6,38 @@ import random
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Annotated, Optional
 
 import cyclopts
+from cyclopts import Parameter
 from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
 
 from ccwt import state
 
+# Default session name
+DEFAULT_SESSION = "ccwt"
+
+
+# Common parameters shared across all commands
+@dataclass
+class Common:
+    """Common parameters for all commands."""
+    session: str = DEFAULT_SESSION
+
+
+# Type alias for Common config parameter
+CommonConfig = Annotated[Common, Parameter(parse=False)]
+
+
 console = Console()
 app = cyclopts.App(
     name="ccwt",
     help="Claude Code Worktrees - Manage multiple Claude Code instances in git worktrees",
 )
-
-# Default session name
-DEFAULT_SESSION = "ccwt"
 
 
 # --- Utility Functions ---
@@ -232,14 +246,16 @@ def get_all_worktrees(repo_root: Path) -> list[dict[str, str]]:
 def new(
     name: Optional[str] = None,
     *,
-    session: str = DEFAULT_SESSION,
+    common: CommonConfig,
 ) -> None:
     """Create a new git worktree and launch Claude Code in a tmux window.
 
     Args:
         name: Name for the worktree/branch (generates random animal name if not provided)
-        session: Tmux session name (default: ccwt)
+        common: Common parameters (session, etc.)
     """
+    session = common.session
+
     # Validate we're in a git repo
     repo_root = get_repo_root()
     if repo_root is None:
@@ -396,13 +412,14 @@ def new(
 @app.command
 def list(
     *,
-    session: str = DEFAULT_SESSION,
+    common: CommonConfig,
 ) -> None:
     """List all worktrees and their tmux session status.
 
     Args:
-        session: Tmux session name (default: ccwt)
+        common: Common parameters (session, etc.)
     """
+    session = common.session
     worktrees = state.get_all_worktrees(session)
 
     if not worktrees:
@@ -480,7 +497,7 @@ def list(
 def deactivate(
     name: Optional[str] = None,
     *,
-    session: str = DEFAULT_SESSION,
+    common: CommonConfig,
     no_confirm: bool = False,
 ) -> None:
     """Deactivate Claude Code instance(s) by killing tmux window (keeps worktree).
@@ -489,9 +506,11 @@ def deactivate(
 
     Args:
         name: Worktree name to deactivate (omit to deactivate all)
-        session: ccwt session name (default: ccwt)
+        common: Common parameters (session, etc.)
         no_confirm: Skip confirmation prompt (default: False)
     """
+    session = common.session
+
     # Get worktrees from state
     worktrees = state.get_all_worktrees(session)
 
@@ -588,7 +607,7 @@ def deactivate(
 def remove(
     name: Optional[str] = None,
     *,
-    session: str = DEFAULT_SESSION,
+    common: CommonConfig,
     no_confirm: bool = False,
 ) -> None:
     """Remove worktree(s) permanently (deactivates session and deletes worktree).
@@ -598,9 +617,11 @@ def remove(
 
     Args:
         name: Worktree name to remove (omit to remove all)
-        session: ccwt session name (default: ccwt)
+        common: Common parameters (session, etc.)
         no_confirm: Skip confirmation prompt (default: False)
     """
+    session = common.session
+
     # Get worktrees from state
     worktrees = state.get_all_worktrees(session)
 
@@ -818,13 +839,15 @@ def which() -> None:
 @app.command
 def attach(
     *,
-    session: str = DEFAULT_SESSION,
+    common: CommonConfig,
 ) -> None:
     """Attach to a tmux session.
 
     Args:
-        session: ccwt session name (default: ccwt)
+        common: Common parameters (session, etc.)
     """
+    session = common.session
+
     # Get session from state
     session_data = state.get_session(session)
 
@@ -861,7 +884,7 @@ def attach(
 def activate(
     name: Optional[str] = None,
     *,
-    session: str = DEFAULT_SESSION,
+    common: CommonConfig,
     no_confirm: bool = False,
 ) -> None:
     """Activate Claude Code in a worktree (useful if tmux window was closed).
@@ -870,9 +893,11 @@ def activate(
 
     Args:
         name: Worktree name to activate (omit to activate all)
-        session: ccwt session name (default: ccwt)
+        common: Common parameters (session, etc.)
         no_confirm: Skip confirmation prompt (default: False)
     """
+    session = common.session
+
     # Get worktrees from state
     worktrees = state.get_all_worktrees(session)
 
@@ -1119,10 +1144,26 @@ def activate(
         sys.exit(1)
 
 
+@app.meta.default
+def meta(
+    *tokens: Annotated[str, Parameter(show=False, allow_leading_hyphen=True)],
+    session: str = DEFAULT_SESSION,
+):
+    """Meta command to inject common parameters into subcommands.
+
+    Args:
+        tokens: Command tokens to parse
+        session: ccwt session name
+    """
+    common = Common(session=session)
+    command, bound, _ = app.parse_args(tokens)
+    return command(*bound.args, **bound.kwargs, common=common)
+
+
 def main():
     """Main entry point for the CLI."""
     try:
-        app()
+        app.meta()
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")
         sys.exit(130)
