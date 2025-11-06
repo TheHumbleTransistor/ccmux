@@ -58,22 +58,24 @@ Options:
 - `--session` - ccwt session name (default: `ccwt`)
 
 ### `ccwt activate [NAME]`
-Reopen Claude Code in a worktree's tmux window.
+Reopen Claude Code in a worktree's tmux window. Omit NAME to activate all inactive worktrees.
 
 Options:
-- `--all` - Activate all inactive worktrees
+- `--session` - ccwt session name (default: `ccwt`)
+- `--no-confirm` - Skip confirmation prompt
 
 ### `ccwt deactivate [NAME]`
-Close tmux window without removing the worktree.
+Close tmux window without removing the worktree. Omit NAME to deactivate all active worktrees.
 
 Options:
-- `--all` - Deactivate all active sessions
+- `--session` - ccwt session name (default: `ccwt`)
+- `--no-confirm` - Skip confirmation prompt
 
 ### `ccwt remove [NAME]`
-Permanently delete a worktree.
+Permanently delete a worktree. Omit NAME to remove all worktrees.
 
 Options:
-- `--all` - Remove all worktrees
+- `--session` - ccwt session name (default: `ccwt`)
 - `--no-confirm` - Skip confirmation prompt
 
 ## How It Works

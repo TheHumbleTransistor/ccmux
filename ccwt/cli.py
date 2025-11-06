@@ -850,7 +850,7 @@ def attach(
         )
     except subprocess.CalledProcessError:
         console.print(f"[red]Error:[/red] Tmux session no longer exists.", style="bold")
-        console.print(f"\nThe tmux session was closed. Activate a worktree with: [cyan]ccwt activate --all --session {session}[/cyan]")
+        console.print(f"\nThe tmux session was closed. Activate worktrees with: [cyan]ccwt activate --session {session}[/cyan]")
         sys.exit(1)
 
     # Use execvp to replace the current process with tmux attach
@@ -862,15 +862,15 @@ def activate(
     name: Optional[str] = None,
     *,
     session: str = DEFAULT_SESSION,
-    all: bool = False,
     no_confirm: bool = False,
 ) -> None:
     """Activate Claude Code in a worktree (useful if tmux window was closed).
 
+    If no name is provided, activates all inactive worktrees in the session.
+
     Args:
-        name: Worktree name to activate
+        name: Worktree name to activate (omit to activate all)
         session: ccwt session name (default: ccwt)
-        all: Activate all inactive worktrees (default: False)
         no_confirm: Skip confirmation prompt (default: False)
     """
     # Get worktrees from state
@@ -903,7 +903,7 @@ def activate(
         if not is_active:
             inactive_worktrees.append(wt)
 
-    if all:
+    if name is None:
         # Activate all inactive worktrees
         if not inactive_worktrees:
             console.print("\n[yellow]No inactive worktrees to activate.[/yellow]")
@@ -1005,11 +1005,7 @@ def activate(
         console.print(f"\n[bold green]Success![/bold green] Activated {activated_count} worktree(s).")
         return
 
-    # Activate single worktree
-    if name is None:
-        console.print("[red]Error:[/red] Please specify a worktree name or use --all.", style="bold")
-        sys.exit(1)
-
+    # Activate single worktree (name is provided)
     # Find the worktree in state
     worktree = None
     for wt in worktrees:
