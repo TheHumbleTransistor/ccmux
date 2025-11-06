@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ccwt"
+version = "2.0.0"
+description = "Claude Code Worktrees - Manage multiple Claude Code instances in git worktrees"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    {name = "Ray Kampmeier"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "cyclopts>=2.0.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+ccwt = "ccwt.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/raykamp-tht/claude-code-worktrees"
+Repository = "https://github.com/raykamp-tht/claude-code-worktrees"
+
+[tool.setuptools.packages.find]
+include = ["ccwt*"]
