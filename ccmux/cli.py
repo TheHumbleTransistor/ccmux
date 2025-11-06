@@ -246,7 +246,7 @@ def get_all_worktrees(repo_root: Path) -> list[dict[str, str]]:
 def new(
     name: Optional[str] = None,
     *,
-    worktree: Annotated[bool, Parameter(names=["-w", "--worktree"])] = False,
+    worktree: Annotated[bool, Parameter(name=["-w", "--worktree"])] = False,
     common: CommonConfig,
 ) -> None:
     """Create a new Claude Code instance in main repo or as a git worktree.
