@@ -17,6 +17,7 @@ from rich.prompt import Confirm
 from rich.table import Table
 
 from ccmux import state
+from ccmux.tmux_config import apply_tmux_config
 
 # Default session name
 DEFAULT_SESSION = "ccmux"
@@ -373,6 +374,12 @@ def new(
                 check=True,
             )
             console.print(f"  [green]✓[/green] Created tmux session '{session}' with window '{name}'")
+
+            # Apply ccmux tmux configuration to the new session
+            if apply_tmux_config(session):
+                console.print(f"  [green]✓[/green] Applied ccmux tmux configuration")
+            else:
+                console.print(f"  [yellow]⚠[/yellow] Could not apply tmux configuration (session will use defaults)")
         except subprocess.CalledProcessError as e:
             console.print(f"[red]Error creating tmux session:[/red] {e}", style="bold")
             sys.exit(1)
@@ -463,7 +470,7 @@ def _display_session_table(session: str) -> None:
     table.add_column("Repository", style="yellow")
     table.add_column("Instance", style="cyan", no_wrap=True)
     table.add_column("Type", style="green")
-    table.add_column("Branch", style="magenta")
+    table.add_column("Branch")
     table.add_column("Status", style="bold")
     table.add_column("Tmux Window", style="blue")
     table.add_column("Path", style="dim")
@@ -493,7 +500,9 @@ def _display_session_table(session: str) -> None:
             )
             branch = result.stdout.strip()
             if branch == "HEAD":
-                branch = "(detached)"
+                branch = "[dim](detached)[/dim]"
+            else:
+                branch = f"[magenta]{branch}[/magenta]"
         except subprocess.CalledProcessError:
             pass
 
@@ -752,10 +761,8 @@ def remove(
             wt_path = Path(wt["instance_path"])
             is_active = wt in active_worktrees
 
-            # Safety check: Only allow removal of worktrees, not main repos
-            if not wt.get("is_worktree", True):  # Default to True for backward compatibility
-                console.print(f"  [red]✗[/red] Skipping '{wt_name}' - cannot remove main repository")
-                continue
+            # For main repos, we skip the git worktree removal but still do everything else
+            is_main_repo = not wt.get("is_worktree", True)  # Default to True for backward compatibility
 
             # Deactivate if active
             if is_active:
@@ -771,21 +778,32 @@ def remove(
                     except subprocess.CalledProcessError:
                         console.print(f"  [yellow]Window '{wt_name}' already closed[/yellow]")
 
-            # Remove worktree
-            if worktree_exists(wt_path):
+            # Remove git worktree if applicable (not for main repos)
+            prefix = "    " if is_active else "  "
+
+            if is_main_repo:
+                # Main repository - just remove from tracking
+                console.print(f"{prefix}[dim]Main repository - no git worktree to remove[/dim]")
+            elif worktree_exists(wt_path):
+                # Try to remove the git worktree
                 try:
+                    repo_path = Path(wt["repo_path"])
                     subprocess.run(
-                        ["git", "worktree", "remove", "--force", str(wt_path)],
+                        ["git", "-C", str(repo_path), "worktree", "remove", "--force", str(wt_path)],
                         check=True,
                     )
-                    # Remove from state
-                    state.remove_worktree(session, wt_name)
-                    prefix = "    " if is_active else "  "
-                    console.print(f"{prefix}[green]✓[/green] Removed worktree '{wt_name}'")
-                    removed_count += 1
+                    console.print(f"{prefix}[green]✓[/green] Removed git worktree '{wt_name}'")
                 except subprocess.CalledProcessError as e:
-                    prefix = "    " if is_active else "  "
-                    console.print(f"{prefix}[red]Error removing worktree:[/red] {e}")
+                    console.print(f"{prefix}[yellow]⚠[/yellow] Git worktree removal failed: {e}")
+                    console.print(f"{prefix}  [dim]Will remove from tracking anyway...[/dim]")
+            else:
+                # Worktree doesn't exist on filesystem
+                console.print(f"{prefix}[yellow]⚠[/yellow] Worktree not found on filesystem")
+
+            # Always remove from state
+            state.remove_worktree(session, wt_name)
+            console.print(f"{prefix}[green]✓[/green] Removed '{wt_name}' from tracking")
+            removed_count += 1
 
         console.print(f"\n[bold green]Success![/bold green] Removed {removed_count} worktree(s).")
         return
@@ -805,19 +823,22 @@ def remove(
     wt_path = Path(worktree["instance_path"])
     is_active = worktree in active_worktrees
 
-    # Safety check: Only allow removal of worktrees, not main repos
-    if not worktree.get("is_worktree", True):  # Default to True for backward compatibility
-        console.print(f"\n[red]Error:[/red] Cannot remove '{name}' - it is a main repository, not a worktree.")
-        console.print("[yellow]Main repositories cannot be removed through ccmux.[/yellow]")
-        sys.exit(1)
+    # Check if it's a main repo or worktree
+    is_main_repo = not worktree.get("is_worktree", True)  # Default to True for backward compatibility
 
-    console.print(f"\n[bold red]⚠️  WARNING: Removing worktree '{name}' from session '{session}'[/bold red]")
-    console.print("[red]This will permanently delete the worktree and any uncommitted changes![/red]")
+    if is_main_repo:
+        console.print(f"\n[bold red]⚠️  WARNING: Removing main repository '{name}' from tracking[/bold red]")
+        console.print("[yellow]This will only remove it from ccmux tracking, not delete the repository itself.[/yellow]")
+    else:
+        console.print(f"\n[bold red]⚠️  WARNING: Removing worktree '{name}' from session '{session}'[/bold red]")
+        console.print("[red]This will permanently delete the worktree and any uncommitted changes![/red]")
+
     console.print(f"  Path: {wt_path}")
     console.print(f"  Status: {'Active' if is_active else 'Inactive'}\n")
 
     if not no_confirm:
-        if not Confirm.ask(f"[bold red]Permanently remove worktree '{name}'?[/bold red]", default=False):
+        prompt = f"[bold red]Remove '{name}' from tracking?[/bold red]" if is_main_repo else f"[bold red]Permanently remove worktree '{name}'?[/bold red]"
+        if not Confirm.ask(prompt, default=False):
             console.print("[yellow]Cancelled.[/yellow]")
             return
 
@@ -835,23 +856,69 @@ def remove(
             except subprocess.CalledProcessError:
                 console.print(f"  [yellow]Window '{name}' already closed[/yellow]")
 
-    # Remove worktree
-    if worktree_exists(wt_path):
+    # Remove git worktree if applicable (not for main repos)
+    if is_main_repo:
+        # Main repository - just remove from tracking
+        console.print(f"  [dim]Main repository - no git worktree to remove[/dim]")
+    elif worktree_exists(wt_path):
+        # Try to remove the git worktree
         try:
+            repo_path = Path(worktree["repo_path"])
             subprocess.run(
-                ["git", "worktree", "remove", "--force", str(wt_path)],
+                ["git", "-C", str(repo_path), "worktree", "remove", "--force", str(wt_path)],
                 check=True,
             )
-            # Remove from state
-            state.remove_worktree(session, name)
-            console.print(f"  [green]✓[/green] Removed worktree at {wt_path}")
+            console.print(f"  [green]✓[/green] Removed git worktree at {wt_path}")
         except subprocess.CalledProcessError as e:
-            console.print(f"  [red]Error removing worktree:[/red] {e}")
+            console.print(f"  [yellow]⚠[/yellow] Git worktree removal failed: {e}")
+            console.print(f"    [dim]Will remove from tracking anyway...[/dim]")
+    else:
+        # Worktree doesn't exist on filesystem
+        console.print(f"  [yellow]⚠[/yellow] Worktree not found on filesystem")
+
+    # Always remove from state
+    state.remove_worktree(session, name)
+    console.print(f"  [green]✓[/green] Removed '{name}' from tracking")
+
+    if is_main_repo:
+        console.print(f"\n[bold green]Success![/bold green] Main repository '{name}' removed from tracking.")
+    else:
+        console.print(f"\n[bold green]Success![/bold green] Worktree '{name}' removed.")
+
+
+@app.command
+def export_tmux_config(
+    *,
+    output: Optional[Path] = None,
+) -> None:
+    """Export the ccmux tmux configuration to a file.
+
+    This exports the tmux configuration that ccmux applies to its sessions.
+    You can use this to apply the same configuration globally or to customize it.
+
+    Args:
+        output: Output file path. If not specified, prints to stdout.
+    """
+    from ccmux.tmux_config import get_tmux_config_content
+
+    content = get_tmux_config_content()
+
+    if output:
+        try:
+            # Check if file exists and prompt for overwrite
+            if output.exists():
+                if not Confirm.ask(f"[yellow]File {output} exists. Overwrite?[/yellow]", default=False):
+                    console.print("[yellow]Cancelled.[/yellow]")
+                    return
+
+            output.write_text(content)
+            console.print(f"[green]✓[/green] Exported tmux configuration to {output}")
+        except Exception as e:
+            console.print(f"[red]Error writing file:[/red] {e}", style="bold")
             sys.exit(1)
     else:
-        console.print(f"  [yellow]Worktree not found:[/yellow] {wt_path}")
-
-    console.print(f"\n[bold green]Success![/bold green] Worktree '{name}' removed.")
+        # Print to stdout
+        console.print(content)
 
 
 @app.command
@@ -1072,6 +1139,12 @@ def activate(
                     )
                     tmux_session_exists_flag = True
                     console.print(f"  [green]✓[/green] Created tmux session and activated '{wt_name}'")
+
+                    # Apply ccmux tmux configuration to the new session
+                    if apply_tmux_config(session):
+                        console.print(f"    [green]✓[/green] Applied ccmux tmux configuration")
+                    else:
+                        console.print(f"    [yellow]⚠[/yellow] Could not apply tmux configuration (session will use defaults)")
                 else:
                     # Create new window in existing session
                     subprocess.run(
@@ -1175,6 +1248,12 @@ def activate(
                 check=True,
             )
             console.print(f"  [green]✓[/green] Created tmux session and activated '{name}'")
+
+            # Apply ccmux tmux configuration to the new session
+            if apply_tmux_config(session):
+                console.print(f"  [green]✓[/green] Applied ccmux tmux configuration")
+            else:
+                console.print(f"  [yellow]⚠[/yellow] Could not apply tmux configuration (session will use defaults)")
         else:
             # Create new window in existing session
             subprocess.run(
