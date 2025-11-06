@@ -367,7 +367,7 @@ def list(
 
     # Create Rich table
     table = Table(title=f"Claude Code Worktrees (session: {session})", show_header=True)
-    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Worktree", style="cyan", no_wrap=True)
     table.add_column("Branch", style="magenta")
     table.add_column("Status", style="bold")
     table.add_column("Path", style="dim")
