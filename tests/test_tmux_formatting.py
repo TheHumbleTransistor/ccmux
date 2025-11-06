@@ -113,9 +113,9 @@ class TestTmuxFormatting:
 
         # Check that format string is correct
         assert "#I:#W" in format_string  # Has index:name pattern
-        assert "colour245" in format_string  # Has grey color for normal
-        assert "red" in format_string  # Has red for bell (in conditional)
-        assert "green" in format_string  # Has green for activity (in conditional)
+        assert "bg=colour235" in format_string  # Normal background (dark grey)
+        assert "bg=red" in format_string  # Has red background for bell (in conditional)
+        assert "bg=green" in format_string  # Has green background for activity (in conditional)
 
     def test_activity_window_formatting(self):
         """Test formatting for windows with activity."""
@@ -138,9 +138,10 @@ class TestTmuxFormatting:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         format_string = result.stdout.strip()
 
-        # Format should have activity conditional that shows green
+        # Format should have activity conditional that shows green background
         assert "window_activity_flag" in format_string
-        assert "green" in format_string
+        assert "bg=green" in format_string
+        assert "fg=black" in format_string  # Black text on green background
 
     def test_bell_window_formatting(self):
         """Test formatting for windows with bell (highest priority)."""
@@ -161,9 +162,10 @@ class TestTmuxFormatting:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         format_string = result.stdout.strip()
 
-        # Format should have bell conditional that shows red
+        # Format should have bell conditional that shows red background
         assert "window_bell_flag" in format_string
-        assert "red" in format_string
+        assert "bg=red" in format_string
+        assert "fg=white" in format_string  # White text on red background
         assert "#I:#W" in format_string
 
     def test_current_window_formatting(self):

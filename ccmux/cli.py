@@ -811,6 +811,19 @@ def remove(
             console.print(f"{prefix}[green]✓[/green] Removed '{wt_name}' from tracking")
             removed_count += 1
 
+        # Kill the entire tmux session if it exists (removes all windows including manually added ones)
+        tmux_session_name = f"ccmux-{session}"
+        if tmux_session_exists(tmux_session_name):
+            try:
+                subprocess.run(
+                    ["tmux", "kill-session", "-t", tmux_session_name],
+                    check=True,
+                    capture_output=True,
+                )
+                console.print(f"\n[green]✓[/green] Killed tmux session '{tmux_session_name}'")
+            except subprocess.CalledProcessError:
+                console.print(f"\n[yellow]⚠[/yellow] Could not kill tmux session '{tmux_session_name}'")
+
         console.print(f"\n[bold green]Success![/bold green] Removed {removed_count} worktree(s).")
         return
 
