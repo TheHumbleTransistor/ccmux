@@ -14,6 +14,8 @@ from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
 
+from ccwt import state
+
 console = Console()
 app = cyclopts.App(
     name="ccwt",
@@ -327,6 +329,40 @@ def new(
             check=True,
         )
 
+        # Get tmux IDs and save to state
+        try:
+            tmux_session_id = subprocess.run(
+                ["tmux", "display-message", "-t", f"{session}", "-p", "#{session_id}"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+            tmux_window_id = subprocess.run(
+                ["tmux", "display-message", "-t", f"{session}:{name}", "-p", "#{window_id}"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+            # Save worktree to state
+            state.add_worktree(
+                session_name=session,
+                worktree_name=name,
+                repo_path=str(repo_root),
+                worktree_path=str(worktree_path),
+                tmux_session_id=tmux_session_id,
+                tmux_window_id=tmux_window_id
+            )
+        except subprocess.CalledProcessError:
+            # If we can't get IDs, still save to state without them
+            state.add_worktree(
+                session_name=session,
+                worktree_name=name,
+                repo_path=str(repo_root),
+                worktree_path=str(worktree_path)
+            )
+
         console.print(f"  [green]✓[/green] Launched Claude Code in tmux window '{name}'")
         console.print(f"\n[bold green]Success![/bold green] Claude Code is running.")
         console.print(f"Attach with: [cyan]tmux attach -t {session}[/cyan]")
@@ -352,45 +388,74 @@ def list(
     Args:
         session: Tmux session name (default: claude-cluster)
     """
-    repo_root = get_repo_root()
-    if repo_root is None:
-        console.print("[red]Error:[/red] Not inside a git repository.", style="bold")
-        sys.exit(1)
-
-    worktrees = get_all_worktrees(repo_root)
-    tmux_windows = get_tmux_windows(session)
+    worktrees = state.get_all_worktrees(session)
 
     if not worktrees:
-        console.print("\n[yellow]No worktrees found in .worktrees/[/yellow]")
+        console.print("\n[yellow]No worktrees found.[/yellow]")
         console.print(f"Create one with: [cyan]ccwt new[/cyan]")
         return
 
     # Create Rich table
     table = Table(title=f"Claude Code Worktrees (session: {session})", show_header=True)
     table.add_column("Worktree", style="cyan", no_wrap=True)
+    table.add_column("Tmux Window", style="blue")
+    table.add_column("Repository", style="yellow")
     table.add_column("Branch", style="magenta")
     table.add_column("Status", style="bold")
     table.add_column("Path", style="dim")
 
+    active_count = 0
     for wt in worktrees:
         name = wt["name"]
-        branch = wt.get("branch", "unknown")
-        path = wt["path"]
+        repo_path = Path(wt["repo_path"])
+        worktree_path = Path(wt["worktree_path"])
+        tmux_window_id = wt.get("tmux_window_id")
 
-        # Check if there's an active tmux window
-        if name in tmux_windows:
-            status = "[green]● Active[/green]"
-        else:
-            status = "[dim]○ Inactive[/dim]"
+        # Get repository name
+        repo_name = repo_path.name
 
-        table.add_row(name, branch, status, path)
+        # Get branch name from worktree
+        branch = "(unknown)"
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(worktree_path), "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            branch = result.stdout.strip()
+            if branch == "HEAD":
+                branch = "(detached)"
+        except subprocess.CalledProcessError:
+            pass
+
+        # Get tmux window name and check if active
+        tmux_window_name = ""
+        status = "[dim]○ Inactive[/dim]"
+        if tmux_window_id:
+            try:
+                result = subprocess.run(
+                    ["tmux", "display-message", "-t", tmux_window_id, "-p", "#{window_name}"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                tmux_window_name = result.stdout.strip()
+                # Only mark as active if we got a window name
+                if tmux_window_name:
+                    status = "[green]● Active[/green]"
+                    active_count += 1
+            except subprocess.CalledProcessError:
+                # Window doesn't exist anymore
+                pass
+
+        table.add_row(name, tmux_window_name, repo_name, branch, status, str(worktree_path))
 
     console.print()
     console.print(table)
     console.print()
 
     # Show summary
-    active_count = sum(1 for wt in worktrees if wt["name"] in tmux_windows)
     total_count = len(worktrees)
     console.print(f"Total: {total_count} worktrees, {active_count} active, {total_count - active_count} inactive")
     console.print()
@@ -563,6 +628,8 @@ def remove(
                         ["git", "worktree", "remove", "--force", str(wt_path)],
                         check=True,
                     )
+                    # Remove from state
+                    state.remove_worktree(session, wt_name)
                     prefix = "    " if is_active else "  "
                     console.print(f"{prefix}[green]✓[/green] Removed worktree '{wt_name}'")
                     removed_count += 1
@@ -630,6 +697,8 @@ def remove(
                 ["git", "worktree", "remove", "--force", str(wt_path)],
                 check=True,
             )
+            # Remove from state
+            state.remove_worktree(session, name)
             console.print(f"  [green]✓[/green] Removed worktree at {wt_path}")
         except subprocess.CalledProcessError as e:
             console.print(f"  [red]Error removing worktree:[/red] {e}")
@@ -638,6 +707,72 @@ def remove(
         console.print(f"  [yellow]Worktree not found:[/yellow] {wt_path}")
 
     console.print(f"\n[bold green]Success![/bold green] Worktree '{name}' removed.")
+
+
+@app.command
+def which() -> None:
+    """Show which worktree the current tmux window is associated with.
+
+    Run this from within a tmux window to see which ccwt worktree you're in.
+    """
+    # Check if we're in tmux
+    if "TMUX" not in os.environ:
+        console.print("[red]Error:[/red] Not running inside a tmux window.", style="bold")
+        sys.exit(1)
+
+    # Get current tmux IDs
+    try:
+        tmux_session_id = subprocess.run(
+            ["tmux", "display-message", "-p", "#{session_id}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        tmux_window_id = subprocess.run(
+            ["tmux", "display-message", "-p", "#{window_id}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Error getting tmux IDs:[/red] {e}", style="bold")
+        sys.exit(1)
+
+    # Find worktree by tmux IDs
+    result = state.find_worktree_by_tmux_ids(tmux_session_id, tmux_window_id)
+
+    if result is None:
+        console.print("[yellow]This tmux window is not associated with any ccwt worktree.[/yellow]")
+        sys.exit(0)
+
+    session_name, worktree_name, worktree_data = result
+
+    # Get repository name
+    repo_path = Path(worktree_data["repo_path"])
+    repo_name = repo_path.name
+
+    # Get current branch
+    worktree_path = Path(worktree_data["worktree_path"])
+    try:
+        branch_result = subprocess.run(
+            ["git", "-C", str(worktree_path), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        branch = branch_result.stdout.strip()
+        if branch == "HEAD":
+            branch = "(detached)"
+    except subprocess.CalledProcessError:
+        branch = "unknown"
+
+    # Display info
+    console.print(f"\n[bold cyan]Worktree:[/bold cyan] {worktree_name}")
+    console.print(f"[bold cyan]Session:[/bold cyan]  {session_name}")
+    console.print(f"[bold cyan]Repository:[/bold cyan] {repo_name}")
+    console.print(f"[bold cyan]Branch:[/bold cyan] {branch}")
+    console.print(f"[bold cyan]Path:[/bold cyan] {worktree_path}\n")
 
 
 @app.command
@@ -716,6 +851,27 @@ def activate(
                     check=True,
                     capture_output=True,
                 )
+
+                # Update tmux IDs in state
+                try:
+                    tmux_session_id = subprocess.run(
+                        ["tmux", "display-message", "-t", f"{session}", "-p", "#{session_id}"],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    ).stdout.strip()
+
+                    tmux_window_id = subprocess.run(
+                        ["tmux", "display-message", "-t", f"{session}:{wt_name}", "-p", "#{window_id}"],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    ).stdout.strip()
+
+                    state.update_tmux_ids(session, wt_name, tmux_session_id, tmux_window_id)
+                except subprocess.CalledProcessError:
+                    pass  # Continue even if we can't update IDs
+
                 console.print(f"  [green]✓[/green] Activated '{wt_name}'")
                 activated_count += 1
             except subprocess.CalledProcessError as e:
@@ -785,6 +941,26 @@ def activate(
             ["tmux", "select-window", "-t", f"{session}:{name}"],
             check=True,
         )
+
+        # Update tmux IDs in state
+        try:
+            tmux_session_id = subprocess.run(
+                ["tmux", "display-message", "-t", f"{session}", "-p", "#{session_id}"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+            tmux_window_id = subprocess.run(
+                ["tmux", "display-message", "-t", f"{session}:{name}", "-p", "#{window_id}"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+            state.update_tmux_ids(session, name, tmux_session_id, tmux_window_id)
+        except subprocess.CalledProcessError:
+            pass  # Continue even if we can't update IDs
 
         console.print(f"  [green]✓[/green] Activated Claude Code in tmux window '{name}'")
         console.print(f"\n[bold green]Success![/bold green] Claude Code is running.")
