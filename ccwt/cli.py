@@ -30,7 +30,7 @@ class Common:
 
 
 # Type alias for Common config parameter
-CommonConfig = Annotated[Common, Parameter(parse=False)]
+CommonConfig = Annotated[Common, Parameter(parse=False, show=False)]
 
 
 console = Console()
@@ -409,22 +409,16 @@ def new(
             os.execvp("tmux", ["tmux", "attach", "-t", session])
 
 
-@app.command
-def list(
-    *,
-    common: CommonConfig,
-) -> None:
-    """List all worktrees and their tmux session status.
+def _display_session_table(session: str) -> None:
+    """Display a table for a single session.
 
     Args:
-        common: Common parameters (session, etc.)
+        session: Session name to display
     """
-    session = common.session
     worktrees = state.get_all_worktrees(session)
 
     if not worktrees:
-        console.print("\n[yellow]No worktrees found.[/yellow]")
-        console.print(f"Create one with: [cyan]ccwt new[/cyan]")
+        console.print(f"\n[yellow]No worktrees found in session '{session}'.[/yellow]")
         return
 
     # Create Rich table
@@ -491,6 +485,43 @@ def list(
     total_count = len(worktrees)
     console.print(f"Total: {total_count} worktrees, {active_count} active, {total_count - active_count} inactive")
     console.print()
+
+
+@app.command
+def list(
+    *,
+    common: CommonConfig,
+    all_sessions: Annotated[bool, Parameter(negative="", alias="-a")] = False,
+) -> None:
+    """List all worktrees and their tmux session status.
+
+    Args:
+        common: Common parameters (session, etc.)
+        all_sessions: List worktrees for all sessions
+    """
+    if all_sessions:
+        # Display tables for all sessions
+        all_state = state.load_state()
+        sessions = all_state.get("sessions", {})
+
+        if not sessions:
+            console.print("\n[yellow]No sessions found.[/yellow]")
+            console.print(f"Create one with: [cyan]ccwt new[/cyan]")
+            return
+
+        for session_name in sessions.keys():
+            _display_session_table(session_name)
+    else:
+        # Display table for single session
+        session = common.session
+        worktrees = state.get_all_worktrees(session)
+
+        if not worktrees:
+            console.print("\n[yellow]No worktrees found.[/yellow]")
+            console.print(f"Create one with: [cyan]ccwt new[/cyan]")
+            return
+
+        _display_session_table(session)
 
 
 @app.command
@@ -1147,7 +1178,7 @@ def activate(
 @app.meta.default
 def meta(
     *tokens: Annotated[str, Parameter(show=False, allow_leading_hyphen=True)],
-    session: str = DEFAULT_SESSION,
+    session: Annotated[str, Parameter(negative="", alias="-s")] = DEFAULT_SESSION,
 ):
     """Meta command to inject common parameters into subcommands.
 
