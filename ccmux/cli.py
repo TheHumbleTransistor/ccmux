@@ -359,20 +359,28 @@ def new(
         f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
     )
 
+    # Variable to store the window ID
+    tmux_window_id = None
+
     if is_first_instance:
         # First instance: create session with this window as the only window
         try:
-            subprocess.run(
+            # Use -P flag to print window ID after creation
+            result = subprocess.run(
                 [
                     "tmux", "new-session",
                     "-d",
                     "-s", session,
                     "-n", name,
                     "-c", str(instance_path),
+                    "-P", "-F", "#{window_id}",
                     launch_cmd,
                 ],
+                capture_output=True,
+                text=True,
                 check=True,
             )
+            tmux_window_id = result.stdout.strip()
             console.print(f"  [green]✓[/green] Created tmux session '{session}' with window '{name}'")
 
             # Apply ccmux tmux configuration to the new session
@@ -386,16 +394,21 @@ def new(
     else:
         # Not the first instance: add a new window to existing session
         try:
-            subprocess.run(
+            # Use -P flag to print window ID after creation
+            result = subprocess.run(
                 [
                     "tmux", "new-window",
                     "-t", f"{session}",
                     "-n", name,
                     "-c", str(instance_path),
+                    "-P", "-F", "#{window_id}",
                     launch_cmd,
                 ],
+                capture_output=True,
+                text=True,
                 check=True,
             )
+            tmux_window_id = result.stdout.strip()
 
             subprocess.run(
                 ["tmux", "select-window", "-t", f"{session}:{name}"],
@@ -406,17 +419,10 @@ def new(
             console.print(f"[red]Error creating tmux window:[/red] {e}", style="bold")
             sys.exit(1)
 
-    # Get tmux IDs and save to state
+    # Get tmux session ID and save to state
     try:
         tmux_session_id = subprocess.run(
             ["tmux", "display-message", "-t", f"{session}", "-p", "#{session_id}"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-
-        tmux_window_id = subprocess.run(
-            ["tmux", "display-message", "-t", f"{session}:{name}", "-p", "#{window_id}"],
             capture_output=True,
             text=True,
             check=True,
@@ -1123,20 +1129,26 @@ def activate(
             )
 
             try:
+                # Variable to store the window ID
+                new_tmux_window_id = None
+
                 # If tmux session doesn't exist and this is the first worktree, create session with it
                 if not tmux_session_exists_flag and i == 0:
-                    subprocess.run(
+                    result = subprocess.run(
                         [
                             "tmux", "new-session",
                             "-d",
                             "-s", session,
                             "-n", wt_name,
                             "-c", wt_path,
+                            "-P", "-F", "#{window_id}",
                             launch_cmd,
                         ],
                         check=True,
                         capture_output=True,
+                        text=True,
                     )
+                    new_tmux_window_id = result.stdout.strip()
                     tmux_session_exists_flag = True
                     console.print(f"  [green]✓[/green] Created tmux session and activated '{wt_name}'")
 
@@ -1147,30 +1159,26 @@ def activate(
                         console.print(f"    [yellow]⚠[/yellow] Could not apply tmux configuration (session will use defaults)")
                 else:
                     # Create new window in existing session
-                    subprocess.run(
+                    result = subprocess.run(
                         [
                             "tmux", "new-window",
                             "-t", session,
                             "-n", wt_name,
                             "-c", wt_path,
+                            "-P", "-F", "#{window_id}",
                             launch_cmd,
                         ],
                         check=True,
                         capture_output=True,
+                        text=True,
                     )
+                    new_tmux_window_id = result.stdout.strip()
                     console.print(f"  [green]✓[/green] Activated '{wt_name}'")
 
                 # Update tmux IDs in state
                 try:
                     new_tmux_session_id = subprocess.run(
                         ["tmux", "display-message", "-t", f"{session}", "-p", "#{session_id}"],
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                    ).stdout.strip()
-
-                    new_tmux_window_id = subprocess.run(
-                        ["tmux", "display-message", "-t", f"{session}:{wt_name}", "-p", "#{window_id}"],
                         capture_output=True,
                         text=True,
                         check=True,
@@ -1234,19 +1242,26 @@ def activate(
     )
 
     try:
+        # Variable to store the window ID
+        tmux_window_id = None
+
         # If tmux session doesn't exist, create it with this worktree
         if not tmux_session_exists_flag:
-            subprocess.run(
+            result = subprocess.run(
                 [
                     "tmux", "new-session",
                     "-d",
                     "-s", session,
                     "-n", name,
                     "-c", wt_path,
+                    "-P", "-F", "#{window_id}",
                     launch_cmd,
                 ],
+                capture_output=True,
+                text=True,
                 check=True,
             )
+            tmux_window_id = result.stdout.strip()
             console.print(f"  [green]✓[/green] Created tmux session and activated '{name}'")
 
             # Apply ccmux tmux configuration to the new session
@@ -1256,16 +1271,20 @@ def activate(
                 console.print(f"  [yellow]⚠[/yellow] Could not apply tmux configuration (session will use defaults)")
         else:
             # Create new window in existing session
-            subprocess.run(
+            result = subprocess.run(
                 [
                     "tmux", "new-window",
                     "-t", session,
                     "-n", name,
                     "-c", wt_path,
+                    "-P", "-F", "#{window_id}",
                     launch_cmd,
                 ],
+                capture_output=True,
+                text=True,
                 check=True,
             )
+            tmux_window_id = result.stdout.strip()
 
             subprocess.run(
                 ["tmux", "select-window", "-t", f"{session}:{name}"],
@@ -1277,13 +1296,6 @@ def activate(
         try:
             tmux_session_id = subprocess.run(
                 ["tmux", "display-message", "-t", f"{session}", "-p", "#{session_id}"],
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
-
-            tmux_window_id = subprocess.run(
-                ["tmux", "display-message", "-t", f"{session}:{name}", "-p", "#{window_id}"],
                 capture_output=True,
                 text=True,
                 check=True,
