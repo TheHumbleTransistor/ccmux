@@ -7,6 +7,7 @@ from typing import Optional
 
 STATE_DIR = Path.home() / ".ccwt"
 STATE_FILE = STATE_DIR / "state.json"
+DEFAULT_SESSION = "ccwt"
 
 
 def _ensure_state_dir():
@@ -19,7 +20,7 @@ def load_state() -> dict:
     if not STATE_FILE.exists():
         return {
             "sessions": {},
-            "default_session": "claude-cluster"
+            "default_session": DEFAULT_SESSION
         }
 
     try:
@@ -29,7 +30,7 @@ def load_state() -> dict:
         # If file is corrupted, return empty state
         return {
             "sessions": {},
-            "default_session": "claude-cluster"
+            "default_session": DEFAULT_SESSION
         }
 
 

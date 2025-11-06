@@ -43,7 +43,7 @@ ccwt remove feature-name
 Create a new git worktree and launch Claude Code in a tmux window.
 
 Options:
-- `--session` - Tmux session name (default: `claude-cluster`)
+- `--session` - Tmux session name (default: `ccwt`)
 
 ### `ccwt list`
 List all worktrees with status, branch, and tmux window information.
@@ -55,7 +55,7 @@ Show which worktree the current tmux window is associated with.
 Attach to a tmux session.
 
 Options:
-- `--session` - ccwt session name (default: `claude-cluster`)
+- `--session` - ccwt session name (default: `ccwt`)
 
 ### `ccwt activate [NAME]`
 Reopen Claude Code in a worktree's tmux window.
