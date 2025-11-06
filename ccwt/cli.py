@@ -65,6 +65,25 @@ def get_repo_root() -> Optional[Path]:
         return None
 
 
+def get_default_branch() -> Optional[str]:
+    """Get the default branch name (main, master, etc.)."""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "show", "origin"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        # Look for line like: "HEAD branch: main"
+        for line in result.stdout.split("\n"):
+            if "HEAD branch:" in line:
+                return line.split(":")[-1].strip()
+    except subprocess.CalledProcessError:
+        pass
+
+    return None
+
+
 def worktree_exists(worktree_path: Path) -> bool:
     """Check if a worktree exists and is registered."""
     try:
@@ -224,13 +243,19 @@ def new(
 
     os.chdir(repo_root)
 
+    # Get default branch
+    default_branch = get_default_branch()
+    if default_branch is None:
+        console.print("[red]Error:[/red] Could not detect default branch (main/master).", style="bold")
+        sys.exit(1)
+
     # Generate or sanitize name
     if name is None:
         # Try to find an unused random name
         for _ in range(20):
             candidate = sanitize_name(generate_animal_name())
             worktree_path = repo_root / ".worktrees" / candidate
-            if not worktree_exists(worktree_path) and not branch_exists(candidate):
+            if not worktree_exists(worktree_path):
                 name = candidate
                 break
 
@@ -247,29 +272,22 @@ def new(
     # Create .worktrees directory if needed
     (repo_root / ".worktrees").mkdir(exist_ok=True)
 
-    # Create worktree and branch
+    # Create detached worktree based on default branch
     console.print(f"\n[bold cyan]Creating Claude Code instance:[/bold cyan] {name}")
     console.print(f"  Repo root: {repo_root}")
     console.print(f"  Worktree:  {worktree_path}")
-    console.print(f"  Branch:    {name}")
+    console.print(f"  Based on:  {default_branch} (detached)")
 
     try:
         if worktree_exists(worktree_path):
             console.print("  [yellow]Worktree already exists, reusing it.[/yellow]")
-        elif branch_exists(name):
-            # Branch exists, attach worktree to it
-            subprocess.run(
-                ["git", "worktree", "add", str(worktree_path), name],
-                check=True,
-            )
-            console.print("  [green]✓[/green] Attached to existing branch")
         else:
-            # Create new branch and worktree
+            # Create detached worktree based on default branch HEAD
             subprocess.run(
-                ["git", "worktree", "add", str(worktree_path), "-b", name],
+                ["git", "worktree", "add", "--detach", str(worktree_path), default_branch],
                 check=True,
             )
-            console.print("  [green]✓[/green] Created new branch and worktree")
+            console.print(f"  [green]✓[/green] Created detached worktree from {default_branch}")
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Error creating worktree:[/red] {e}", style="bold")
         sys.exit(1)
