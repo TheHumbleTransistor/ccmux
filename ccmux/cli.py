@@ -348,7 +348,8 @@ def new(
 
     # Check if this is the first instance in the ccmux session
     session_data = state.get_session(session)
-    is_first_instance = session_data is None
+    # Check if tmux session actually exists (not just state data)
+    is_first_instance = not tmux_session_exists(session)
 
     # Create or attach to tmux session
     instance_type = "worktree" if create_as_worktree else "main repo"
