@@ -294,88 +294,100 @@ def new(
         console.print(f"[red]Error creating worktree:[/red] {e}", style="bold")
         sys.exit(1)
 
+    # Check if this is the first worktree in the ccwt session
+    session_data = state.get_session(session)
+    is_first_worktree = session_data is None
+
     # Create or attach to tmux session
-    if not tmux_session_exists(session):
+    launch_cmd = (
+        f"echo 'Launching Claude Code in {worktree_path} (branch {name})'; "
+        f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
+    )
+
+    if is_first_worktree:
+        # First worktree: create session with this window as the only window
         try:
             subprocess.run(
-                ["tmux", "new-session", "-d", "-s", session, "-n", "home"],
+                [
+                    "tmux", "new-session",
+                    "-d",
+                    "-s", session,
+                    "-n", name,
+                    "-c", str(worktree_path),
+                    launch_cmd,
+                ],
                 check=True,
             )
-            console.print(f"  [green]✓[/green] Created tmux session '{session}'")
+            console.print(f"  [green]✓[/green] Created tmux session '{session}' with window '{name}'")
         except subprocess.CalledProcessError as e:
             console.print(f"[red]Error creating tmux session:[/red] {e}", style="bold")
             sys.exit(1)
-
-    # Create new tmux window and launch Claude
-    try:
-        launch_cmd = (
-            f"echo 'Launching Claude Code in {worktree_path} (branch {name})'; "
-            f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
-        )
-
-        subprocess.run(
-            [
-                "tmux", "new-window",
-                "-t", f"{session}",
-                "-n", name,
-                "-c", str(worktree_path),
-                launch_cmd,
-            ],
-            check=True,
-        )
-
-        subprocess.run(
-            ["tmux", "select-window", "-t", f"{session}:{name}"],
-            check=True,
-        )
-
-        # Get tmux IDs and save to state
+    else:
+        # Not the first worktree: add a new window to existing session
         try:
-            tmux_session_id = subprocess.run(
-                ["tmux", "display-message", "-t", f"{session}", "-p", "#{session_id}"],
-                capture_output=True,
-                text=True,
+            subprocess.run(
+                [
+                    "tmux", "new-window",
+                    "-t", f"{session}",
+                    "-n", name,
+                    "-c", str(worktree_path),
+                    launch_cmd,
+                ],
                 check=True,
-            ).stdout.strip()
-
-            tmux_window_id = subprocess.run(
-                ["tmux", "display-message", "-t", f"{session}:{name}", "-p", "#{window_id}"],
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
-
-            # Save worktree to state
-            state.add_worktree(
-                session_name=session,
-                worktree_name=name,
-                repo_path=str(repo_root),
-                worktree_path=str(worktree_path),
-                tmux_session_id=tmux_session_id,
-                tmux_window_id=tmux_window_id
-            )
-        except subprocess.CalledProcessError:
-            # If we can't get IDs, still save to state without them
-            state.add_worktree(
-                session_name=session,
-                worktree_name=name,
-                repo_path=str(repo_root),
-                worktree_path=str(worktree_path)
             )
 
-        console.print(f"  [green]✓[/green] Launched Claude Code in tmux window '{name}'")
-        console.print(f"\n[bold green]Success![/bold green] Claude Code is running.")
-        console.print(f"Attach with: [cyan]tmux attach -t {session}[/cyan]")
+            subprocess.run(
+                ["tmux", "select-window", "-t", f"{session}:{name}"],
+                check=True,
+            )
+            console.print(f"  [green]✓[/green] Created new window '{name}' in session '{session}'")
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]Error creating tmux window:[/red] {e}", style="bold")
+            sys.exit(1)
 
-        # Auto-attach if not already in tmux
-        if "TMUX" not in os.environ:
-            console.print()
-            if Confirm.ask("Attach to tmux session now?", default=True):
-                os.execvp("tmux", ["tmux", "attach", "-t", session])
+    # Get tmux IDs and save to state
+    try:
+        tmux_session_id = subprocess.run(
+            ["tmux", "display-message", "-t", f"{session}", "-p", "#{session_id}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
 
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]Error launching Claude Code:[/red] {e}", style="bold")
-        sys.exit(1)
+        tmux_window_id = subprocess.run(
+            ["tmux", "display-message", "-t", f"{session}:{name}", "-p", "#{window_id}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        # Save worktree to state
+        state.add_worktree(
+            session_name=session,
+            worktree_name=name,
+            repo_path=str(repo_root),
+            worktree_path=str(worktree_path),
+            tmux_session_id=tmux_session_id,
+            tmux_window_id=tmux_window_id
+        )
+    except subprocess.CalledProcessError:
+        # If we can't get IDs, still save to state without them
+        state.add_worktree(
+            session_name=session,
+            worktree_name=name,
+            repo_path=str(repo_root),
+            worktree_path=str(worktree_path)
+        )
+
+    console.print(f"  [green]✓[/green] Launched Claude Code in tmux window '{name}'")
+    console.print(f"\n[bold green]Success![/bold green] Claude Code is running.")
+    console.print(f"Attach with: [cyan]ccwt attach[/cyan]")
+
+    # Auto-attach if not already in tmux
+    if "TMUX" not in os.environ:
+        console.print()
+        if Confirm.ask("Attach to tmux session now?", default=True):
+            os.execvp("tmux", ["tmux", "attach", "-t", session])
 
 
 @app.command
