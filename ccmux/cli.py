@@ -39,32 +39,15 @@ CommonConfig = Annotated[Common, Parameter(parse=False, show=False)]
 console = Console()
 app = cyclopts.App(
     name="ccmux",
-    help="""Claude Code Multiplexer - Manage multiple Claude Code instances.
-
-Shortcuts (backward-compatible aliases):
-  ccmux new          -> ccmux instance new
-  ccmux list         -> ccmux instance list
-  ccmux attach       -> ccmux session attach
-  ccmux activate     -> ccmux instance activate
-  ccmux deactivate   -> ccmux instance deactivate
-  ccmux remove       -> ccmux instance remove
-  ccmux rename       -> ccmux session rename""",
+    help="Claude Code Multiplexer - Manage multiple Claude Code instances.",
 )
 
 session_app = cyclopts.App(name="session", help="Manage ccmux sessions")
-instance_app = cyclopts.App(name="instance", help="Manage ccmux instances")
 app.command(session_app)
-app.command(instance_app)
 
 # Top-level aliases: rewrite these to sub-app paths in meta
 TOP_LEVEL_ALIASES = {
-    "new": ("instance", "new"),
-    "list": ("instance", "list"),
     "attach": ("session", "attach"),
-    "activate": ("instance", "activate"),
-    "deactivate": ("instance", "deactivate"),
-    "remove": ("instance", "remove"),
-    "rename": ("session", "rename"),
 }
 
 
@@ -980,20 +963,20 @@ def session_attach(*, common: CommonConfig) -> None:
 
 # --- Instance Sub-App Commands ---
 
-@instance_app.default
+@app.default
 def instance_info(*, common: CommonConfig) -> None:
     """Show current instance info, or help if none active."""
     detected = detect_current_ccmux_instance()
     if not detected:
         console.print("[yellow]Not currently in a ccmux instance.[/yellow]\n")
-        app.help_print(["instance"])
+        app.help_print([])
         return
 
     session_name, instance_name, instance_data = detected
     _show_instance_info(session_name, instance_name, instance_data)
 
 
-@instance_app.command(name="which")
+@app.command(name="which")
 def instance_which() -> None:
     """Print the current instance name (useful for scripting)."""
     detected = detect_current_ccmux_instance()
@@ -1002,7 +985,7 @@ def instance_which() -> None:
     print(detected[1])
 
 
-@instance_app.command(name="new")
+@app.command(name="new")
 def instance_new(
     name: Optional[str] = None,
     *,
@@ -1257,7 +1240,7 @@ def instance_new(
             os.execvp("tmux", ["tmux", "attach", "-t", session])
 
 
-@instance_app.command(name="list")
+@app.command(name="list")
 def instance_list(
     *,
     common: CommonConfig,
@@ -1292,7 +1275,7 @@ def instance_list(
         _display_session_table(session)
 
 
-@instance_app.command(name="rename")
+@app.command(name="rename")
 def instance_rename(
     old: Optional[str] = None,
     new: Optional[str] = None,
@@ -1401,7 +1384,7 @@ def instance_rename(
     console.print(f"\n[bold green]Success![/bold green] Instance renamed: '{old_name}' -> '{new_name}'")
 
 
-@instance_app.command(name="activate")
+@app.command(name="activate")
 def instance_activate(
     name: Optional[str] = None,
     *,
@@ -1424,7 +1407,7 @@ def instance_activate(
         _activate_single_instance(session, name, no_confirm)
 
 
-@instance_app.command(name="deactivate")
+@app.command(name="deactivate")
 def instance_deactivate(
     name: Optional[str] = None,
     *,
@@ -1518,7 +1501,7 @@ def instance_deactivate(
     console.print(f"\n[bold green]Success![/bold green] Instance '{name}' deactivated.")
 
 
-@instance_app.command(name="remove")
+@app.command(name="remove")
 def instance_remove(
     name: Optional[str] = None,
     *,
