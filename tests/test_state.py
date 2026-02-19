@@ -25,7 +25,7 @@ def test_load_state_empty(temp_state_dir):
     result = state.load_state()
     assert result == {
         "sessions": {},
-        "default_session": "claude-cluster"
+        "default_session": "ccmux"
     }
 
 
@@ -35,10 +35,10 @@ def test_save_and_load_state(temp_state_dir):
         "sessions": {
             "test-session": {
                 "tmux_session_id": "$0",
-                "worktrees": {}
+                "instances": {}
             }
         },
-        "default_session": "claude-cluster"
+        "default_session": "ccmux"
     }
 
     state.save_state(test_state)
@@ -60,11 +60,11 @@ def test_add_worktree(temp_state_dir):
 
     loaded = state.load_state()
     assert "test-session" in loaded["sessions"]
-    assert "feature-x" in loaded["sessions"]["test-session"]["worktrees"]
+    assert "feature-x" in loaded["sessions"]["test-session"]["instances"]
 
-    wt = loaded["sessions"]["test-session"]["worktrees"]["feature-x"]
+    wt = loaded["sessions"]["test-session"]["instances"]["feature-x"]
     assert wt["repo_path"] == "/repo"
-    assert wt["worktree_path"] == "/repo/.worktrees/feature-x"
+    assert wt["instance_path"] == "/repo/.worktrees/feature-x"
     assert wt["tmux_window_id"] == "@1"
     assert loaded["sessions"]["test-session"]["tmux_session_id"] == "$0"
 
@@ -108,8 +108,8 @@ def test_remove_worktree_keeps_session_with_other_worktrees(temp_state_dir):
 
     loaded = state.load_state()
     assert "test-session" in loaded["sessions"]
-    assert "feature-x" not in loaded["sessions"]["test-session"]["worktrees"]
-    assert "feature-y" in loaded["sessions"]["test-session"]["worktrees"]
+    assert "feature-x" not in loaded["sessions"]["test-session"]["instances"]
+    assert "feature-y" in loaded["sessions"]["test-session"]["instances"]
 
 
 def test_update_tmux_ids(temp_state_dir):
@@ -134,7 +134,7 @@ def test_update_tmux_ids(temp_state_dir):
 
     loaded = state.load_state()
     assert loaded["sessions"]["test-session"]["tmux_session_id"] == "$1"
-    assert loaded["sessions"]["test-session"]["worktrees"]["feature-x"]["tmux_window_id"] == "@2"
+    assert loaded["sessions"]["test-session"]["instances"]["feature-x"]["tmux_window_id"] == "@2"
 
 
 def test_get_session(temp_state_dir):
@@ -148,8 +148,8 @@ def test_get_session(temp_state_dir):
 
     session = state.get_session("test-session")
     assert session is not None
-    assert "worktrees" in session
-    assert "feature-x" in session["worktrees"]
+    assert "instances" in session
+    assert "feature-x" in session["instances"]
 
     # Non-existent session
     assert state.get_session("non-existent") is None
@@ -235,5 +235,5 @@ def test_corrupted_state_file(temp_state_dir):
     result = state.load_state()
     assert result == {
         "sessions": {},
-        "default_session": "claude-cluster"
+        "default_session": "ccmux"
     }

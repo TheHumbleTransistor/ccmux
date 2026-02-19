@@ -44,9 +44,17 @@ class TestTmuxFormatting:
             "tmux", "new-window", "-t", self.session_name, "-n", "Window3"
         ], check=True)
 
-        # Source our config file
+        # Source our config file and override monitor-silence for faster tests
         subprocess.run([
             "tmux", "source-file", str(self.config_path)
+        ], check=True)
+        subprocess.run([
+            "tmux", "set-option", "-t", self.session_name, "monitor-silence", "2"
+        ], check=True)
+
+        # Select Window1 as active
+        subprocess.run([
+            "tmux", "select-window", "-t", f"{self.session_name}:0"
         ], check=True)
 
     def teardown_method(self):
@@ -223,8 +231,8 @@ class TestTmuxFormatting:
 
     def test_silence_flag_no_background(self):
         """Test that silence flag doesn't cause background color changes."""
-        # Wait for silence flag to trigger (5 seconds)
-        time.sleep(6)
+        # Wait for shell init output to finish + monitor-silence interval (2s)
+        time.sleep(8)
 
         flags = self.get_window_flags(0)
         assert flags is not None
@@ -252,14 +260,14 @@ class TestTmuxFormatting:
 
     def test_silence_priority_over_activity(self):
         """Test that silence takes priority over activity in formatting."""
-        # Generate activity first
+        # Generate activity in window 1 (non-current, sets activity flag)
         subprocess.run([
             "tmux", "send-keys", "-t", f"{self.session_name}:1",
             "echo 'activity'", "Enter"
         ], check=True)
 
-        # Wait for silence flag to also trigger
-        time.sleep(6)
+        # Wait for shell init output to finish + monitor-silence interval (2s)
+        time.sleep(8)
 
         flags = self.get_window_flags(1)
         assert flags is not None
