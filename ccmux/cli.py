@@ -707,21 +707,21 @@ def _resolve_session_name(
 # --- Session Sub-App Commands ---
 
 @session_app.default
-def session_info(*, common: CommonConfig) -> None:
-    """Show current session info, or help if none active."""
-    detected = detect_current_ccmux_session()
-    if not detected:
-        console.print("[yellow]Not currently in a ccmux session.[/yellow]")
-        console.print("\nUsage: ccmux session <command>")
-        console.print("\nCommands:")
-        console.print("  list       List all sessions")
-        console.print("  rename     Rename a session")
-        console.print("  activate   Activate all instances in a session")
-        console.print("  remove     Remove an entire session")
-        console.print("  attach     Attach to a tmux session")
+def session_info(name: Optional[str] = None, *, common: CommonConfig) -> None:
+    """Show session info.
+
+    Args:
+        name: Session name to show info for (defaults to the --session value)
+        common: Common parameters (session, etc.)
+    """
+    session_name = name if name else common.session
+    session_data = state.get_session(session_name)
+
+    if not session_data:
+        console.print(f"[yellow]Session '{session_name}' not found.[/yellow]")
+        console.print(f"\nCreate one with: [cyan]ccmux new --session {session_name}[/cyan]")
         return
 
-    session_name, session_data = detected
     instances = session_data.get("instances", session_data.get("worktrees", {}))
     total = len(instances)
 
@@ -993,15 +993,8 @@ def instance_info(*, common: CommonConfig) -> None:
     """Show current instance info, or help if none active."""
     detected = detect_current_ccmux_instance()
     if not detected:
-        console.print("[yellow]Not currently in a ccmux instance.[/yellow]")
-        console.print("\nUsage: ccmux instance <command>")
-        console.print("\nCommands:")
-        console.print("  new          Create a new instance")
-        console.print("  list         List instances")
-        console.print("  rename       Rename an instance")
-        console.print("  activate     Activate instance(s)")
-        console.print("  deactivate   Deactivate instance(s)")
-        console.print("  remove       Remove instance(s)")
+        console.print("[yellow]Not currently in a ccmux instance.[/yellow]\n")
+        app.help_print(["instance"])
         return
 
     session_name, instance_name, instance_data = detected
