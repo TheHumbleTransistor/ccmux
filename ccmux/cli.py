@@ -776,35 +776,27 @@ def session_rename(
     old: Optional[str] = None,
     new: Optional[str] = None,
     *,
-    current: Annotated[bool, Parameter(name=["-c", "--current"], negative="")] = False,
     common: CommonConfig,
 ) -> None:
     """Rename a ccmux session.
 
     Args:
-        old: Current session name (or new name when using -c)
+        old: Current session name (or new name if only 1 arg given)
         new: New session name
-        current: Use the current tmux session as the source
         common: Common parameters (session, etc.)
     """
-    if current:
-        # -c mode: old arg is actually the new name
-        if old is None:
-            console.print("[red]Error:[/red] Must provide new name with -c flag.", style="bold")
-            console.print("Usage: ccmux session rename -c <new-name>")
-            sys.exit(1)
-        if new is not None:
-            console.print("[red]Error:[/red] With -c, only provide the new name (old is detected from tmux).", style="bold")
-            sys.exit(1)
+    if old is not None and new is not None:
+        # Explicit: ccmux session rename <old> <new>
+        old_name = old
+        new_name = sanitize_name(new)
+    elif old is not None and new is None:
+        # 1 arg: rename current session to <new-name>
         new_name = sanitize_name(old)
         detected = detect_current_ccmux_session()
         if not detected:
             console.print("[red]Error:[/red] Not in a ccmux session.", style="bold")
             sys.exit(1)
         old_name = detected[0]
-    elif old is not None and new is not None:
-        old_name = old
-        new_name = sanitize_name(new)
     elif old is None and new is None:
         # Interactive mode
         all_state = state.load_state()
@@ -825,7 +817,7 @@ def session_rename(
         raw_new = Prompt.ask("New name")
         new_name = sanitize_name(raw_new)
     else:
-        console.print("[red]Error:[/red] Provide both old and new names, use -c, or run without args for interactive mode.", style="bold")
+        console.print("[red]Error:[/red] Provide both old and new names, one name to rename current session, or run without args for interactive mode.", style="bold")
         sys.exit(1)
 
     if old_name == new_name:
@@ -999,6 +991,15 @@ def instance_info(*, common: CommonConfig) -> None:
 
     session_name, instance_name, instance_data = detected
     _show_instance_info(session_name, instance_name, instance_data)
+
+
+@instance_app.command(name="which")
+def instance_which() -> None:
+    """Print the current instance name (useful for scripting)."""
+    detected = detect_current_ccmux_instance()
+    if detected is None:
+        sys.exit(1)
+    print(detected[1])
 
 
 @instance_app.command(name="new")
@@ -1296,27 +1297,27 @@ def instance_rename(
     old: Optional[str] = None,
     new: Optional[str] = None,
     *,
-    current: Annotated[bool, Parameter(name=["-c", "--current"], negative="")] = False,
     common: CommonConfig,
 ) -> None:
     """Rename a ccmux instance.
 
     Args:
-        old: Current instance name (or new name when using -c)
+        old: Current instance name (or new name if only 1 arg given)
         new: New instance name
-        current: Use the current tmux window as the source
         common: Common parameters (session, etc.)
     """
     session = common.session
 
-    if current:
-        if old is None:
-            console.print("[red]Error:[/red] Must provide new name with -c flag.", style="bold")
-            console.print("Usage: ccmux instance rename -c <new-name>")
+    if old is not None and new is not None:
+        # Explicit: ccmux instance rename <old> <new>
+        old_name = old
+        new_name = sanitize_name(new)
+        instance_data = state.get_worktree(session, old_name)
+        if not instance_data:
+            console.print(f"[red]Error:[/red] Instance '{old_name}' not found in session '{session}'.", style="bold")
             sys.exit(1)
-        if new is not None:
-            console.print("[red]Error:[/red] With -c, only provide the new name (old is detected from tmux).", style="bold")
-            sys.exit(1)
+    elif old is not None and new is None:
+        # 1 arg: rename current instance to <new-name>
         new_name = sanitize_name(old)
         detected = detect_current_ccmux_instance()
         if not detected:
@@ -1325,13 +1326,6 @@ def instance_rename(
         session = detected[0]
         old_name = detected[1]
         instance_data = detected[2]
-    elif old is not None and new is not None:
-        old_name = old
-        new_name = sanitize_name(new)
-        instance_data = state.get_worktree(session, old_name)
-        if not instance_data:
-            console.print(f"[red]Error:[/red] Instance '{old_name}' not found in session '{session}'.", style="bold")
-            sys.exit(1)
     elif old is None and new is None:
         # Interactive mode
         instances = state.get_all_worktrees(session)
@@ -1352,7 +1346,7 @@ def instance_rename(
         raw_new = Prompt.ask("New name")
         new_name = sanitize_name(raw_new)
     else:
-        console.print("[red]Error:[/red] Provide both old and new names, use -c, or run without args for interactive mode.", style="bold")
+        console.print("[red]Error:[/red] Provide both old and new names, one name to rename current instance, or run without args for interactive mode.", style="bold")
         sys.exit(1)
 
     if old_name == new_name:
@@ -1735,23 +1729,6 @@ def export_tmux_config(
         console.print(content)
 
 
-@app.command
-def which() -> None:
-    """Show which instance the current tmux window is associated with.
-
-    Run this from within a tmux window to see which ccmux instance you're in.
-    """
-    if "TMUX" not in os.environ:
-        console.print("[red]Error:[/red] Not running inside a tmux window.", style="bold")
-        sys.exit(1)
-
-    detected = detect_current_ccmux_instance()
-    if detected is None:
-        console.print("[yellow]This tmux window is not associated with any ccmux instance.[/yellow]")
-        sys.exit(0)
-
-    session_name, instance_name, instance_data = detected
-    _show_instance_info(session_name, instance_name, instance_data)
 
 
 # --- Meta (parameter injection + alias rewriting) ---
