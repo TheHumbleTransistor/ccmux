@@ -225,6 +225,166 @@ def test_get_all_worktrees(temp_state_dir):
     assert session1_wts[0]["session"] == "session-1"
 
 
+def test_rename_session(temp_state_dir):
+    """Test renaming a session."""
+    state.add_worktree(
+        session_name="old-session",
+        worktree_name="feature-x",
+        repo_path="/repo",
+        worktree_path="/repo/.worktrees/feature-x",
+        tmux_session_id="$0",
+        tmux_window_id="@1",
+    )
+
+    assert state.rename_session("old-session", "new-session")
+
+    loaded = state.load_state()
+    assert "old-session" not in loaded["sessions"]
+    assert "new-session" in loaded["sessions"]
+    assert "feature-x" in loaded["sessions"]["new-session"]["instances"]
+
+
+def test_rename_session_updates_default(temp_state_dir):
+    """Test renaming a session updates default_session if it matched."""
+    state.add_worktree(
+        session_name="ccmux",
+        worktree_name="feature-x",
+        repo_path="/repo",
+        worktree_path="/repo/.worktrees/feature-x",
+    )
+    # Set default_session to the session we're about to rename
+    s = state.load_state()
+    s["default_session"] = "ccmux"
+    state.save_state(s)
+
+    assert state.rename_session("ccmux", "my-project")
+
+    loaded = state.load_state()
+    assert loaded["default_session"] == "my-project"
+
+
+def test_rename_session_conflict(temp_state_dir):
+    """Test renaming a session to a name that already exists fails."""
+    state.add_worktree(
+        session_name="session-a",
+        worktree_name="inst-a",
+        repo_path="/repo",
+        worktree_path="/repo/.worktrees/a",
+    )
+    state.add_worktree(
+        session_name="session-b",
+        worktree_name="inst-b",
+        repo_path="/repo",
+        worktree_path="/repo/.worktrees/b",
+    )
+
+    assert not state.rename_session("session-a", "session-b")
+    # Original should still exist
+    loaded = state.load_state()
+    assert "session-a" in loaded["sessions"]
+    assert "session-b" in loaded["sessions"]
+
+
+def test_rename_session_not_found(temp_state_dir):
+    """Test renaming a non-existent session returns False."""
+    assert not state.rename_session("non-existent", "new-name")
+
+
+def test_rename_instance(temp_state_dir):
+    """Test renaming an instance within a session."""
+    state.add_worktree(
+        session_name="test-session",
+        worktree_name="old-name",
+        repo_path="/repo",
+        worktree_path="/repo/.worktrees/old-name",
+        tmux_window_id="@1",
+    )
+
+    assert state.rename_instance("test-session", "old-name", "new-name")
+
+    loaded = state.load_state()
+    instances = loaded["sessions"]["test-session"]["instances"]
+    assert "old-name" not in instances
+    assert "new-name" in instances
+    assert instances["new-name"]["repo_path"] == "/repo"
+    assert instances["new-name"]["tmux_window_id"] == "@1"
+
+
+def test_rename_instance_conflict(temp_state_dir):
+    """Test renaming an instance to a name that already exists fails."""
+    state.add_worktree(
+        session_name="test-session",
+        worktree_name="inst-a",
+        repo_path="/repo",
+        worktree_path="/repo/.worktrees/a",
+    )
+    state.add_worktree(
+        session_name="test-session",
+        worktree_name="inst-b",
+        repo_path="/repo",
+        worktree_path="/repo/.worktrees/b",
+    )
+
+    assert not state.rename_instance("test-session", "inst-a", "inst-b")
+
+
+def test_rename_instance_not_found(temp_state_dir):
+    """Test renaming a non-existent instance returns False."""
+    state.add_worktree(
+        session_name="test-session",
+        worktree_name="inst-a",
+        repo_path="/repo",
+        worktree_path="/repo/.worktrees/a",
+    )
+
+    assert not state.rename_instance("test-session", "non-existent", "new-name")
+    assert not state.rename_instance("non-existent-session", "inst-a", "new-name")
+
+
+def test_remove_session(temp_state_dir):
+    """Test removing an entire session."""
+    state.add_worktree(
+        session_name="doomed-session",
+        worktree_name="inst-a",
+        repo_path="/repo",
+        worktree_path="/repo/.worktrees/a",
+    )
+    state.add_worktree(
+        session_name="doomed-session",
+        worktree_name="inst-b",
+        repo_path="/repo",
+        worktree_path="/repo/.worktrees/b",
+    )
+
+    assert state.remove_session("doomed-session")
+
+    loaded = state.load_state()
+    assert "doomed-session" not in loaded["sessions"]
+
+
+def test_remove_session_resets_default(temp_state_dir):
+    """Test removing the default session resets default_session."""
+    state.add_worktree(
+        session_name="my-default",
+        worktree_name="inst",
+        repo_path="/repo",
+        worktree_path="/repo/.worktrees/inst",
+    )
+    s = state.load_state()
+    s["default_session"] = "my-default"
+    state.save_state(s)
+
+    assert state.remove_session("my-default")
+
+    loaded = state.load_state()
+    assert loaded["default_session"] == "ccmux"
+
+
+def test_remove_session_not_found(temp_state_dir):
+    """Test removing a non-existent session returns False."""
+    assert not state.remove_session("non-existent")
+
+
 def test_corrupted_state_file(temp_state_dir):
     """Test loading a corrupted state file."""
     # Write invalid JSON

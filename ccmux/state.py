@@ -185,6 +185,77 @@ def get_all_worktrees(session_name: Optional[str] = None) -> list[dict]:
     return instances_list
 
 
+def rename_session(old_name: str, new_name: str) -> bool:
+    """Rename a session in state.
+
+    Returns True if the rename succeeded, False if old_name not found
+    or new_name already exists.
+    """
+    s = load_state()
+
+    if old_name not in s["sessions"]:
+        return False
+    if new_name in s["sessions"]:
+        return False
+
+    # Move session data under new key
+    s["sessions"][new_name] = s["sessions"].pop(old_name)
+
+    # Update default_session if it matched the old name
+    if s.get("default_session") == old_name:
+        s["default_session"] = new_name
+
+    save_state(s)
+    return True
+
+
+def rename_instance(session_name: str, old_name: str, new_name: str) -> bool:
+    """Rename an instance within a session.
+
+    Returns True if the rename succeeded, False if the instance was not found
+    or new_name already exists in the session.
+    """
+    s = load_state()
+
+    if session_name not in s["sessions"]:
+        return False
+
+    session_data = s["sessions"][session_name]
+    # Handle both old "worktrees" and new "instances" keys
+    instances_key = "instances" if "instances" in session_data else "worktrees"
+    instances = session_data[instances_key]
+
+    if old_name not in instances:
+        return False
+    if new_name in instances:
+        return False
+
+    instances[new_name] = instances.pop(old_name)
+
+    save_state(s)
+    return True
+
+
+def remove_session(session_name: str) -> bool:
+    """Remove an entire session and all its instances from state.
+
+    Returns True if the session was found and removed, False otherwise.
+    """
+    s = load_state()
+
+    if session_name not in s["sessions"]:
+        return False
+
+    del s["sessions"][session_name]
+
+    # Clear default_session if it matched the removed session
+    if s.get("default_session") == session_name:
+        s["default_session"] = DEFAULT_SESSION
+
+    save_state(s)
+    return True
+
+
 def find_main_repo_instance(repo_path: str, session_name: Optional[str] = None) -> Optional[dict]:
     """Find if a main repo instance already exists for the given repository.
 
