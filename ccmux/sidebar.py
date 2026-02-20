@@ -119,6 +119,7 @@ class SidebarApp(App):
         self._initial_session = session
         self._demo = demo
         self._last_snapshot: list[tuple] = []
+        self._refresh_lock = asyncio.Lock()
 
     def compose(self) -> ComposeResult:
         yield Static("CCMUX", id="title")
@@ -269,39 +270,39 @@ class SidebarApp(App):
 
     async def _refresh_instances(self) -> None:
         """Refresh the instance list, updating in place when possible."""
-        self.session_name = self._initial_session
-        header = self.query_one("#header", Static)
-        header.update(f"Session: {self.session_name}")
+        async with self._refresh_lock:
+            # Gather data outside batch_update — no UI side-effects during async I/O
+            snapshot = await self._build_snapshot()
+            if snapshot == self._last_snapshot:
+                return
 
-        snapshot = await self._build_snapshot()
-        if snapshot == self._last_snapshot:
-            return
+            old_names = [entry[1] for entry in self._last_snapshot]
+            new_names = [entry[1] for entry in snapshot]
+            self._last_snapshot = snapshot
 
-        old_names = [entry[1] for entry in self._last_snapshot]
-        new_names = [entry[1] for entry in snapshot]
-        self._last_snapshot = snapshot
+            if old_names == new_names and old_names:
+                # Same structure — sync-only UI mutations inside batch
+                with self.batch_update():
+                    repos: dict[str, list[tuple]] = {}
+                    for entry in snapshot:
+                        repos.setdefault(entry[0], []).append(entry)
+                    for repo_entries in repos.values():
+                        for i, (_, inst_name, inst_type, is_active, is_current, alert_state) in enumerate(
+                            repo_entries
+                        ):
+                            row = self.query_one(f"#inst-{inst_name}", InstanceRow)
+                            row.update_state(
+                                is_active, is_current, is_last=(i == len(repo_entries) - 1),
+                                alert_state=alert_state,
+                            )
+                return
 
-        if old_names == new_names and old_names:
-            # Same structure — update existing rows in place
-            repos: dict[str, list[tuple]] = {}
-            for entry in snapshot:
-                repos.setdefault(entry[0], []).append(entry)
-            for repo_entries in repos.values():
-                for i, (_, inst_name, inst_type, is_active, is_current, alert_state) in enumerate(
-                    repo_entries
-                ):
-                    row = self.query_one(f"#inst-{inst_name}", InstanceRow)
-                    row.update_state(
-                        is_active, is_current, is_last=(i == len(repo_entries) - 1),
-                        alert_state=alert_state,
-                    )
-            return
-
-        # Structure changed — full rebuild
-        container = self.query_one("#instance-list", Vertical)
-        await container.remove_children()
-        await container.mount(*self._build_widgets(snapshot))
-        self.refresh(layout=True)
+            # Structure changed — full rebuild
+            container = self.query_one("#instance-list", Vertical)
+            new_widgets = self._build_widgets(snapshot)
+            with self.batch_update():
+                await container.remove_children()
+                await container.mount(*new_widgets)
 
     async def _poll_refresh(self) -> None:
         """Periodic refresh via polling."""
@@ -315,26 +316,13 @@ class SidebarApp(App):
         except (ValueError, OSError):
             pass
 
-    def _reload_css_from_disk(self) -> None:
-        """Re-read and apply CSS from disk."""
-        css_paths = self.css_path
-        if css_paths:
-            stylesheet = self.stylesheet.copy()
-            stylesheet.read_all(css_paths)
-            stylesheet.parse()
-            self.stylesheet = stylesheet
-            self.stylesheet.update(self)
-            for screen in self.screen_stack:
-                self.stylesheet.update(screen)
-
     def on_resize(self, event) -> None:
         """Force full layout recalculation on terminal resize."""
         self.refresh(layout=True)
 
     def _on_sigusr1(self) -> None:
         """Handle SIGUSR1 signal by scheduling a refresh."""
-        self._reload_css_from_disk()
-        self.run_worker(self._refresh_instances())
+        self.run_worker(self._refresh_instances(), exclusive=True, group="refresh")
 
 
 # --- PID file management ---

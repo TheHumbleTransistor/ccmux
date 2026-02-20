@@ -384,6 +384,10 @@ def _create_bash_window(session: str, instance_name: str, working_dir: str) -> N
                 ["tmux", "set-option", "-t", bash, "mouse", "on"],
                 check=True, capture_output=True,
             )
+            subprocess.run(
+                ["tmux", "set-option", "-t", bash, "window-style", "bg=#1e1e1e"],
+                check=True, capture_output=True,
+            )
         else:
             if instance_name in get_tmux_windows(bash):
                 return
