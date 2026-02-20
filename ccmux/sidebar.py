@@ -5,7 +5,6 @@ Launch: python -m ccmux.sidebar <session> <window_id>
 
 import asyncio
 import atexit
-import json
 import os
 import signal
 import subprocess
@@ -13,7 +12,7 @@ import sys
 from pathlib import Path
 
 from textual.app import App, ComposeResult
-from textual.containers import VerticalScroll
+from textual.containers import Vertical
 from textual.reactive import reactive
 from textual.widgets import Static
 
@@ -27,22 +26,6 @@ POLL_INTERVAL = 5.0
 
 class InstanceRow(Static):
     """A clickable row representing a single instance."""
-
-    DEFAULT_CSS = """
-    InstanceRow {
-        height: 1;
-        padding: 0 1;
-        color: #9e9e9e;
-    }
-    InstanceRow:hover {
-        background: #3a3a3a;
-    }
-    InstanceRow.current {
-        background: #3a3a3a;
-        color: #bcbcbc;
-        text-style: bold;
-    }
-    """
 
     def __init__(
         self,
@@ -66,81 +49,57 @@ class InstanceRow(Static):
         if is_current:
             self.add_class("current")
 
+    def update_state(self, is_active: bool, is_current: bool, is_last: bool) -> None:
+        """Update this row's display without remounting."""
+        self.is_active = is_active
+        self.is_current = is_current
+        connector = "\u2514\u2500\u2500" if is_last else "\u251c\u2500\u2500"
+        indicator = "\u25cf" if is_active else "\u25cb"
+        self.update(f"{connector} {indicator} {self.instance_name:<10} {self.instance_type}")
+        if is_current:
+            self.add_class("current")
+        else:
+            self.remove_class("current")
+
     def on_click(self) -> None:
         """Switch to this instance's tmux window."""
-        try:
-            subprocess.run(
-                ["tmux", "select-window", "-t", f"{self.session}:{self.instance_name}"],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError:
-            pass
+        # try:
+        #     subprocess.run(
+        #         ["tmux", "select-window", "-t", f"{self.session}:{self.instance_name}"],
+        #         check=True,
+        #         capture_output=True,
+        #     )
+        # except subprocess.CalledProcessError:
+        #     pass
 
 
 class RepoHeader(Static):
     """Non-clickable section header for a repository group."""
 
-    DEFAULT_CSS = """
-    RepoHeader {
-        height: 1;
-        padding: 0 1;
-        color: #d7af5f;
-        text-style: bold;
-    }
-    """
-
 
 class SidebarApp(App):
     """Textual sidebar showing ccmux instances for click-to-switch navigation."""
 
-    CSS = """
-    Screen {
-        background: #262626;
-        layout: vertical;
-    }
-    #title {
-        height: 1;
-        padding: 0 1;
-        color: #d7af5f;
-        background: #262626;
-        text-style: bold;
-    }
-    #header {
-        height: 1;
-        padding: 0 1;
-        background: #262626;
-        color: #bcbcbc;
-    }
-    #spacer {
-        height: 1;
-        background: #262626;
-    }
-    #instance-list {
-        background: #262626;
-    }
-    #instance-list:focus {
-        border: none;
-    }
-    """
+    CSS_PATH = "sidebar.tcss"
 
     session_name: reactive[str] = reactive("")
 
-    def __init__(self, session: str, window_id: str) -> None:
+    def __init__(self, session: str, window_id: str, demo: bool = False) -> None:
         super().__init__()
         self._initial_session = session
         self._window_id = window_id
+        self._demo = demo
         self._last_snapshot: list[tuple] = []
 
     def compose(self) -> ComposeResult:
         yield Static("CCMUX", id="title")
         yield Static(f"Session: {self._initial_session}", id="header")
         yield Static("", id="spacer")
-        yield VerticalScroll(id="instance-list")
+        yield Vertical(id="instance-list")
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self.session_name = self._resolve_session_name()
-        self._refresh_instances()
+        await self._refresh_instances()
         self.set_interval(POLL_INTERVAL, self._poll_refresh)
         self._register_signal_handler()
 
@@ -181,8 +140,21 @@ class SidebarApp(App):
         except subprocess.CalledProcessError:
             return set()
 
+    def _build_demo_snapshot(self) -> list[tuple]:
+        """Build dummy snapshot data for testing outside tmux."""
+        return [
+            ("my-project", "main", "main", True, True),
+            ("my-project", "feat-auth", "worktree", True, False),
+            ("my-project", "fix-bug", "worktree", False, False),
+            ("other-repo", "default", "main", True, False),
+            ("other-repo", "refactor", "worktree", False, False),
+        ]
+
     def _build_snapshot(self) -> list[tuple]:
         """Build a comparable snapshot of the current instance state."""
+        if self._demo:
+            return self._build_demo_snapshot()
+
         instances = state.get_all_worktrees(self.session_name)
         if not instances:
             return []
@@ -199,34 +171,20 @@ class SidebarApp(App):
             snapshot.append((repo_name, inst["name"], inst_type, is_active, is_current))
         return snapshot
 
-    def _refresh_instances(self) -> None:
-        """Rebuild the instance list from state + tmux, only if data changed."""
-        self.session_name = self._resolve_session_name()
-        header = self.query_one("#header", Static)
-        header.update(f"Session: {self.session_name}")
-
-        snapshot = self._build_snapshot()
-        if snapshot == self._last_snapshot:
-            return
-        self._last_snapshot = snapshot
-
-        container = self.query_one("#instance-list", VerticalScroll)
-        container.remove_children()
-
+    def _build_widgets(self, snapshot: list[tuple]) -> list[Static]:
+        """Build widget list from a snapshot."""
         if not snapshot:
-            container.mount(Static("  No instances", classes="dim"))
-            return
+            return [Static("  No instances", classes="dim")]
 
-        # Group by repo
         repos: dict[str, list[tuple]] = {}
         for entry in snapshot:
-            repo_name = entry[0]
-            repos.setdefault(repo_name, []).append(entry)
+            repos.setdefault(entry[0], []).append(entry)
 
+        widgets: list[Static] = []
         for repo_name, repo_entries in repos.items():
-            container.mount(RepoHeader(f"{repo_name}/"))
+            widgets.append(RepoHeader(f"{repo_name}/", id=f"repo-{repo_name}"))
             for i, (_, inst_name, inst_type, is_active, is_current) in enumerate(repo_entries):
-                container.mount(
+                widgets.append(
                     InstanceRow(
                         instance_name=inst_name,
                         instance_type=inst_type,
@@ -234,12 +192,45 @@ class SidebarApp(App):
                         is_current=is_current,
                         is_last=(i == len(repo_entries) - 1),
                         session=self.session_name,
+                        id=f"inst-{inst_name}",
                     )
                 )
+        return widgets
+
+    async def _refresh_instances(self) -> None:
+        """Refresh the instance list, updating in place when possible."""
+        self.session_name = self._resolve_session_name()
+        header = self.query_one("#header", Static)
+        header.update(f"Session: {self.session_name}")
+
+        snapshot = self._build_snapshot()
+        if snapshot == self._last_snapshot:
+            return
+
+        old_names = [entry[1] for entry in self._last_snapshot]
+        new_names = [entry[1] for entry in snapshot]
+        self._last_snapshot = snapshot
+
+        if old_names == new_names and old_names:
+            # Same structure — update existing rows in place
+            repos: dict[str, list[tuple]] = {}
+            for entry in snapshot:
+                repos.setdefault(entry[0], []).append(entry)
+            for repo_entries in repos.values():
+                for i, (_, inst_name, inst_type, is_active, is_current) in enumerate(repo_entries):
+                    row = self.query_one(f"#inst-{inst_name}", InstanceRow)
+                    row.update_state(is_active, is_current, is_last=(i == len(repo_entries) - 1))
+            return
+
+        # Structure changed — full rebuild with batch_update
+        container = self.query_one("#instance-list", Vertical)
+        with self.app.batch_update():
+            await container.remove_children()
+            await container.mount(*self._build_widgets(snapshot))
 
     async def _poll_refresh(self) -> None:
         """Periodic refresh via polling."""
-        self._refresh_instances()
+        await self._refresh_instances()
 
     def _register_signal_handler(self) -> None:
         """Register SIGUSR1 handler for instant refresh on state changes."""
@@ -249,9 +240,22 @@ class SidebarApp(App):
         except (ValueError, OSError):
             pass
 
+    def _reload_css_from_disk(self) -> None:
+        """Re-read and apply CSS from disk."""
+        css_paths = self.css_path
+        if css_paths:
+            stylesheet = self.stylesheet.copy()
+            stylesheet.read_all(css_paths)
+            stylesheet.parse()
+            self.stylesheet = stylesheet
+            self.stylesheet.update(self)
+            for screen in self.screen_stack:
+                self.stylesheet.update(screen)
+
     def _on_sigusr1(self) -> None:
         """Handle SIGUSR1 signal by scheduling a refresh."""
-        self.call_from_thread(self._refresh_instances)
+        self._reload_css_from_disk()
+        self.run_worker(self._refresh_instances())
 
 
 # --- PID file management ---
@@ -280,8 +284,14 @@ def remove_pid_file(session: str) -> None:
 
 def main() -> None:
     """Entry point: python -m ccmux.sidebar <session> <window_id>"""
+    if "--demo" in sys.argv:
+        app = SidebarApp(session="demo", window_id="@0", demo=True)
+        app.run()
+        return
+
     if len(sys.argv) < 3:
         print("Usage: python -m ccmux.sidebar <session> <window_id>", file=sys.stderr)
+        print("       python -m ccmux.sidebar --demo", file=sys.stderr)
         sys.exit(1)
 
     session = sys.argv[1]

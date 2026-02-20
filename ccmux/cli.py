@@ -310,7 +310,7 @@ def _add_sidebar_pane(session: str, window_id: str) -> None:
 
     python_exe = sys.executable or "python3"
     sidebar_cmd = (
-        f"{python_exe} -m ccmux.sidebar {session} {window_id} ; "
+        f"COLORTERM=truecolor {python_exe} -m ccmux.sidebar {session} {window_id} ; "
         f"echo 'Sidebar exited. Press enter to close.' ; read"
     )
 
@@ -1147,6 +1147,7 @@ def instance_new(
     name: Optional[str] = None,
     *,
     worktree: Annotated[bool, Parameter(name=["-w", "--worktree"])] = False,
+    yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
     common: CommonConfig,
 ) -> None:
     """Create a new Claude Code instance in main repo or as a git worktree.
@@ -1154,6 +1155,7 @@ def instance_new(
     Args:
         name: Name for the instance (generates random animal name if not provided)
         worktree: Create instance as a git worktree instead of using main repo
+        yes: Skip confirmation prompts (auto-create as worktree if main exists)
         common: Common parameters (session, etc.)
     """
     session = common.session
@@ -1180,7 +1182,7 @@ def instance_new(
         existing_main = state.find_main_repo_instance(str(repo_root), session)
         if existing_main:
             console.print(f"[yellow]Warning:[/yellow] Main repository already has an instance: '{existing_main['name']}'")
-            if Confirm.ask("Create a worktree instead?", default=True):
+            if yes or Confirm.ask("Create a worktree instead?", default=True):
                 create_as_worktree = True
             else:
                 console.print("[red]Aborted:[/red] Main repository already in use.")
