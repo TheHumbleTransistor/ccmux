@@ -83,15 +83,23 @@ def generate_animal_name() -> str:
 
 
 def get_repo_root() -> Optional[Path]:
-    """Get the git repository root directory."""
+    """Get the main git repository root directory.
+
+    Uses --git-common-dir to resolve through linked worktrees to the main repo,
+    so this always returns the root of the main worktree even when called from
+    inside a linked worktree.
+    """
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
             capture_output=True,
             text=True,
             check=True,
         )
-        return Path(result.stdout.strip())
+        # --git-common-dir returns the .git directory of the main repo
+        # (e.g., /repo/.git), so the parent is the repo root
+        git_common_dir = Path(result.stdout.strip())
+        return git_common_dir.parent
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
@@ -289,11 +297,19 @@ def _inner_session_name(session: str) -> str:
 
 
 def _ccmux_session_from_tmux(tmux_session_name: str) -> str:
-    """Strip '-inner' or '-bash' suffix to get the ccmux session name."""
+    """Strip '-inner' or '-bash' suffix to get the ccmux session name.
+
+    Also reverses the _outer_session_name() mapping:
+      'ccmux' -> DEFAULT_SESSION, 'ccmux-foo' -> 'foo'.
+    """
     if tmux_session_name.endswith("-inner"):
         return tmux_session_name[:-6]
     if tmux_session_name.endswith("-bash"):
         return tmux_session_name[:-5]
+    if tmux_session_name == "ccmux":
+        return DEFAULT_SESSION
+    if tmux_session_name.startswith("ccmux-"):
+        return tmux_session_name[6:]
     return tmux_session_name
 
 

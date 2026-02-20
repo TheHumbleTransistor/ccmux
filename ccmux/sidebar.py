@@ -127,24 +127,10 @@ class SidebarApp(App):
         yield Vertical(id="instance-list")
 
     async def on_mount(self) -> None:
-        self.session_name = await self._resolve_session_name()
+        self.session_name = self._initial_session
         await self._refresh_instances()
         self.set_interval(POLL_INTERVAL, self._poll_refresh)
         self._register_signal_handler()
-
-    async def _resolve_session_name(self) -> str:
-        """Get the current tmux session name (survives renames)."""
-        try:
-            result = await asyncio.to_thread(
-                subprocess.run,
-                ["tmux", "display-message", "-p", "#S"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            return result.stdout.strip()
-        except subprocess.CalledProcessError:
-            return self._initial_session
 
     async def _get_current_window_id(self) -> str | None:
         """Query the inner tmux session for the currently active window ID."""
@@ -283,7 +269,7 @@ class SidebarApp(App):
 
     async def _refresh_instances(self) -> None:
         """Refresh the instance list, updating in place when possible."""
-        self.session_name = await self._resolve_session_name()
+        self.session_name = self._initial_session
         header = self.query_one("#header", Static)
         header.update(f"Session: {self.session_name}")
 
