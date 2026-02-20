@@ -46,9 +46,6 @@ app = cyclopts.App(
 session_app = cyclopts.App(name="session", help="Manage ccmux sessions")
 app.command(session_app)
 
-sidebar_app = cyclopts.App(name="sidebar", help="Manage sidebar panes")
-app.command(sidebar_app)
-
 # Top-level aliases: rewrite these to sub-app paths in meta
 TOP_LEVEL_ALIASES = {
     "attach": ("session", "attach"),
@@ -1987,21 +1984,19 @@ def export_tmux_config(
         console.print(content)
 
 
-# --- Sidebar Sub-App Commands ---
-
-@sidebar_app.command(name="reload")
-def sidebar_reload(
+@app.command(name="refresh")
+def refresh(
     *,
     common: CommonConfig,
 ) -> None:
-    """Reload the session sidebar (kill and restart).
+    """Reload the sidebar by killing and restarting the outer session.
 
     Args:
         common: Common parameters (session, etc.)
     """
     session = common.session
     _reload_session_sidebar(session)
-    console.print("[green]\u2713[/green] Sidebar reloaded.")
+    console.print("[green]\u2713[/green] Sidebar refreshed.")
 
 
 # --- Meta (parameter injection + alias rewriting) ---

@@ -25,7 +25,7 @@ POLL_INTERVAL = 5.0
 
 
 class InstanceRow(Static):
-    """A clickable row representing a single instance."""
+    """A clickable 3-row block: tree pad above, content, tree pad below."""
 
     def __init__(
         self,
@@ -41,21 +41,25 @@ class InstanceRow(Static):
         self.instance_type = instance_type
         self.is_active = is_active
         self.is_current = is_current
+        self.is_last = is_last
         self.session = session
-        connector = "\u2514\u2500\u2500" if is_last else "\u251c\u2500\u2500"
-        indicator = "\u25cf" if is_active else "\u25cb"
-        label = f"{connector} {indicator} {instance_name:<10} {instance_type}"
-        super().__init__(label, **kwargs)
+        super().__init__(self._render_label(), **kwargs)
         if is_current:
             self.add_class("current")
+
+    def _render_label(self) -> str:
+        connector = "\u2514\u2500\u2500" if self.is_last else "\u251c\u2500\u2500"
+        indicator = "\u25cf" if self.is_active else "\u25cb"
+        content = f"{connector} {indicator} {self.instance_name:<10} {self.instance_type}"
+        bottom = "" if self.is_last else "\u2502"
+        return f"\u2502\n{content}\n{bottom}"
 
     def update_state(self, is_active: bool, is_current: bool, is_last: bool) -> None:
         """Update this row's display without remounting."""
         self.is_active = is_active
         self.is_current = is_current
-        connector = "\u2514\u2500\u2500" if is_last else "\u251c\u2500\u2500"
-        indicator = "\u25cf" if is_active else "\u25cb"
-        self.update(f"{connector} {indicator} {self.instance_name:<10} {self.instance_type}")
+        self.is_last = is_last
+        self.update(self._render_label())
         if is_current:
             self.add_class("current")
         else:

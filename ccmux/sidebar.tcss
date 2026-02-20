@@ -29,7 +29,7 @@ Screen {
 }
 
 InstanceRow {
-    height: 1;
+    height: auto;
     padding: 0 1;
     color: #9e9e9e;
 }
