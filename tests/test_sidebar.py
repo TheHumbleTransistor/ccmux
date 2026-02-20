@@ -184,58 +184,150 @@ class TestPidTracking:
         remove_pid_file("non-existent-session")
 
 
-class TestAddSidebarPane:
-    """Tests for _add_sidebar_pane CLI helper."""
+class TestInnerSessionName:
+    """Tests for _inner_session_name and _ccmux_session_from_tmux."""
 
+    def test_inner_session_name(self):
+        """_inner_session_name appends '-inner' suffix."""
+        from ccmux.cli import _inner_session_name
+
+        assert _inner_session_name("default") == "default-inner"
+        assert _inner_session_name("my-session") == "my-session-inner"
+
+    def test_ccmux_session_from_tmux_strips_inner(self):
+        """_ccmux_session_from_tmux strips '-inner' suffix."""
+        from ccmux.cli import _ccmux_session_from_tmux
+
+        assert _ccmux_session_from_tmux("default-inner") == "default"
+        assert _ccmux_session_from_tmux("my-session-inner") == "my-session"
+
+    def test_ccmux_session_from_tmux_no_suffix(self):
+        """_ccmux_session_from_tmux returns name unchanged if no '-inner' suffix."""
+        from ccmux.cli import _ccmux_session_from_tmux
+
+        assert _ccmux_session_from_tmux("default") == "default"
+        assert _ccmux_session_from_tmux("my-session") == "my-session"
+
+
+class TestIsInstanceWindowActive:
+    """Tests for is_instance_window_active wrapper."""
+
+    @mock.patch("ccmux.cli.is_window_active_in_session")
+    def test_delegates_to_inner_session(self, mock_active):
+        """is_instance_window_active checks the inner session."""
+        from ccmux.cli import is_instance_window_active
+
+        mock_active.return_value = True
+        result = is_instance_window_active("my-session", "@5")
+
+        assert result is True
+        mock_active.assert_called_once_with("my-session-inner", "@5")
+
+    @mock.patch("ccmux.cli.is_window_active_in_session")
+    def test_returns_false_for_none_window(self, mock_active):
+        """is_instance_window_active handles None window ID."""
+        from ccmux.cli import is_instance_window_active
+
+        mock_active.return_value = False
+        result = is_instance_window_active("my-session", None)
+
+        assert result is False
+        mock_active.assert_called_once_with("my-session-inner", None)
+
+
+class TestCreateOuterSession:
+    """Tests for _create_outer_session CLI helper."""
+
+    @mock.patch("ccmux.cli._install_inner_hook")
+    @mock.patch("ccmux.cli.apply_outer_session_config")
     @mock.patch("ccmux.cli.subprocess.run")
-    def test_splits_window_with_correct_args(self, mock_run):
-        """_add_sidebar_pane issues correct tmux split-window command."""
-        from ccmux.cli import _add_sidebar_pane
+    @mock.patch("ccmux.cli.tmux_session_exists")
+    def test_creates_outer_with_sidebar_and_inner_client(
+        self, mock_exists, mock_run, mock_outer_config, mock_hook
+    ):
+        """_create_outer_session creates outer session with sidebar + inner client pane."""
+        from ccmux.cli import _create_outer_session
 
-        # First call: display-message to get width
-        width_result = mock.MagicMock()
-        width_result.stdout = "200\n"
+        # outer doesn't exist, inner does exist
+        mock_exists.side_effect = lambda s: s == "my-session-inner"
 
-        # Second call: split-window
-        split_result = mock.MagicMock()
+        _create_outer_session("my-session")
 
-        mock_run.side_effect = [width_result, split_result]
+        # Should have called new-session and split-window
+        assert mock_run.call_count == 2
 
-        _add_sidebar_pane("my-session", "@5")
-
-        # Verify width check
-        width_call = mock_run.call_args_list[0]
-        assert "display-message" in width_call[0][0]
-        assert "@5" in width_call[0][0]
-
-        # Verify split-window call
-        split_call = mock_run.call_args_list[1]
-        split_args = split_call[0][0]
-        assert "split-window" in split_args
-        assert "-bh" in split_args
-        assert "-l" in split_args
-        assert "25%" in split_args
-        assert "-d" in split_args
-        assert "@5" in split_args
-        # Verify sidebar command is included
-        sidebar_cmd = split_args[-1]
+        # Verify new-session creates the sidebar
+        new_session_call = mock_run.call_args_list[0][0][0]
+        assert "new-session" in new_session_call
+        assert "my-session" in new_session_call
+        sidebar_cmd = new_session_call[-1]
         assert "ccmux.sidebar" in sidebar_cmd
-        assert "my-session" in sidebar_cmd
-        assert "@5" in sidebar_cmd
+
+        # Verify split-window creates the inner client
+        split_call = mock_run.call_args_list[1][0][0]
+        assert "split-window" in split_call
+        assert "75%" in split_call
+        inner_cmd = split_call[-1]
+        assert "tmux attach -t =my-session-inner" in inner_cmd
+
+        mock_outer_config.assert_called_once_with("my-session")
+        mock_hook.assert_called_once_with("my-session")
 
     @mock.patch("ccmux.cli.subprocess.run")
-    def test_skips_narrow_terminal(self, mock_run):
-        """_add_sidebar_pane skips if terminal is too narrow."""
-        from ccmux.cli import _add_sidebar_pane
+    @mock.patch("ccmux.cli.tmux_session_exists")
+    def test_skips_if_outer_exists(self, mock_exists, mock_run):
+        """_create_outer_session skips if outer session already exists."""
+        from ccmux.cli import _create_outer_session
 
-        width_result = mock.MagicMock()
-        width_result.stdout = "50\n"
-        mock_run.return_value = width_result
+        # Both exist
+        mock_exists.return_value = True
 
-        _add_sidebar_pane("my-session", "@5")
+        _create_outer_session("my-session")
+        mock_run.assert_not_called()
 
-        # Only the width check should have been called
-        assert mock_run.call_count == 1
+    @mock.patch("ccmux.cli.subprocess.run")
+    @mock.patch("ccmux.cli.tmux_session_exists")
+    def test_skips_if_inner_missing(self, mock_exists, mock_run):
+        """_create_outer_session skips if inner session doesn't exist."""
+        from ccmux.cli import _create_outer_session
+
+        # Neither exists
+        mock_exists.return_value = False
+
+        _create_outer_session("my-session")
+        mock_run.assert_not_called()
+
+
+class TestKillOuterSession:
+    """Tests for _kill_outer_session CLI helper."""
+
+    @mock.patch("ccmux.cli.subprocess.run")
+    @mock.patch("ccmux.cli.tmux_session_exists", return_value=True)
+    def test_kills_outer_session(self, mock_exists, mock_run):
+        """_kill_outer_session kills the outer tmux session."""
+        from ccmux.cli import _kill_outer_session
+
+        assert _kill_outer_session("my-session") is True
+
+        kill_call = mock_run.call_args[0][0]
+        assert "kill-session" in kill_call
+        assert "=my-session" in kill_call
+
+    @mock.patch("ccmux.cli.tmux_session_exists", return_value=False)
+    def test_returns_false_when_no_session(self, mock_exists):
+        """_kill_outer_session returns False when session doesn't exist."""
+        from ccmux.cli import _kill_outer_session
+
+        assert _kill_outer_session("my-session") is False
+
+    @mock.patch("ccmux.cli.subprocess.run")
+    @mock.patch("ccmux.cli.tmux_session_exists", return_value=True)
+    def test_returns_false_on_kill_failure(self, mock_exists, mock_run):
+        """_kill_outer_session returns False if kill-session fails."""
+        from ccmux.cli import _kill_outer_session
+
+        mock_run.side_effect = subprocess.CalledProcessError(1, "tmux")
+        assert _kill_outer_session("my-session") is False
 
 
 class TestNotifySidebars:
@@ -284,58 +376,107 @@ class TestNotifySidebars:
         _notify_sidebars("non-existent-session")
 
 
-class TestKillSidebarPane:
-    """Tests for _kill_sidebar_pane CLI helper."""
+class TestReloadSessionSidebar:
+    """Tests for _reload_session_sidebar CLI helper."""
+
+    @mock.patch("ccmux.cli._ensure_outer_session")
+    @mock.patch("ccmux.cli._kill_outer_session")
+    def test_kills_then_ensures(self, mock_kill, mock_ensure):
+        """_reload_session_sidebar kills outer and recreates."""
+        from ccmux.cli import _reload_session_sidebar
+
+        _reload_session_sidebar("my-session")
+
+        mock_kill.assert_called_once_with("my-session")
+        mock_ensure.assert_called_once_with("my-session")
+
+
+class TestInstallInnerHook:
+    """Tests for _install_inner_hook and _uninstall_inner_hook."""
 
     @mock.patch("ccmux.cli.subprocess.run")
-    def test_kills_pane_running_sidebar(self, mock_run):
-        """_kill_sidebar_pane finds and kills the sidebar pane."""
-        from ccmux.cli import _kill_sidebar_pane
+    def test_creates_hook_script(self, mock_run, tmp_path, monkeypatch):
+        """_install_inner_hook writes a SIGUSR1-only script and registers the hook."""
+        import ccmux.cli as cli_mod
+        monkeypatch.setattr(cli_mod, "HOOKS_DIR", tmp_path)
 
-        list_result = mock.MagicMock()
-        list_result.stdout = "%1 python -m ccmux.sidebar my-session @5\n%2 claude\n"
+        from ccmux.cli import _install_inner_hook
+        _install_inner_hook("test-session")
 
-        kill_result = mock.MagicMock()
+        script = tmp_path / "notify-sidebar-test-session.sh"
+        assert script.exists()
+        content = script.read_text()
+        # Should contain SIGUSR1 notification
+        assert "sidebar_pids/test-session" in content
+        assert "kill -USR1" in content
+        # Should NOT contain join-pane (that was the old approach)
+        assert "join-pane" not in content
 
-        mock_run.side_effect = [list_result, kill_result]
-
-        assert _kill_sidebar_pane("@5") is True
-
-        kill_call = mock_run.call_args_list[1]
-        assert "kill-pane" in kill_call[0][0]
-        assert "%1" in kill_call[0][0]
-
-    @mock.patch("ccmux.cli.subprocess.run")
-    def test_returns_false_when_no_sidebar(self, mock_run):
-        """_kill_sidebar_pane returns False when no sidebar pane exists."""
-        from ccmux.cli import _kill_sidebar_pane
-
-        list_result = mock.MagicMock()
-        list_result.stdout = "%2 claude\n"
-        mock_run.return_value = list_result
-
-        assert _kill_sidebar_pane("@5") is False
+        # Verify tmux set-hook was called on the INNER session
+        call_args = mock_run.call_args[0][0]
+        assert "set-hook" in call_args
+        assert "test-session-inner" in call_args
+        assert "after-select-window" in call_args
 
     @mock.patch("ccmux.cli.subprocess.run")
-    def test_handles_list_panes_failure(self, mock_run):
-        """_kill_sidebar_pane returns False if list-panes fails."""
-        from ccmux.cli import _kill_sidebar_pane
+    def test_uninstall_removes_hook(self, mock_run, tmp_path, monkeypatch):
+        """_uninstall_inner_hook removes the hook and script."""
+        import ccmux.cli as cli_mod
+        monkeypatch.setattr(cli_mod, "HOOKS_DIR", tmp_path)
 
-        mock_run.side_effect = subprocess.CalledProcessError(1, "tmux")
+        # Create a script to remove
+        script = tmp_path / "notify-sidebar-test-session.sh"
+        script.write_text("#!/bin/sh\n")
 
-        assert _kill_sidebar_pane("@5") is False
+        from ccmux.cli import _uninstall_inner_hook
+        _uninstall_inner_hook("test-session")
+
+        assert not script.exists()
+        call_args = mock_run.call_args[0][0]
+        assert "set-hook" in call_args
+        assert "-u" in call_args
+        # Should target the inner session
+        assert "test-session-inner" in call_args
 
 
-class TestReloadSidebarPane:
-    """Tests for _reload_sidebar_pane CLI helper."""
+class TestEnsureOuterSession:
+    """Tests for _ensure_outer_session CLI helper."""
 
-    @mock.patch("ccmux.cli._add_sidebar_pane")
-    @mock.patch("ccmux.cli._kill_sidebar_pane")
-    def test_kills_then_adds(self, mock_kill, mock_add):
-        """_reload_sidebar_pane kills existing and adds new sidebar."""
-        from ccmux.cli import _reload_sidebar_pane
+    @mock.patch("ccmux.cli._install_inner_hook")
+    @mock.patch("ccmux.cli.tmux_session_exists")
+    def test_installs_hook_if_outer_exists(self, mock_exists, mock_hook):
+        """_ensure_outer_session just installs hook if both sessions exist."""
+        from ccmux.cli import _ensure_outer_session
 
-        _reload_sidebar_pane("my-session", "@5")
+        # Both inner and outer exist
+        mock_exists.return_value = True
 
-        mock_kill.assert_called_once_with("@5")
-        mock_add.assert_called_once_with("my-session", "@5")
+        _ensure_outer_session("my-session")
+
+        mock_hook.assert_called_once_with("my-session")
+
+    @mock.patch("ccmux.cli._create_outer_session")
+    @mock.patch("ccmux.cli.tmux_session_exists")
+    def test_creates_outer_if_missing(self, mock_exists, mock_create):
+        """_ensure_outer_session creates outer session if inner exists but outer doesn't."""
+        from ccmux.cli import _ensure_outer_session
+
+        # Inner exists, outer doesn't
+        mock_exists.side_effect = lambda s: s == "my-session-inner"
+
+        _ensure_outer_session("my-session")
+
+        mock_create.assert_called_once_with("my-session")
+
+    @mock.patch("ccmux.cli._create_outer_session")
+    @mock.patch("ccmux.cli.tmux_session_exists")
+    def test_returns_early_if_inner_missing(self, mock_exists, mock_create):
+        """_ensure_outer_session returns early if inner session doesn't exist."""
+        from ccmux.cli import _ensure_outer_session
+
+        # Neither exists
+        mock_exists.return_value = False
+
+        _ensure_outer_session("my-session")
+
+        mock_create.assert_not_called()

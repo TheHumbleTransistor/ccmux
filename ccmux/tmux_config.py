@@ -50,6 +50,28 @@ def apply_tmux_config(session_name: str) -> bool:
         return False
 
 
+def apply_outer_session_config(session_name: str) -> bool:
+    """Apply minimal outer config via per-session set-option.
+
+    The outer session has no status bar, mouse on, C-Space prefix, and no escape delay.
+    """
+    options = [
+        ("status", "off"),
+        ("mouse", "on"),
+        ("prefix", "C-Space"),
+        ("escape-time", "0"),
+    ]
+    try:
+        for key, val in options:
+            subprocess.run(
+                ["tmux", "set-option", "-t", session_name, key, val],
+                check=True, capture_output=True,
+            )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
 def get_tmux_config_content() -> str:
     """Get the tmux configuration as a string.
 

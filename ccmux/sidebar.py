@@ -1,6 +1,6 @@
 """Textual TUI sidebar for ccmux - shows instances with click-to-switch navigation.
 
-Launch: python -m ccmux.sidebar <session> <window_id>
+Launch: python -m ccmux.sidebar <session>
 """
 
 import asyncio
@@ -62,15 +62,15 @@ class InstanceRow(Static):
             self.remove_class("current")
 
     def on_click(self) -> None:
-        """Switch to this instance's tmux window."""
-        # try:
-        #     subprocess.run(
-        #         ["tmux", "select-window", "-t", f"{self.session}:{self.instance_name}"],
-        #         check=True,
-        #         capture_output=True,
-        #     )
-        # except subprocess.CalledProcessError:
-        #     pass
+        """Switch to this instance's tmux window in the inner session."""
+        try:
+            subprocess.run(
+                ["tmux", "select-window", "-t", f"{self.session}-inner:{self.instance_name}"],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
 
 
 class RepoHeader(Static):
@@ -84,10 +84,9 @@ class SidebarApp(App):
 
     session_name: reactive[str] = reactive("")
 
-    def __init__(self, session: str, window_id: str, demo: bool = False) -> None:
+    def __init__(self, session: str, demo: bool = False) -> None:
         super().__init__()
         self._initial_session = session
-        self._window_id = window_id
         self._demo = demo
         self._last_snapshot: list[tuple] = []
 
@@ -98,15 +97,16 @@ class SidebarApp(App):
         yield Vertical(id="instance-list")
 
     async def on_mount(self) -> None:
-        self.session_name = self._resolve_session_name()
+        self.session_name = await self._resolve_session_name()
         await self._refresh_instances()
         self.set_interval(POLL_INTERVAL, self._poll_refresh)
         self._register_signal_handler()
 
-    def _resolve_session_name(self) -> str:
+    async def _resolve_session_name(self) -> str:
         """Get the current tmux session name (survives renames)."""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["tmux", "display-message", "-p", "#S"],
                 capture_output=True,
                 text=True,
@@ -116,22 +116,42 @@ class SidebarApp(App):
         except subprocess.CalledProcessError:
             return self._initial_session
 
-    def _get_current_instance_name(self) -> str | None:
-        """Resolve the current instance name from our window_id."""
+    async def _get_current_window_id(self) -> str | None:
+        """Query the inner tmux session for the currently active window ID."""
+        inner = f"{self.session_name}-inner"
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                ["tmux", "display-message", "-t", inner, "-p", "#{window_id}"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return result.stdout.strip() or None
+        except subprocess.CalledProcessError:
+            return None
+
+    async def _get_current_instance_name(self) -> str | None:
+        """Resolve the current instance name by dynamically finding our window."""
+        window_id = await self._get_current_window_id()
+        if not window_id:
+            return None
         session_data = state.get_session(self.session_name)
         if not session_data:
             return None
         instances = session_data.get("instances", session_data.get("worktrees", {}))
         for inst_name, inst_data in instances.items():
-            if inst_data.get("tmux_window_id") == self._window_id:
+            if inst_data.get("tmux_window_id") == window_id:
                 return inst_name
         return None
 
-    def _get_tmux_window_ids(self) -> set[str]:
-        """Get active window IDs from tmux for this session."""
+    async def _get_tmux_window_ids(self) -> set[str]:
+        """Get active window IDs from the inner tmux session."""
+        inner = f"{self.session_name}-inner"
         try:
-            result = subprocess.run(
-                ["tmux", "list-windows", "-t", self.session_name, "-F", "#{window_id}"],
+            result = await asyncio.to_thread(
+                subprocess.run,
+                ["tmux", "list-windows", "-t", inner, "-F", "#{window_id}"],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -150,7 +170,7 @@ class SidebarApp(App):
             ("other-repo", "refactor", "worktree", False, False),
         ]
 
-    def _build_snapshot(self) -> list[tuple]:
+    async def _build_snapshot(self) -> list[tuple]:
         """Build a comparable snapshot of the current instance state."""
         if self._demo:
             return self._build_demo_snapshot()
@@ -159,8 +179,8 @@ class SidebarApp(App):
         if not instances:
             return []
 
-        active_window_ids = self._get_tmux_window_ids()
-        current_instance = self._get_current_instance_name()
+        active_window_ids = await self._get_tmux_window_ids()
+        current_instance = await self._get_current_instance_name()
 
         snapshot = []
         for inst in instances:
@@ -199,11 +219,11 @@ class SidebarApp(App):
 
     async def _refresh_instances(self) -> None:
         """Refresh the instance list, updating in place when possible."""
-        self.session_name = self._resolve_session_name()
+        self.session_name = await self._resolve_session_name()
         header = self.query_one("#header", Static)
         header.update(f"Session: {self.session_name}")
 
-        snapshot = self._build_snapshot()
+        snapshot = await self._build_snapshot()
         if snapshot == self._last_snapshot:
             return
 
@@ -222,11 +242,11 @@ class SidebarApp(App):
                     row.update_state(is_active, is_current, is_last=(i == len(repo_entries) - 1))
             return
 
-        # Structure changed — full rebuild with batch_update
+        # Structure changed — full rebuild
         container = self.query_one("#instance-list", Vertical)
-        with self.app.batch_update():
-            await container.remove_children()
-            await container.mount(*self._build_widgets(snapshot))
+        await container.remove_children()
+        await container.mount(*self._build_widgets(snapshot))
+        self.refresh(layout=True)
 
     async def _poll_refresh(self) -> None:
         """Periodic refresh via polling."""
@@ -283,25 +303,24 @@ def remove_pid_file(session: str) -> None:
 
 
 def main() -> None:
-    """Entry point: python -m ccmux.sidebar <session> <window_id>"""
+    """Entry point: python -m ccmux.sidebar <session>"""
     if "--demo" in sys.argv:
-        app = SidebarApp(session="demo", window_id="@0", demo=True)
+        app = SidebarApp(session="demo", demo=True)
         app.run()
         return
 
-    if len(sys.argv) < 3:
-        print("Usage: python -m ccmux.sidebar <session> <window_id>", file=sys.stderr)
+    if len(sys.argv) < 2:
+        print("Usage: python -m ccmux.sidebar <session>", file=sys.stderr)
         print("       python -m ccmux.sidebar --demo", file=sys.stderr)
         sys.exit(1)
 
     session = sys.argv[1]
-    window_id = sys.argv[2]
 
     # PID tracking
     write_pid_file(session)
     atexit.register(remove_pid_file, session)
 
-    app = SidebarApp(session=session, window_id=window_id)
+    app = SidebarApp(session=session)
     app.run()
 
 
