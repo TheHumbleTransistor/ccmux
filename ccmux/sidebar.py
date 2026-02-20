@@ -15,7 +15,7 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
 from textual.reactive import reactive
-from textual.widgets import Label, Static
+from textual.widgets import Static
 
 from ccmux import state
 
@@ -23,13 +23,6 @@ from ccmux import state
 SIDEBAR_PIDS_DIR = Path.home() / ".ccmux" / "sidebar_pids"
 
 POLL_INTERVAL = 5.0
-
-LOGO_ART = """\
- ▄▄▄▄▄▄▄  ▄▄▄▄▄▄▄ ▄▄▄      ▄▄▄ ▄▄▄  ▄▄▄ ▄▄▄   ▄▄▄
-███▀▀▀▀▀ ███▀▀▀▀▀ ████▄  ▄████ ███  ███ ████▄████
-███      ███      ███▀████▀███ ███  ███  ▀█████▀
-███      ███      ███  ▀▀  ███ ███▄▄███ ▄███████▄
-▀███████ ▀███████ ███      ███ ▀██████▀ ███▀ ▀███"""
 
 
 class InstanceRow(Static):
@@ -57,6 +50,7 @@ class InstanceRow(Static):
         instance_type: str,
         is_active: bool,
         is_current: bool,
+        is_last: bool,
         session: str,
         **kwargs,
     ) -> None:
@@ -65,8 +59,9 @@ class InstanceRow(Static):
         self.is_active = is_active
         self.is_current = is_current
         self.session = session
+        connector = "\u2514\u2500\u2500" if is_last else "\u251c\u2500\u2500"
         indicator = "\u25cf" if is_active else "\u25cb"
-        label = f"  {indicator} {instance_name:<14} {instance_type}"
+        label = f"{connector} {indicator} {instance_name:<10} {instance_type}"
         super().__init__(label, **kwargs)
         if is_current:
             self.add_class("current")
@@ -96,48 +91,30 @@ class RepoHeader(Static):
     """
 
 
-class LogoHeader(Static):
-    """ASCII art logo displayed at the top of the sidebar."""
-
-    DEFAULT_CSS = """
-    LogoHeader {
-        color: #d7af5f;
-        padding: 0;
-        height: 5;
-    }
-    """
-
-    def __init__(self, art: str, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self._art = art
-
-    def render(self) -> str:
-        width = self.size.width
-        lines = self._art.split("\n")
-        centered = [line.center(width)[:width] for line in lines]
-        return "\n".join(centered)
-
-
 class SidebarApp(App):
     """Textual sidebar showing ccmux instances for click-to-switch navigation."""
 
     CSS = """
     Screen {
         background: #262626;
+        layout: vertical;
     }
-    #logo {
-        height: 5;
-        padding: 0;
+    #title {
+        height: 1;
+        padding: 0 1;
         color: #d7af5f;
         background: #262626;
+        text-style: bold;
     }
     #header {
         height: 1;
         padding: 0 1;
         background: #262626;
         color: #bcbcbc;
-        text-style: bold;
-        text-align: center;
+    }
+    #spacer {
+        height: 1;
+        background: #262626;
     }
     #instance-list {
         background: #262626;
@@ -153,10 +130,12 @@ class SidebarApp(App):
         super().__init__()
         self._initial_session = session
         self._window_id = window_id
+        self._last_snapshot: list[tuple] = []
 
     def compose(self) -> ComposeResult:
-        yield LogoHeader(LOGO_ART, id="logo")
-        yield Label(f"Session: {self._initial_session}", id="header")
+        yield Static("CCMUX", id="title")
+        yield Static(f"Session: {self._initial_session}", id="header")
+        yield Static("", id="spacer")
         yield VerticalScroll(id="instance-list")
 
     def on_mount(self) -> None:
@@ -202,41 +181,58 @@ class SidebarApp(App):
         except subprocess.CalledProcessError:
             return set()
 
-    def _refresh_instances(self) -> None:
-        """Rebuild the instance list from state + tmux."""
-        self.session_name = self._resolve_session_name()
-        header = self.query_one("#header", Label)
-        header.update(f"Session: {self.session_name}")
-
-        container = self.query_one("#instance-list", VerticalScroll)
-        container.remove_children()
-
+    def _build_snapshot(self) -> list[tuple]:
+        """Build a comparable snapshot of the current instance state."""
         instances = state.get_all_worktrees(self.session_name)
         if not instances:
-            container.mount(Static("  No instances", classes="dim"))
-            return
+            return []
 
         active_window_ids = self._get_tmux_window_ids()
         current_instance = self._get_current_instance_name()
 
-        # Group by repo
-        repos: dict[str, list[dict]] = {}
+        snapshot = []
         for inst in instances:
             repo_name = Path(inst["repo_path"]).name
-            repos.setdefault(repo_name, []).append(inst)
+            is_active = inst.get("tmux_window_id") in active_window_ids
+            is_current = inst["name"] == current_instance
+            inst_type = "worktree" if inst.get("is_worktree", True) else "main"
+            snapshot.append((repo_name, inst["name"], inst_type, is_active, is_current))
+        return snapshot
 
-        for repo_name, repo_instances in repos.items():
+    def _refresh_instances(self) -> None:
+        """Rebuild the instance list from state + tmux, only if data changed."""
+        self.session_name = self._resolve_session_name()
+        header = self.query_one("#header", Static)
+        header.update(f"Session: {self.session_name}")
+
+        snapshot = self._build_snapshot()
+        if snapshot == self._last_snapshot:
+            return
+        self._last_snapshot = snapshot
+
+        container = self.query_one("#instance-list", VerticalScroll)
+        container.remove_children()
+
+        if not snapshot:
+            container.mount(Static("  No instances", classes="dim"))
+            return
+
+        # Group by repo
+        repos: dict[str, list[tuple]] = {}
+        for entry in snapshot:
+            repo_name = entry[0]
+            repos.setdefault(repo_name, []).append(entry)
+
+        for repo_name, repo_entries in repos.items():
             container.mount(RepoHeader(f"{repo_name}/"))
-            for inst in repo_instances:
-                is_active = inst.get("tmux_window_id") in active_window_ids
-                is_current = inst["name"] == current_instance
-                inst_type = "worktree" if inst.get("is_worktree", True) else "main"
+            for i, (_, inst_name, inst_type, is_active, is_current) in enumerate(repo_entries):
                 container.mount(
                     InstanceRow(
-                        instance_name=inst["name"],
+                        instance_name=inst_name,
                         instance_type=inst_type,
                         is_active=is_active,
                         is_current=is_current,
+                        is_last=(i == len(repo_entries) - 1),
                         session=self.session_name,
                     )
                 )
