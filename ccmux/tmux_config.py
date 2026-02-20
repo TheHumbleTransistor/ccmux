@@ -54,7 +54,15 @@ def apply_outer_session_config(session_name: str) -> bool:
     """Apply minimal outer config via per-session set-option.
 
     The outer session has no status bar, mouse on, C-Space prefix, and no escape delay.
+    Sets the terminal title to a friendly display name derived from the session name.
     """
+    if session_name == "ccmux":
+        display_title = "CCMUX"
+    elif session_name.startswith("ccmux-"):
+        display_title = f"CCMUX: {session_name[6:]}"
+    else:
+        display_title = session_name
+
     options = [
         ("status", "off"),
         ("mouse", "on"),
@@ -62,6 +70,8 @@ def apply_outer_session_config(session_name: str) -> bool:
         ("escape-time", "0"),
         ("pane-border-style", "fg=#333333"),
         ("pane-active-border-style", "fg=#d7af5f"),
+        ("set-titles", "on"),
+        ("set-titles-string", display_title),
     ]
     try:
         for key, val in options:
