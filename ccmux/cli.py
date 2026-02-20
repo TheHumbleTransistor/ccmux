@@ -289,9 +289,11 @@ def _inner_session_name(session: str) -> str:
 
 
 def _ccmux_session_from_tmux(tmux_session_name: str) -> str:
-    """Strip '-inner' suffix to get the ccmux session name."""
+    """Strip '-inner' or '-bash' suffix to get the ccmux session name."""
     if tmux_session_name.endswith("-inner"):
         return tmux_session_name[:-6]
+    if tmux_session_name.endswith("-bash"):
+        return tmux_session_name[:-5]
     return tmux_session_name
 
 
@@ -671,6 +673,35 @@ def detect_current_ccmux_instance() -> Optional[tuple[str, str, dict]]:
         return None
 
     return state.find_worktree_by_tmux_ids(tmux_session_id, tmux_window_id)
+
+
+def detect_current_ccmux_instance_any() -> Optional[tuple[str, str, dict]]:
+    """Detect the current ccmux instance from inner or bash session.
+
+    First tries the inner-session detection (detect_current_ccmux_instance).
+    Falls back to bash-session detection: uses the tmux session name
+    (e.g. 'default-bash') and window name (= instance name) to look up
+    the instance in state.
+
+    Returns (session_name, instance_name, instance_data) or None.
+    """
+    result = detect_current_ccmux_instance()
+    if result:
+        return result
+
+    tmux_session = get_current_tmux_session()
+    if not tmux_session or not tmux_session.endswith("-bash"):
+        return None
+
+    ccmux_session = _ccmux_session_from_tmux(tmux_session)
+    window_name = get_current_tmux_window()
+    if not window_name:
+        return None
+
+    instance_data = state.get_worktree(ccmux_session, window_name)
+    if instance_data:
+        return (ccmux_session, window_name, instance_data)
+    return None
 
 
 # --- Internal Helpers ---
@@ -1944,17 +1975,33 @@ def instance_remove(
     *,
     common: CommonConfig,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
+    all_instances: Annotated[bool, Parameter(name=["--all"], negative="")] = False,
 ) -> None:
     """Remove instance(s) permanently (deactivates and deletes worktree).
 
-    If no name is provided, removes all instances in the session.
+    If no name is provided, auto-detects the current instance.
+    Use --all to remove all instances in the session.
 
     Args:
-        name: Instance name to remove (omit to remove all)
+        name: Instance name to remove (auto-detects if omitted)
         common: Common parameters (session, etc.)
         yes: Skip confirmation prompt (default: False)
+        all_instances: Remove all instances in the session
     """
     session = common.session
+
+    # Auto-detect instance when no name given and --all not set
+    if name is None and not all_instances:
+        detected = detect_current_ccmux_instance_any()
+        if detected:
+            session, name = detected[0], detected[1]
+        else:
+            console.print("[red]Error:[/red] No instance name provided and could not auto-detect.", style="bold")
+            console.print("  Run from within a ccmux instance, or specify a name:")
+            console.print("    [cyan]ccmux remove <name>[/cyan]")
+            console.print("  To remove all instances:")
+            console.print("    [cyan]ccmux remove --all[/cyan]")
+            sys.exit(1)
 
     worktrees = state.get_all_worktrees(session)
 
