@@ -5,10 +5,12 @@ Launch: python -m ccmux.sidebar <session>
 
 import asyncio
 import atexit
+import logging
 import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from textual.app import App, ComposeResult
@@ -22,6 +24,24 @@ from ccmux import state
 SIDEBAR_PIDS_DIR = Path.home() / ".ccmux" / "sidebar_pids"
 
 POLL_INTERVAL = 5.0
+DEMO_POLL_INTERVAL = 1.0
+
+# --- Diagnostic logging ---
+_LOG_DIR = Path.home() / ".ccmux"
+_LOG_FILE = _LOG_DIR / "sidebar_debug.log"
+
+
+def _setup_logger() -> logging.Logger:
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("ccmux.sidebar")
+    logger.setLevel(logging.DEBUG)
+    handler = logging.FileHandler(_LOG_FILE, mode="a")
+    handler.setFormatter(logging.Formatter("%(asctime)s.%(msecs)03d %(message)s", datefmt="%H:%M:%S"))
+    logger.addHandler(handler)
+    return logger
+
+
+log = _setup_logger()
 
 
 class InstanceRow(Static):
@@ -118,6 +138,7 @@ class SidebarApp(App):
         super().__init__()
         self._initial_session = session
         self._demo = demo
+        self._demo_tick = 0
         self._last_snapshot: list[tuple] = []
         self._refresh_lock = asyncio.Lock()
 
@@ -129,8 +150,9 @@ class SidebarApp(App):
 
     async def on_mount(self) -> None:
         self.session_name = self._initial_session
-        await self._refresh_instances()
-        self.set_interval(POLL_INTERVAL, self._poll_refresh)
+        await self._refresh_instances(caller="mount")
+        interval = DEMO_POLL_INTERVAL if self._demo else POLL_INTERVAL
+        self.set_interval(interval, self._poll_refresh)
         self._register_signal_handler()
 
     async def _get_current_window_id(self) -> str | None:
@@ -165,7 +187,7 @@ class SidebarApp(App):
     async def _get_tmux_window_flags(self) -> dict[str, dict[str, bool]]:
         """Get window IDs and their bell/activity/silence flags from inner session."""
         inner = f"{self.session_name}-inner"
-        fmt = "#{window_id} #{@ccmux_bell} #{window_activity_flag} #{window_silence_flag}"
+        fmt = "#{window_id}|#{@ccmux_bell}|#{window_activity_flag}|#{window_silence_flag}"
         try:
             result = await asyncio.to_thread(
                 subprocess.run,
@@ -178,7 +200,7 @@ class SidebarApp(App):
             for line in result.stdout.strip().split("\n"):
                 if not line:
                     continue
-                parts = line.split()
+                parts = line.split("|")
                 if len(parts) >= 4:
                     wid = parts[0]
                     flags[wid] = {
@@ -191,14 +213,29 @@ class SidebarApp(App):
             return {}
 
     def _build_demo_snapshot(self) -> list[tuple]:
-        """Build dummy snapshot data for testing outside tmux."""
-        return [
-            ("my-project", "main", "main", True, True, None),
-            ("my-project", "feat-auth", "worktree", True, False, "bell"),
-            ("my-project", "fix-bug", "worktree", False, False, None),
-            ("other-repo", "default", "main", True, False, "activity"),
+        """Build varying snapshot data to exercise refresh/rebuild paths."""
+        tick = self._demo_tick
+        self._demo_tick += 1
+
+        # Cycle current instance among three instances
+        current_idx = tick % 3
+        # Cycle alert states: None → bell → activity → None
+        alert_cycle = [None, "bell", "activity", None]
+        alert_for = lambda offset: alert_cycle[(tick + offset) % len(alert_cycle)]
+
+        base = [
+            ("my-project", "main", "main", True, current_idx == 0, alert_for(0)),
+            ("my-project", "feat-auth", "worktree", True, current_idx == 1, alert_for(1)),
+            ("my-project", "fix-bug", "worktree", False, current_idx == 2, alert_for(2)),
+            ("other-repo", "default", "main", True, False, alert_for(3)),
             ("other-repo", "refactor", "worktree", False, False, None),
         ]
+
+        # Every 8th tick, add an extra instance (tests full rebuild path)
+        if (tick // 4) % 2 == 1:
+            base.append(("other-repo", "hotfix", "worktree", True, False, "bell"))
+
+        return base
 
     @staticmethod
     def _resolve_alert_state(flags: dict[str, bool] | None) -> str | None:
@@ -268,12 +305,15 @@ class SidebarApp(App):
                 )
         return widgets
 
-    async def _refresh_instances(self) -> None:
+    async def _refresh_instances(self, caller: str = "unknown") -> None:
         """Refresh the instance list, updating in place when possible."""
         async with self._refresh_lock:
-            # Gather data outside batch_update — no UI side-effects during async I/O
+            t0 = time.monotonic()
+            log.debug("refresh START caller=%s", caller)
+
             snapshot = await self._build_snapshot()
             if snapshot == self._last_snapshot:
+                log.debug("refresh SHORT-CIRCUIT (no change) %.1fms", (time.monotonic() - t0) * 1000)
                 return
 
             old_names = [entry[1] for entry in self._last_snapshot]
@@ -281,7 +321,8 @@ class SidebarApp(App):
             self._last_snapshot = snapshot
 
             if old_names == new_names and old_names:
-                # Same structure — sync-only UI mutations inside batch
+                log.debug("refresh SAME-STRUCTURE update")
+                t1 = time.monotonic()
                 with self.batch_update():
                     repos: dict[str, list[tuple]] = {}
                     for entry in snapshot:
@@ -295,18 +336,25 @@ class SidebarApp(App):
                                 is_active, is_current, is_last=(i == len(repo_entries) - 1),
                                 alert_state=alert_state,
                             )
+                log.debug("refresh SAME-STRUCTURE done batch=%.1fms total=%.1fms",
+                          (time.monotonic() - t1) * 1000, (time.monotonic() - t0) * 1000)
                 return
 
             # Structure changed — full rebuild
+            log.debug("refresh FULL-REBUILD old=%s new=%s", old_names, new_names)
             container = self.query_one("#instance-list", Vertical)
             new_widgets = self._build_widgets(snapshot)
+            t1 = time.monotonic()
             with self.batch_update():
                 await container.remove_children()
                 await container.mount(*new_widgets)
+            log.debug("refresh FULL-REBUILD done mount=%.1fms total=%.1fms",
+                      (time.monotonic() - t1) * 1000, (time.monotonic() - t0) * 1000)
 
     async def _poll_refresh(self) -> None:
         """Periodic refresh via polling."""
-        await self._refresh_instances()
+        log.debug("poll_refresh triggered")
+        await self._refresh_instances(caller="poll")
 
     def _register_signal_handler(self) -> None:
         """Register SIGUSR1 handler for instant refresh on state changes."""
@@ -316,13 +364,12 @@ class SidebarApp(App):
         except (ValueError, OSError):
             pass
 
-    def on_resize(self, event) -> None:
-        """Force full layout recalculation on terminal resize."""
-        self.refresh(layout=True)
-
     def _on_sigusr1(self) -> None:
         """Handle SIGUSR1 signal by scheduling a refresh."""
-        self.run_worker(self._refresh_instances(), exclusive=True, group="refresh")
+        log.debug("SIGUSR1 received")
+        self.run_worker(
+            self._refresh_instances(caller="signal"), exclusive=True, group="refresh",
+        )
 
 
 # --- PID file management ---
