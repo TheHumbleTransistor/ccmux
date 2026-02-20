@@ -11,7 +11,15 @@ from unittest import mock
 import pytest
 
 from ccmux import state
-from ccmux.sidebar import SidebarApp, write_pid_file, remove_pid_file, SIDEBAR_PIDS_DIR
+from ccmux.ui import (
+    SidebarApp,
+    NonInteractiveStatic,
+    InstanceRow,
+    RepoHeader,
+    write_pid_file,
+    remove_pid_file,
+    SIDEBAR_PIDS_DIR,
+)
 
 
 @pytest.fixture
@@ -29,9 +37,9 @@ def temp_pid_dir(monkeypatch):
     """Create a temporary PID directory for testing."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
-        import ccmux.sidebar as sidebar_mod
+        import ccmux.ui.pid as pid_mod
         import ccmux.cli as cli_mod
-        monkeypatch.setattr(sidebar_mod, "SIDEBAR_PIDS_DIR", tmpdir_path)
+        monkeypatch.setattr(pid_mod, "SIDEBAR_PIDS_DIR", tmpdir_path)
         monkeypatch.setattr(cli_mod, "SIDEBAR_PIDS_DIR", tmpdir_path)
         yield tmpdir_path
 
@@ -539,3 +547,85 @@ class TestEnsureOuterSession:
         _ensure_outer_session("my-session")
 
         mock_create.assert_not_called()
+
+
+class TestSidebarRendering:
+    """Headless pilot tests verifying widget integrity after simulated clicks."""
+
+    @pytest.fixture
+    def demo_app(self):
+        """Create a demo SidebarApp for headless testing."""
+        return SidebarApp(session="test-demo", demo=True)
+
+    @pytest.mark.asyncio
+    async def test_widgets_present_after_instance_click(self, demo_app):
+        """Click InstanceRow, verify title/header/instances still mounted and displayed."""
+        async with demo_app.run_test() as pilot:
+            # Verify initial state — title, header, and instances are present
+            app = pilot.app
+            title = app.query_one("#title", NonInteractiveStatic)
+            header = app.query_one("#header", NonInteractiveStatic)
+            assert title.display is True
+            assert header.display is True
+
+            # Find and click an InstanceRow
+            rows = app.query(InstanceRow)
+            assert len(rows) > 0
+            await pilot.click(InstanceRow)
+
+            # After click, all structural widgets must still be mounted and visible
+            title = app.query_one("#title", NonInteractiveStatic)
+            header = app.query_one("#header", NonInteractiveStatic)
+            assert title.display is True
+            assert header.display is True
+            assert len(app.query(InstanceRow)) > 0
+
+    @pytest.mark.asyncio
+    async def test_widgets_present_after_header_click(self, demo_app):
+        """Click title/RepoHeader, verify no corruption."""
+        async with demo_app.run_test() as pilot:
+            app = pilot.app
+
+            # Click the title
+            await pilot.click("#title")
+
+            title = app.query_one("#title", NonInteractiveStatic)
+            header = app.query_one("#header", NonInteractiveStatic)
+            assert title.display is True
+            assert header.display is True
+
+            # Click a RepoHeader
+            repo_headers = app.query(RepoHeader)
+            if len(repo_headers) > 0:
+                await pilot.click(RepoHeader)
+                # Verify everything still intact
+                assert app.query_one("#title", NonInteractiveStatic).display is True
+                assert app.query_one("#header", NonInteractiveStatic).display is True
+                assert len(app.query(InstanceRow)) > 0
+
+    @pytest.mark.asyncio
+    async def test_screen_content_after_multiple_clicks(self, demo_app):
+        """Rapid-fire clicks on all rows, verify content intact."""
+        async with demo_app.run_test() as pilot:
+            app = pilot.app
+
+            # Click title, header, then each InstanceRow
+            await pilot.click("#title")
+            await pilot.click("#header")
+
+            rows = app.query(InstanceRow)
+            for row in rows:
+                await pilot.click(f"#{row.id}")
+
+            # All structural widgets must survive rapid clicking
+            assert app.query_one("#title", NonInteractiveStatic).display is True
+            assert app.query_one("#header", NonInteractiveStatic).display is True
+            assert app.query_one("#instance-list") is not None
+            assert len(app.query(InstanceRow)) > 0
+
+    @pytest.mark.asyncio
+    async def test_allow_select_disabled(self, demo_app):
+        """Confirm ALLOW_SELECT is False on SidebarApp."""
+        assert SidebarApp.ALLOW_SELECT is False
+        async with demo_app.run_test() as pilot:
+            assert pilot.app.ALLOW_SELECT is False

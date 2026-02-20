@@ -320,7 +320,7 @@ def is_instance_window_active(session: str, tmux_window_id: Optional[str]) -> bo
 
 # --- Sidebar Helpers ---
 
-SIDEBAR_PIDS_DIR = Path.home() / ".ccmux" / "sidebar_pids"
+from ccmux.ui.pid import SIDEBAR_PIDS_DIR  # noqa: E402
 HOOKS_DIR = Path.home() / ".ccmux" / "hooks"
 
 
@@ -384,10 +384,6 @@ def _create_bash_window(session: str, instance_name: str, working_dir: str) -> N
                 ["tmux", "set-option", "-t", bash, "mouse", "on"],
                 check=True, capture_output=True,
             )
-            subprocess.run(
-                ["tmux", "set-option", "-t", bash, "window-style", "bg=#1e1e1e"],
-                check=True, capture_output=True,
-            )
         else:
             if instance_name in get_tmux_windows(bash):
                 return
@@ -396,6 +392,12 @@ def _create_bash_window(session: str, instance_name: str, working_dir: str) -> N
                  "-n", instance_name, "-c", working_dir],
                 check=True, capture_output=True,
             )
+        # Set background on the newly created window (window-level option)
+        subprocess.run(
+            ["tmux", "set-option", "-w", "-t", f"{bash}:{instance_name}",
+             "window-style", "bg=#1e1e1e"],
+            check=True, capture_output=True,
+        )
     except subprocess.CalledProcessError:
         pass
 

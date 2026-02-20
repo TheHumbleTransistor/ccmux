@@ -37,6 +37,7 @@ ccmux = "ccmux.cli:main"
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
 ]
 
 [project.urls]
@@ -47,4 +48,5 @@ Repository = "https://github.com/raykamp-tht/claude-code-worktrees"
 include = ["ccmux*"]
 
 [tool.setuptools.package-data]
-ccmux = ["tmux.conf", "sidebar.tcss"]
+ccmux = ["tmux.conf"]
+"ccmux.ui" = ["sidebar.tcss"]
