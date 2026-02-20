@@ -1506,18 +1506,30 @@ def instance_remove(
     name: Optional[str] = None,
     *,
     common: CommonConfig,
-    no_confirm: bool = False,
+    all_instances: Annotated[bool, Parameter(name=["-a", "--all"])] = False,
+    no_confirm: Annotated[bool, Parameter(name=["-y", "--yes", "--no-confirm"])] = False,
 ) -> None:
     """Remove instance(s) permanently (deactivates and deletes worktree).
 
-    If no name is provided, removes all instances in the session.
+    If no name is provided, removes the current instance (detected from tmux).
+    Use --all to remove every instance in the session.
 
     Args:
-        name: Instance name to remove (omit to remove all)
+        name: Instance name to remove (omit to remove current)
         common: Common parameters (session, etc.)
+        all_instances: Remove all instances in the session
         no_confirm: Skip confirmation prompt (default: False)
     """
     session = common.session
+
+    # No name given and not --all: detect current instance
+    if name is None and not all_instances:
+        detected = detect_current_ccmux_instance()
+        if not detected:
+            console.print("[red]Error:[/red] Not in a ccmux instance. Specify a name or use --all.", style="bold")
+            sys.exit(1)
+        session = detected[0]
+        name = detected[1]
 
     worktrees = state.get_all_worktrees(session)
 
@@ -1534,7 +1546,7 @@ def instance_remove(
         else:
             inactive_worktrees.append(wt)
 
-    if name is None:
+    if all_instances:
         console.print(f"\n[bold red]WARNING: This will permanently delete {len(worktrees)} instance(s) in session '{session}'[/bold red]")
         console.print("[red]Any uncommitted changes will be lost![/red]\n")
 
