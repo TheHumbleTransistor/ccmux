@@ -46,6 +46,9 @@ app = cyclopts.App(
 session_app = cyclopts.App(name="session", help="Manage ccmux sessions")
 app.command(session_app)
 
+sidebar_app = cyclopts.App(name="sidebar", help="Manage sidebar panes")
+app.command(sidebar_app)
+
 # Top-level aliases: rewrite these to sub-app paths in meta
 TOP_LEVEL_ALIASES = {
     "attach": ("session", "attach"),
@@ -383,6 +386,42 @@ def _notify_sidebars(session: str) -> None:
                 pass
         except PermissionError:
             pass
+
+
+def _kill_sidebar_pane(window_id: str) -> bool:
+    """Kill the sidebar pane in a tmux window.
+
+    Identifies the sidebar pane by checking pane commands for 'ccmux.sidebar'.
+    Returns True if a sidebar pane was found and killed.
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "list-panes", "-t", window_id, "-F", "#{pane_id} #{pane_start_command}"],
+            capture_output=True, text=True, check=True,
+        )
+    except subprocess.CalledProcessError:
+        return False
+
+    for line in result.stdout.strip().split("\n"):
+        if not line.strip():
+            continue
+        if "ccmux.sidebar" in line:
+            pane_id = line.split()[0]
+            try:
+                subprocess.run(
+                    ["tmux", "kill-pane", "-t", pane_id],
+                    check=True, capture_output=True,
+                )
+                return True
+            except subprocess.CalledProcessError:
+                pass
+    return False
+
+
+def _reload_sidebar_pane(session: str, window_id: str) -> None:
+    """Kill and re-add the sidebar pane for a tmux window."""
+    _kill_sidebar_pane(window_id)
+    _add_sidebar_pane(session, window_id)
 
 
 # --- Detection Helpers ---
@@ -1838,6 +1877,61 @@ def export_tmux_config(
         console.print(content)
 
 
+# --- Sidebar Sub-App Commands ---
+
+@sidebar_app.command(name="reload")
+def sidebar_reload(
+    *,
+    all_windows: Annotated[bool, Parameter(negative="", alias="-a")] = False,
+    common: CommonConfig,
+) -> None:
+    """Reload sidebar pane(s) (kill and restart).
+
+    By default reloads the sidebar for the current tmux window.
+    Use --all to reload sidebars for all windows in the session.
+
+    Args:
+        all_windows: Reload sidebars for all windows in the session
+        common: Common parameters (session, etc.)
+    """
+    if "TMUX" not in os.environ and not all_windows:
+        console.print("[red]Error:[/red] Not inside tmux. Use --all to reload all sidebars.", style="bold")
+        sys.exit(1)
+
+    session = common.session
+
+    if all_windows:
+        instances = state.get_all_worktrees(session)
+        if not instances:
+            console.print(f"[yellow]No instances found in session '{session}'.[/yellow]")
+            return
+
+        reloaded = 0
+        for inst in instances:
+            window_id = inst.get("tmux_window_id")
+            if window_id and is_window_active_in_session(session, window_id):
+                _reload_sidebar_pane(session, window_id)
+                console.print(f"  [green]\u2713[/green] Reloaded sidebar for '{inst['name']}'")
+                reloaded += 1
+
+        if reloaded:
+            console.print(f"\n[bold green]Success![/bold green] Reloaded {reloaded} sidebar(s).")
+        else:
+            console.print("[yellow]No active windows found.[/yellow]")
+        return
+
+    # Single window: detect current window
+    try:
+        window_id = subprocess.run(
+            ["tmux", "display-message", "-p", "#{window_id}"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError:
+        console.print("[red]Error:[/red] Could not determine current tmux window.", style="bold")
+        sys.exit(1)
+
+    _reload_sidebar_pane(session, window_id)
+    console.print("[green]\u2713[/green] Sidebar reloaded.")
 
 
 # --- Meta (parameter injection + alias rewriting) ---

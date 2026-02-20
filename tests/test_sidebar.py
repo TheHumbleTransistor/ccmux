@@ -3,6 +3,7 @@
 import json
 import os
 import signal
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -281,3 +282,60 @@ class TestNotifySidebars:
 
         # Should not raise
         _notify_sidebars("non-existent-session")
+
+
+class TestKillSidebarPane:
+    """Tests for _kill_sidebar_pane CLI helper."""
+
+    @mock.patch("ccmux.cli.subprocess.run")
+    def test_kills_pane_running_sidebar(self, mock_run):
+        """_kill_sidebar_pane finds and kills the sidebar pane."""
+        from ccmux.cli import _kill_sidebar_pane
+
+        list_result = mock.MagicMock()
+        list_result.stdout = "%1 python -m ccmux.sidebar my-session @5\n%2 claude\n"
+
+        kill_result = mock.MagicMock()
+
+        mock_run.side_effect = [list_result, kill_result]
+
+        assert _kill_sidebar_pane("@5") is True
+
+        kill_call = mock_run.call_args_list[1]
+        assert "kill-pane" in kill_call[0][0]
+        assert "%1" in kill_call[0][0]
+
+    @mock.patch("ccmux.cli.subprocess.run")
+    def test_returns_false_when_no_sidebar(self, mock_run):
+        """_kill_sidebar_pane returns False when no sidebar pane exists."""
+        from ccmux.cli import _kill_sidebar_pane
+
+        list_result = mock.MagicMock()
+        list_result.stdout = "%2 claude\n"
+        mock_run.return_value = list_result
+
+        assert _kill_sidebar_pane("@5") is False
+
+    @mock.patch("ccmux.cli.subprocess.run")
+    def test_handles_list_panes_failure(self, mock_run):
+        """_kill_sidebar_pane returns False if list-panes fails."""
+        from ccmux.cli import _kill_sidebar_pane
+
+        mock_run.side_effect = subprocess.CalledProcessError(1, "tmux")
+
+        assert _kill_sidebar_pane("@5") is False
+
+
+class TestReloadSidebarPane:
+    """Tests for _reload_sidebar_pane CLI helper."""
+
+    @mock.patch("ccmux.cli._add_sidebar_pane")
+    @mock.patch("ccmux.cli._kill_sidebar_pane")
+    def test_kills_then_adds(self, mock_kill, mock_add):
+        """_reload_sidebar_pane kills existing and adds new sidebar."""
+        from ccmux.cli import _reload_sidebar_pane
+
+        _reload_sidebar_pane("my-session", "@5")
+
+        mock_kill.assert_called_once_with("@5")
+        mock_add.assert_called_once_with("my-session", "@5")
