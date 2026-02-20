@@ -201,48 +201,29 @@ class SidebarApp(App):
         return widgets
 
     async def _refresh_instances(self, caller: str = "unknown") -> None:
-        """Refresh the instance list, updating in place when possible."""
+        """Refresh the instance list with a full rebuild every time."""
         async with self._refresh_lock:
             log.debug("refresh START caller=%s", caller)
 
             snapshot = await self._build_snapshot()
-            if snapshot == self._last_snapshot:
-                log.debug("refresh SHORT-CIRCUIT (no change)")
-                return
+            # if snapshot == self._last_snapshot:
+            #     log.debug("refresh SHORT-CIRCUIT (no change)")
+            #     return
 
-            old_names = [entry[1] for entry in self._last_snapshot]
-            new_names = [entry[1] for entry in snapshot]
-            self._last_snapshot = snapshot
+            # self._last_snapshot = snapshot
 
-            if old_names == new_names and old_names:
-                log.debug("refresh SAME-STRUCTURE update")
-                with self.batch_update():
-                    repos = _group_by_repo(snapshot)
-                    for repo_entries in repos.values():
-                        for i, (_, inst_name, inst_type, is_active, is_current, alert_state) in enumerate(
-                            repo_entries
-                        ):
-                            row = self.query_one(f"#inst-{inst_name}", InstanceRow)
-                            row.update_state(
-                                is_active, is_current, is_last=(i == len(repo_entries) - 1),
-                                alert_state=alert_state,
-                            )
-                return
-
-            # Structure changed — full rebuild
-            log.debug("refresh FULL-REBUILD old=%s new=%s", old_names, new_names)
+            log.debug("refresh REBUILD caller=%s", caller)
             container = self.query_one("#instance-list", Vertical)
             new_widgets = self._build_widgets(snapshot)
-            with self.batch_update():
-                await container.remove_children()
-                await container.mount(*new_widgets)
+            await container.remove_children()
+            await container.mount(*new_widgets)
 
     async def _poll_refresh(self) -> None:
         """Periodic refresh via polling."""
         await self._refresh_instances(caller="poll")
 
     def _register_signal_handler(self) -> None:
-        """Register SIGUSR1 handler for instant refresh on state changes."""
+    #     """Register SIGUSR1 handler for instant refresh on state changes."""
         try:
             loop = asyncio.get_running_loop()
             loop.add_signal_handler(signal.SIGUSR1, self._on_sigusr1)

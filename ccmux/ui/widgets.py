@@ -59,21 +59,6 @@ class InstanceRow(Static):
             self.remove_class("bell")
             self.remove_class("activity")
 
-    def update_state(
-        self, is_active: bool, is_current: bool, is_last: bool, alert_state: str | None = None
-    ) -> None:
-        """Update this row's display without remounting."""
-        self.is_active = is_active
-        self.is_current = is_current
-        self.is_last = is_last
-        self.alert_state = alert_state
-        self.update(self._render_label())
-        if is_current:
-            self.add_class("current")
-        else:
-            self.remove_class("current")
-        self._apply_alert_class(alert_state)
-
     async def on_click(self) -> None:
         """Switch to this instance's tmux window."""
         try:

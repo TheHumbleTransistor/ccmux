@@ -33,7 +33,7 @@ def load_repo_config(repo_root: Path) -> Optional[dict]:
         with open(config_path, "rb") as f:
             return tomllib.load(f)
     except Exception as e:
-        console.print(f"  [yellow]Warning:[/yellow] Failed to parse ccmux.toml: {e}")
+        #console.print(f"  [yellow]Warning:[/yellow] Failed to parse ccmux.toml: {e}")
         return None
 
 
@@ -68,11 +68,11 @@ def run_post_create(
     env["CCMUX_INSTANCE_NAME"] = instance_name
     env["CCMUX_SESSION"] = session
 
-    console.print(f"  [bold cyan]Running post_create commands from ccmux.toml[/bold cyan]")
+    #console.print(f"  [bold cyan]Running post_create commands from ccmux.toml[/bold cyan]")
 
     all_ok = True
     for cmd in commands:
-        console.print(f"    $ {cmd}")
+        #console.print(f"    $ {cmd}")
         try:
             result = subprocess.run(
                 cmd,
@@ -83,15 +83,17 @@ def run_post_create(
                 text=True,
             )
             if result.returncode == 0:
-                console.print(f"    [green]\u2713[/green] OK")
+                #console.print(f"    [green]\u2713[/green] OK")
+                pass
             else:
-                console.print(f"    [red]\u2717[/red] Failed (exit code {result.returncode})")
+                #console.print(f"    [red]\u2717[/red] Failed (exit code {result.returncode})")
                 if result.stderr.strip():
                     for line in result.stderr.strip().split("\n"):
-                        console.print(f"      {line}")
+                        #console.print(f"      {line}")
+                        pass
                 all_ok = False
         except Exception as e:
-            console.print(f"    [red]\u2717[/red] Error: {e}")
+            #console.print(f"    [red]\u2717[/red] Error: {e}")
             all_ok = False
 
     return all_ok
