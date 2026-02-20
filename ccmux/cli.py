@@ -332,16 +332,62 @@ def _notify_sidebars(session: str) -> None:
             pass
 
 
-def _create_outer_session(session: str) -> None:
-    """Create the outer tmux session with sidebar + nested inner client.
+def _bash_session_name(session: str) -> str:
+    """Derive the bash tmux session name."""
+    return f"{session}-bash"
 
-    The outer session has two panes:
-    - Left (25%): sidebar TUI
-    - Right (75%): nested tmux client attached to the inner session
+
+def _create_bash_window(session: str, instance_name: str, working_dir: str) -> None:
+    """Create a window in the bash session for an instance.
+
+    Creates the bash session if it doesn't exist yet.
+    Skips if window already exists. Sets bg=#1e1e1e to match sidebar.
+    """
+    bash = _bash_session_name(session)
+    try:
+        if not tmux_session_exists(bash):
+            subprocess.run(
+                ["tmux", "new-session", "-d", "-s", bash,
+                 "-n", instance_name, "-c", working_dir],
+                check=True, capture_output=True,
+            )
+            subprocess.run(
+                ["tmux", "set-option", "-t", bash, "status", "off"],
+                check=True, capture_output=True,
+            )
+            subprocess.run(
+                ["tmux", "set-option", "-t", bash, "mouse", "on"],
+                check=True, capture_output=True,
+            )
+        else:
+            if instance_name in get_tmux_windows(bash):
+                return
+            subprocess.run(
+                ["tmux", "new-window", "-t", bash,
+                 "-n", instance_name, "-c", working_dir],
+                check=True, capture_output=True,
+            )
+        subprocess.run(
+            ["tmux", "select-pane", "-t", f"{bash}:{instance_name}",
+             "-P", "bg=#1e1e1e"],
+            check=True, capture_output=True,
+        )
+    except subprocess.CalledProcessError:
+        pass
+
+
+def _create_outer_session(session: str) -> None:
+    """Create the outer tmux session with sidebar, inner client, and bash pane.
+
+    The outer session has three panes:
+    - Top-left (20%): sidebar TUI
+    - Top-right (80%): nested tmux client attached to the inner session
+    - Bottom (full width, 20% height): nested tmux client attached to bash session
 
     Skips if outer already exists or inner doesn't exist.
     """
     inner = _inner_session_name(session)
+    bash = _bash_session_name(session)
 
     if tmux_session_exists(session):
         return
@@ -355,7 +401,7 @@ def _create_outer_session(session: str) -> None:
     )
 
     try:
-        # Create outer session with sidebar as the initial command
+        # 1. Create outer session with sidebar as the initial pane (full screen)
         subprocess.run(
             [
                 "tmux", "new-session",
@@ -367,25 +413,38 @@ def _create_outer_session(session: str) -> None:
             capture_output=True,
         )
 
-        # Split right pane with nested tmux client (75% width)
-        # TMUX= unsets the variable so the nested tmux attach works
-        # Note: split-window expects a pane target, so don't use = prefix
+        # 2. Split full-width bottom pane for bash (20% height)
+        if tmux_session_exists(bash):
+            subprocess.run(
+                [
+                    "tmux", "split-window",
+                    "-t", f"{session}:0.0",
+                    "-v", "-l", "20%",
+                    f"TMUX= tmux attach -t ={bash}",
+                ],
+                check=True,
+                capture_output=True,
+            )
+        # Now: pane 0 = sidebar (top), pane 1 = bash (bottom)
+
+        # 3. Split top pane horizontally for inner client (80% of top area)
         subprocess.run(
             [
                 "tmux", "split-window",
-                "-t", session,
+                "-t", f"{session}:0.0",
                 "-h",
-                "-l", "75%",
+                "-l", "80%",
                 f"TMUX= tmux attach -t ={inner}",
             ],
             check=True,
             capture_output=True,
         )
+        # Now: pane 0 = sidebar (top-left 20%), pane 1 = inner (top-right 80%), pane 2 = bash (bottom full width)
 
         # Apply outer session config (no status bar, C-Space prefix, etc.)
         apply_outer_session_config(session)
 
-        # Install hook on inner session for sidebar refresh
+        # Install hook on inner session for sidebar refresh + bash sync
         _install_inner_hook(session)
 
     except subprocess.CalledProcessError as exc:
@@ -415,10 +474,21 @@ def _ensure_outer_session(session: str) -> None:
 
 
 def _kill_outer_session(session: str) -> bool:
-    """Kill the outer tmux session.
+    """Kill the outer tmux session and its associated bash session.
 
-    Returns True if the session was killed.
+    Returns True if the outer session was killed.
     """
+    # Also kill the bash session if it exists
+    bash = _bash_session_name(session)
+    if tmux_session_exists(bash):
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", f"={bash}"],
+                check=True, capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
+
     if not tmux_session_exists(session):
         return False
 
@@ -458,13 +528,13 @@ def _reload_session_sidebar(session: str) -> None:
         pass
 
     try:
-        # Split a new sidebar pane on the left (25% width)
+        # Split a new sidebar pane on the left (20% width)
         subprocess.run(
             [
                 "tmux", "split-window",
-                "-t", f"{session}:0",
+                "-t", f"{session}:0.0",  # explicitly target pane 0
                 "-hb",
-                "-l", "25%",
+                "-l", "20%",
                 sidebar_cmd,
             ],
             check=True,
@@ -479,17 +549,23 @@ def _reload_session_sidebar(session: str) -> None:
 
 
 def _install_inner_hook(session: str) -> None:
-    """Install hooks on the inner session for sidebar refresh and bell tracking.
+    """Install hooks on the inner session for sidebar refresh, bell tracking, and bash sync.
 
     Registers two hooks:
     - alert-bell: sets @ccmux_bell 1 on the triggering window, then notifies sidebars
-    - after-select-window: clears @ccmux_bell 0 on the selected window, then notifies sidebars
+    - after-select-window: clears @ccmux_bell 0, switches bash window, then notifies sidebars
     """
     HOOKS_DIR.mkdir(parents=True, exist_ok=True)
     script_path = HOOKS_DIR / f"notify-sidebar-{session}.sh"
 
+    inner = _inner_session_name(session)
+    bash = _bash_session_name(session)
+
     script_content = f"""\
 #!/bin/sh
+# Get current inner window name and switch bash session to match
+WIN=$(tmux display-message -t "{inner}" -p '#{{window_name}}' 2>/dev/null)
+[ -n "$WIN" ] && tmux select-window -t "{bash}:$WIN" 2>/dev/null
 # Notify sidebar processes that the active window changed
 for f in "$HOME/.ccmux/sidebar_pids/{session}"/*.pid; do
     [ -f "$f" ] && kill -USR1 "$(cat "$f")" 2>/dev/null
@@ -760,6 +836,7 @@ def _activate_all_in_session(session: str, no_confirm: bool = False) -> None:
                     text=True,
                 )
                 new_tmux_window_id = result.stdout.strip()
+                _create_bash_window(session, wt_name, wt_path)
                 inner_exists_flag = True
                 console.print(f"  [green]\u2713[/green] Created tmux session and activated '{wt_name}'")
 
@@ -783,6 +860,7 @@ def _activate_all_in_session(session: str, no_confirm: bool = False) -> None:
                     text=True,
                 )
                 new_tmux_window_id = result.stdout.strip()
+                _create_bash_window(session, wt_name, wt_path)
                 console.print(f"  [green]\u2713[/green] Activated '{wt_name}'")
 
             # Update tmux IDs in state
@@ -862,6 +940,7 @@ def _activate_single_instance(session: str, name: str, no_confirm: bool = False)
                 capture_output=True, text=True, check=True,
             )
             tmux_window_id = result.stdout.strip()
+            _create_bash_window(session, name, wt_path)
             console.print(f"  [green]\u2713[/green] Created tmux session and activated '{name}'")
 
             if apply_tmux_config(inner):
@@ -882,6 +961,7 @@ def _activate_single_instance(session: str, name: str, no_confirm: bool = False)
                 capture_output=True, text=True, check=True,
             )
             tmux_window_id = result.stdout.strip()
+            _create_bash_window(session, name, wt_path)
 
             subprocess.run(
                 ["tmux", "select-window", "-t", f"{inner}:{name}"],
@@ -1107,6 +1187,19 @@ def session_rename(
         except subprocess.CalledProcessError:
             console.print(f"  [yellow]\u26a0[/yellow] Could not rename inner tmux session")
 
+    # Rename bash tmux session if it exists
+    old_bash = _bash_session_name(old_name)
+    new_bash = _bash_session_name(new_name)
+    if tmux_session_exists(old_bash):
+        try:
+            subprocess.run(
+                ["tmux", "rename-session", "-t", f"={old_bash}", new_bash],
+                check=True, capture_output=True,
+            )
+            console.print(f"  [green]\u2713[/green] Renamed bash tmux session '{old_bash}' -> '{new_bash}'")
+        except subprocess.CalledProcessError:
+            console.print(f"  [yellow]\u26a0[/yellow] Could not rename bash tmux session")
+
     # Rename outer tmux session if it exists
     if tmux_session_exists(old_name):
         try:
@@ -1215,9 +1308,10 @@ def session_remove(
 
         removed_count += 1
 
-    # Kill both tmux sessions
+    # Kill all tmux sessions (outer, inner, bash)
     _uninstall_inner_hook(session)
     inner = _inner_session_name(session)
+    bash = _bash_session_name(session)
     if tmux_session_exists(session):
         try:
             subprocess.run(
@@ -1236,6 +1330,15 @@ def session_remove(
             console.print(f"  [green]\u2713[/green] Killed inner tmux session '{inner}'")
         except subprocess.CalledProcessError:
             console.print(f"  [yellow]\u26a0[/yellow] Could not kill inner tmux session '{inner}'")
+    if tmux_session_exists(bash):
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", f"={bash}"],
+                check=True, capture_output=True,
+            )
+            console.print(f"  [green]\u2713[/green] Killed bash tmux session '{bash}'")
+        except subprocess.CalledProcessError:
+            console.print(f"  [yellow]\u26a0[/yellow] Could not kill bash tmux session '{bash}'")
 
     # Remove session from state
     state.remove_session(session)
@@ -1426,6 +1529,7 @@ def instance_new(
                 capture_output=True, text=True, check=True,
             )
             tmux_window_id = result.stdout.strip()
+            _create_bash_window(session, name, str(instance_path))
             console.print(f"  [green]\u2713[/green] Created tmux session '{inner}' with window '{name}'")
 
             if apply_tmux_config(inner):
@@ -1450,6 +1554,7 @@ def instance_new(
                 capture_output=True, text=True, check=True,
             )
             tmux_window_id = result.stdout.strip()
+            _create_bash_window(session, name, str(instance_path))
 
             subprocess.run(
                 ["tmux", "select-window", "-t", f"{inner}:{name}"],
@@ -1522,6 +1627,7 @@ def instance_new(
                         capture_output=True, text=True, check=True,
                     )
                     new_window_id = result.stdout.strip()
+                    _create_bash_window(session, inst_name, inst_path)
 
                     try:
                         new_session_id = subprocess.run(
@@ -1912,8 +2018,9 @@ def instance_remove(
             console.print(f"{prefix}[green]\u2713[/green] Removed '{wt_name}' from tracking")
             removed_count += 1
 
-        # Kill both tmux sessions
+        # Kill all tmux sessions (outer, inner, bash)
         inner = _inner_session_name(session)
+        bash = _bash_session_name(session)
         if tmux_session_exists(session):
             try:
                 subprocess.run(
@@ -1932,6 +2039,15 @@ def instance_remove(
                 console.print(f"[green]\u2713[/green] Killed inner tmux session '{inner}'")
             except subprocess.CalledProcessError:
                 console.print(f"[yellow]\u26a0[/yellow] Could not kill inner tmux session '{inner}'")
+        if tmux_session_exists(bash):
+            try:
+                subprocess.run(
+                    ["tmux", "kill-session", "-t", f"={bash}"],
+                    check=True, capture_output=True,
+                )
+                console.print(f"[green]\u2713[/green] Killed bash tmux session '{bash}'")
+            except subprocess.CalledProcessError:
+                console.print(f"[yellow]\u26a0[/yellow] Could not kill bash tmux session '{bash}'")
 
         console.print(f"\n[bold green]Success![/bold green] Removed {removed_count} instance(s).")
         return

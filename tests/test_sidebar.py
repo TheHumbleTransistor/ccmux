@@ -242,19 +242,19 @@ class TestCreateOuterSession:
     @mock.patch("ccmux.cli.apply_outer_session_config")
     @mock.patch("ccmux.cli.subprocess.run")
     @mock.patch("ccmux.cli.tmux_session_exists")
-    def test_creates_outer_with_sidebar_and_inner_client(
+    def test_creates_outer_with_sidebar_inner_and_bash(
         self, mock_exists, mock_run, mock_outer_config, mock_hook
     ):
-        """_create_outer_session creates outer session with sidebar + inner client pane."""
+        """_create_outer_session creates outer session with sidebar, inner client, and bash pane."""
         from ccmux.cli import _create_outer_session
 
-        # outer doesn't exist, inner does exist
-        mock_exists.side_effect = lambda s: s == "my-session-inner"
+        # outer doesn't exist, inner and bash do exist
+        mock_exists.side_effect = lambda s: s in ("my-session-inner", "my-session-bash")
 
         _create_outer_session("my-session")
 
-        # Should have called new-session and split-window
-        assert mock_run.call_count == 2
+        # Should have called new-session, split-window (bash), split-window (inner)
+        assert mock_run.call_count == 3
 
         # Verify new-session creates the sidebar
         new_session_call = mock_run.call_args_list[0][0][0]
@@ -263,10 +263,51 @@ class TestCreateOuterSession:
         sidebar_cmd = new_session_call[-1]
         assert "ccmux.sidebar" in sidebar_cmd
 
+        # Verify first split-window creates the bash pane (vertical, bottom)
+        bash_split_call = mock_run.call_args_list[1][0][0]
+        assert "split-window" in bash_split_call
+        assert "-v" in bash_split_call
+        assert "20%" in bash_split_call
+        bash_cmd = bash_split_call[-1]
+        assert "tmux attach -t =my-session-bash" in bash_cmd
+
+        # Verify second split-window creates the inner client (horizontal, right)
+        inner_split_call = mock_run.call_args_list[2][0][0]
+        assert "split-window" in inner_split_call
+        assert "-h" in inner_split_call
+        assert "80%" in inner_split_call
+        inner_cmd = inner_split_call[-1]
+        assert "tmux attach -t =my-session-inner" in inner_cmd
+
+        mock_outer_config.assert_called_once_with("my-session")
+        mock_hook.assert_called_once_with("my-session")
+
+    @mock.patch("ccmux.cli._install_inner_hook")
+    @mock.patch("ccmux.cli.apply_outer_session_config")
+    @mock.patch("ccmux.cli.subprocess.run")
+    @mock.patch("ccmux.cli.tmux_session_exists")
+    def test_creates_outer_without_bash_session(
+        self, mock_exists, mock_run, mock_outer_config, mock_hook
+    ):
+        """_create_outer_session creates 2-pane layout when bash session doesn't exist."""
+        from ccmux.cli import _create_outer_session
+
+        # outer doesn't exist, inner exists, bash doesn't
+        mock_exists.side_effect = lambda s: s == "my-session-inner"
+
+        _create_outer_session("my-session")
+
+        # Should have called new-session and split-window (inner only, no bash)
+        assert mock_run.call_count == 2
+
+        # Verify new-session creates the sidebar
+        new_session_call = mock_run.call_args_list[0][0][0]
+        assert "new-session" in new_session_call
+
         # Verify split-window creates the inner client
         split_call = mock_run.call_args_list[1][0][0]
         assert "split-window" in split_call
-        assert "75%" in split_call
+        assert "80%" in split_call
         inner_cmd = split_call[-1]
         assert "tmux attach -t =my-session-inner" in inner_cmd
 
@@ -410,7 +451,7 @@ class TestInstallInnerHook:
 
     @mock.patch("ccmux.cli.subprocess.run")
     def test_creates_hook_script(self, mock_run, tmp_path, monkeypatch):
-        """_install_inner_hook writes a SIGUSR1-only script and registers the hook."""
+        """_install_inner_hook writes a script that syncs bash window and notifies sidebars."""
         import ccmux.cli as cli_mod
         monkeypatch.setattr(cli_mod, "HOOKS_DIR", tmp_path)
 
@@ -420,6 +461,10 @@ class TestInstallInnerHook:
         script = tmp_path / "notify-sidebar-test-session.sh"
         assert script.exists()
         content = script.read_text()
+        # Should contain bash window switching
+        assert "test-session-inner" in content
+        assert "test-session-bash" in content
+        assert "select-window" in content
         # Should contain SIGUSR1 notification
         assert "sidebar_pids/test-session" in content
         assert "kill -USR1" in content

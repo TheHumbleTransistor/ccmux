@@ -60,6 +60,8 @@ def apply_outer_session_config(session_name: str) -> bool:
         ("mouse", "on"),
         ("prefix", "C-Space"),
         ("escape-time", "0"),
+        ("pane-border-style", "fg=#333333"),
+        ("pane-active-border-style", "fg=#d7af5f"),
     ]
     try:
         for key, val in options:

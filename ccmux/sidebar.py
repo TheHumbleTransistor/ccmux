@@ -85,11 +85,18 @@ class InstanceRow(Static):
         self._apply_alert_class(alert_state)
 
     def on_click(self) -> None:
-        """Switch to this instance's tmux window in the inner session."""
+        """Switch to this instance's tmux window in the inner and bash sessions."""
         try:
             subprocess.run(
                 ["tmux", "select-window", "-t", f"{self.session}-inner:{self.instance_name}"],
                 check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
+        try:
+            subprocess.run(
+                ["tmux", "select-window", "-t", f"{self.session}-bash:{self.instance_name}"],
                 capture_output=True,
             )
         except subprocess.CalledProcessError:
@@ -333,6 +340,10 @@ class SidebarApp(App):
             self.stylesheet.update(self)
             for screen in self.screen_stack:
                 self.stylesheet.update(screen)
+
+    def on_resize(self, event) -> None:
+        """Force full layout recalculation on terminal resize."""
+        self.refresh(layout=True)
 
     def _on_sigusr1(self) -> None:
         """Handle SIGUSR1 signal by scheduling a refresh."""
