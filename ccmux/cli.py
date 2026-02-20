@@ -1996,6 +1996,16 @@ def instance_remove(
                     except subprocess.CalledProcessError:
                         console.print(f"  [yellow]Window '{wt_name}' already closed[/yellow]")
 
+                # Also kill the corresponding bash window
+                bash = _bash_session_name(session)
+                try:
+                    subprocess.run(
+                        ["tmux", "kill-window", "-t", f"{bash}:{wt_name}"],
+                        check=True, capture_output=True,
+                    )
+                except subprocess.CalledProcessError:
+                    pass
+
             prefix = "    " if is_active else "  "
 
             if is_main_repo:
@@ -2096,6 +2106,16 @@ def instance_remove(
             except subprocess.CalledProcessError:
                 console.print(f"  [yellow]Window '{name}' already closed[/yellow]")
 
+        # Also kill the corresponding bash window
+        bash = _bash_session_name(session)
+        try:
+            subprocess.run(
+                ["tmux", "kill-window", "-t", f"{bash}:{name}"],
+                check=True, capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
+
     if is_main_repo:
         console.print(f"  [dim]Main repository - no git worktree to remove[/dim]")
     elif worktree_exists(wt_path):
@@ -2115,6 +2135,18 @@ def instance_remove(
     state.remove_worktree(session, name)
     _notify_sidebars(session)
     console.print(f"  [green]\u2713[/green] Removed '{name}' from tracking")
+
+    # If no instances remain, clean up all tmux sessions
+    remaining = state.get_all_worktrees(session)
+    if not remaining:
+        _uninstall_inner_hook(session)
+        _kill_outer_session(session)
+        inner = _inner_session_name(session)
+        if tmux_session_exists(inner):
+            subprocess.run(
+                ["tmux", "kill-session", "-t", f"={inner}"],
+                check=True, capture_output=True,
+            )
 
     if is_main_repo:
         console.print(f"\n[bold green]Success![/bold green] Main repository '{name}' removed from tracking.")
