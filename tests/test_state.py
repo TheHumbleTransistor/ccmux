@@ -25,7 +25,7 @@ def test_load_state_empty(temp_state_dir):
     result = state.load_state()
     assert result == {
         "sessions": {},
-        "default_session": "ccmux"
+        "default_session": "default"
     }
 
 
@@ -38,7 +38,7 @@ def test_save_and_load_state(temp_state_dir):
                 "instances": {}
             }
         },
-        "default_session": "ccmux"
+        "default_session": "default"
     }
 
     state.save_state(test_state)
@@ -247,17 +247,17 @@ def test_rename_session(temp_state_dir):
 def test_rename_session_updates_default(temp_state_dir):
     """Test renaming a session updates default_session if it matched."""
     state.add_worktree(
-        session_name="ccmux",
+        session_name="default",
         worktree_name="feature-x",
         repo_path="/repo",
         worktree_path="/repo/.worktrees/feature-x",
     )
     # Set default_session to the session we're about to rename
     s = state.load_state()
-    s["default_session"] = "ccmux"
+    s["default_session"] = "default"
     state.save_state(s)
 
-    assert state.rename_session("ccmux", "my-project")
+    assert state.rename_session("default", "my-project")
 
     loaded = state.load_state()
     assert loaded["default_session"] == "my-project"
@@ -377,7 +377,7 @@ def test_remove_session_resets_default(temp_state_dir):
     assert state.remove_session("my-default")
 
     loaded = state.load_state()
-    assert loaded["default_session"] == "ccmux"
+    assert loaded["default_session"] == "default"
 
 
 def test_remove_session_not_found(temp_state_dir):
@@ -395,5 +395,5 @@ def test_corrupted_state_file(temp_state_dir):
     result = state.load_state()
     assert result == {
         "sessions": {},
-        "default_session": "ccmux"
+        "default_session": "default"
     }

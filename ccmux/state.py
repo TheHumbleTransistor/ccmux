@@ -7,7 +7,7 @@ from typing import Optional
 
 STATE_DIR = Path.home() / ".ccmux"
 STATE_FILE = STATE_DIR / "state.json"
-DEFAULT_SESSION = "ccmux"
+DEFAULT_SESSION = "default"
 
 
 def _ensure_state_dir():

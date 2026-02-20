@@ -27,6 +27,7 @@ classifiers = [
 dependencies = [
     "cyclopts>=2.0.0",
     "rich>=13.0.0",
+    "textual>=1.0.0",
     "tomli>=1.0.0; python_version < '3.11'",
 ]
 

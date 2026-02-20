@@ -5,6 +5,7 @@ import inspect
 import os
 import random
 import re
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ from ccmux.config import run_post_create
 from ccmux.tmux_config import apply_tmux_config
 
 # Default session name
-DEFAULT_SESSION = "ccmux"
+DEFAULT_SESSION = "default"
 
 
 # Common parameters shared across all commands
@@ -280,6 +281,110 @@ def get_all_worktrees(repo_root: Path) -> list[dict[str, str]]:
         return []
 
 
+# --- Sidebar Helpers ---
+
+SIDEBAR_PIDS_DIR = Path.home() / ".ccmux" / "sidebar_pids"
+
+
+def _add_sidebar_pane(session: str, window_id: str) -> None:
+    """Add a sidebar pane to a tmux window via split.
+
+    Creates a left-side pane (25% width) running the Textual sidebar app.
+    Skips if terminal is too narrow (< 60 columns).
+    """
+    # Check window width - skip sidebar for very narrow terminals
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-t", window_id, "-p", "#{window_width}"],
+            capture_output=True, text=True, check=True,
+        )
+        width = int(result.stdout.strip())
+        if width < 60:
+            return
+    except (subprocess.CalledProcessError, ValueError):
+        # If we can't check width, proceed anyway
+        pass
+
+    python_exe = sys.executable or "python3"
+    sidebar_cmd = (
+        f"{python_exe} -m ccmux.sidebar {session} {window_id} ; "
+        f"echo 'Sidebar exited. Press enter to close.' ; read"
+    )
+
+    try:
+        subprocess.run(
+            [
+                "tmux", "split-window",
+                "-t", window_id,
+                "-bh",
+                "-l", "25%",
+                "-d",
+                sidebar_cmd,
+            ],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError:
+        pass
+
+
+def _ensure_sidebar_pane(session: str, window_id: str) -> None:
+    """Check if a window has a sidebar pane; add one if missing.
+
+    Detects the sidebar by counting panes: a ccmux window should have 2
+    (sidebar + main). If only 1 pane exists, the sidebar is missing.
+    """
+    if not window_id:
+        return
+
+    try:
+        result = subprocess.run(
+            ["tmux", "list-panes", "-t", window_id, "-F", "#{pane_id}"],
+            capture_output=True, text=True, check=True,
+        )
+        pane_count = len(result.stdout.strip().split("\n"))
+    except subprocess.CalledProcessError:
+        return
+
+    if pane_count < 2:
+        _add_sidebar_pane(session, window_id)
+
+
+def _ensure_all_sidebars(session: str) -> None:
+    """Ensure every active window in a session has a sidebar pane."""
+    instances = state.get_all_worktrees(session)
+    for inst in instances:
+        tmux_window_id = inst.get("tmux_window_id")
+        if tmux_window_id and is_window_active_in_session(session, tmux_window_id):
+            _ensure_sidebar_pane(session, tmux_window_id)
+
+
+def _notify_sidebars(session: str) -> None:
+    """Send SIGUSR1 to all active sidebar processes for a session.
+
+    Reads PID files from ~/.ccmux/sidebar_pids/<session>/ and signals each.
+    Removes stale PID files when the process no longer exists.
+    """
+    pid_dir = SIDEBAR_PIDS_DIR / session
+    if not pid_dir.is_dir():
+        return
+
+    for pid_file in pid_dir.iterdir():
+        if not pid_file.suffix == ".pid":
+            continue
+        try:
+            pid = int(pid_file.read_text().strip())
+            os.kill(pid, signal.SIGUSR1)
+        except (ProcessLookupError, ValueError):
+            # Process gone or invalid PID - clean up stale file
+            try:
+                pid_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+        except PermissionError:
+            pass
+
+
 # --- Detection Helpers ---
 
 def detect_current_ccmux_session() -> Optional[tuple[str, dict]]:
@@ -447,6 +552,7 @@ def _activate_all_in_session(session: str, no_confirm: bool = False) -> None:
             inactive_worktrees.append(wt)
 
     if not inactive_worktrees:
+        _ensure_all_sidebars(session)
         console.print("\n[yellow]No inactive instances to activate.[/yellow]")
         return
 
@@ -498,6 +604,7 @@ def _activate_all_in_session(session: str, no_confirm: bool = False) -> None:
                     console.print(f"    [green]\u2713[/green] Applied ccmux tmux configuration")
                 else:
                     console.print(f"    [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
+                _add_sidebar_pane(session, new_tmux_window_id)
             else:
                 result = subprocess.run(
                     [
@@ -513,6 +620,7 @@ def _activate_all_in_session(session: str, no_confirm: bool = False) -> None:
                     text=True,
                 )
                 new_tmux_window_id = result.stdout.strip()
+                _add_sidebar_pane(session, new_tmux_window_id)
                 console.print(f"  [green]\u2713[/green] Activated '{wt_name}'")
 
             # Update tmux IDs in state
@@ -529,6 +637,8 @@ def _activate_all_in_session(session: str, no_confirm: bool = False) -> None:
         except subprocess.CalledProcessError as e:
             console.print(f"  [red]Error activating '{wt_name}':[/red] {e}")
 
+    _ensure_all_sidebars(session)
+    _notify_sidebars(session)
     console.print(f"\n[bold green]Success![/bold green] Activated {activated_count} instance(s).")
 
 
@@ -553,8 +663,9 @@ def _activate_single_instance(session: str, name: str, no_confirm: bool = False)
         console.print(f"List instances with: [cyan]ccmux list --session {session}[/cyan]")
         sys.exit(1)
 
-    # Check if already active
+    # Check if already active - ensure sidebar even if window exists
     if is_window_active_in_session(session, worktree.get("tmux_window_id")):
+        _ensure_sidebar_pane(session, worktree["tmux_window_id"])
         console.print(f"[yellow]Instance '{name}' already has an active tmux window.[/yellow]")
         return
 
@@ -593,6 +704,7 @@ def _activate_single_instance(session: str, name: str, no_confirm: bool = False)
                 console.print(f"  [green]\u2713[/green] Applied ccmux tmux configuration")
             else:
                 console.print(f"  [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
+            _add_sidebar_pane(session, tmux_window_id)
         else:
             result = subprocess.run(
                 [
@@ -606,6 +718,7 @@ def _activate_single_instance(session: str, name: str, no_confirm: bool = False)
                 capture_output=True, text=True, check=True,
             )
             tmux_window_id = result.stdout.strip()
+            _add_sidebar_pane(session, tmux_window_id)
 
             subprocess.run(
                 ["tmux", "select-window", "-t", f"{session}:{name}"],
@@ -623,6 +736,8 @@ def _activate_single_instance(session: str, name: str, no_confirm: bool = False)
         except subprocess.CalledProcessError:
             pass
 
+        _ensure_all_sidebars(session)
+        _notify_sidebars(session)
         console.print(f"\n[bold green]Success![/bold green] Claude Code is running.")
         console.print(f"Attach with: [cyan]ccmux attach --session {session}[/cyan]")
 
@@ -827,6 +942,7 @@ def session_rename(
         except subprocess.CalledProcessError:
             console.print(f"  [yellow]\u26a0[/yellow] Could not rename tmux session (it may have been closed)")
 
+    _notify_sidebars(new_name)
     console.print(f"\n[bold green]Success![/bold green] Session renamed: '{old_name}' -> '{new_name}'")
 
 
@@ -958,6 +1074,8 @@ def session_attach(*, common: CommonConfig) -> None:
         console.print(f"\nThe tmux session was closed. Activate instances with: [cyan]ccmux activate --session {session}[/cyan]")
         sys.exit(1)
 
+    _ensure_all_sidebars(session)
+    _notify_sidebars(session)
     os.execvp("tmux", ["tmux", "attach", "-t", session])
 
 
@@ -1120,6 +1238,7 @@ def instance_new(
                 console.print(f"  [green]\u2713[/green] Applied ccmux tmux configuration")
             else:
                 console.print(f"  [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
+            _add_sidebar_pane(session, tmux_window_id)
         except subprocess.CalledProcessError as e:
             console.print(f"[red]Error creating tmux session:[/red] {e}", style="bold")
             sys.exit(1)
@@ -1137,6 +1256,7 @@ def instance_new(
                 capture_output=True, text=True, check=True,
             )
             tmux_window_id = result.stdout.strip()
+            _add_sidebar_pane(session, tmux_window_id)
 
             subprocess.run(
                 ["tmux", "select-window", "-t", f"{session}:{name}"],
@@ -1173,6 +1293,7 @@ def instance_new(
         )
 
     console.print(f"  [green]\u2713[/green] Launched Claude Code in tmux window '{name}'")
+    _notify_sidebars(session)
 
     # Auto-reactivate orphaned instances when a new session was just created
     if is_first_instance:
@@ -1207,6 +1328,7 @@ def instance_new(
                         capture_output=True, text=True, check=True,
                     )
                     new_window_id = result.stdout.strip()
+                    _add_sidebar_pane(session, new_window_id)
 
                     try:
                         new_session_id = subprocess.run(
@@ -1381,6 +1503,7 @@ def instance_rename(
         except subprocess.CalledProcessError:
             console.print(f"  [yellow]\u26a0[/yellow] Could not rename tmux window")
 
+    _notify_sidebars(session)
     console.print(f"\n[bold green]Success![/bold green] Instance renamed: '{old_name}' -> '{new_name}'")
 
 
@@ -1467,6 +1590,7 @@ def instance_deactivate(
                 except subprocess.CalledProcessError:
                     console.print(f"  [yellow]Window '{inst_name}' not found or already closed[/yellow]")
 
+        _notify_sidebars(session)
         console.print(f"\n[bold green]Success![/bold green] Deactivated {deactivated_count} instance(s).")
         return
 
@@ -1498,6 +1622,7 @@ def instance_deactivate(
         except subprocess.CalledProcessError:
             console.print(f"  [yellow]Window '{name}' not found or already closed[/yellow]")
 
+    _notify_sidebars(session)
     console.print(f"\n[bold green]Success![/bold green] Instance '{name}' deactivated.")
 
 
@@ -1506,30 +1631,18 @@ def instance_remove(
     name: Optional[str] = None,
     *,
     common: CommonConfig,
-    all_instances: Annotated[bool, Parameter(name=["-a", "--all"])] = False,
-    no_confirm: Annotated[bool, Parameter(name=["-y", "--yes", "--no-confirm"])] = False,
+    no_confirm: bool = False,
 ) -> None:
     """Remove instance(s) permanently (deactivates and deletes worktree).
 
-    If no name is provided, removes the current instance (detected from tmux).
-    Use --all to remove every instance in the session.
+    If no name is provided, removes all instances in the session.
 
     Args:
-        name: Instance name to remove (omit to remove current)
+        name: Instance name to remove (omit to remove all)
         common: Common parameters (session, etc.)
-        all_instances: Remove all instances in the session
         no_confirm: Skip confirmation prompt (default: False)
     """
     session = common.session
-
-    # No name given and not --all: detect current instance
-    if name is None and not all_instances:
-        detected = detect_current_ccmux_instance()
-        if not detected:
-            console.print("[red]Error:[/red] Not in a ccmux instance. Specify a name or use --all.", style="bold")
-            sys.exit(1)
-        session = detected[0]
-        name = detected[1]
 
     worktrees = state.get_all_worktrees(session)
 
@@ -1546,7 +1659,7 @@ def instance_remove(
         else:
             inactive_worktrees.append(wt)
 
-    if all_instances:
+    if name is None:
         console.print(f"\n[bold red]WARNING: This will permanently delete {len(worktrees)} instance(s) in session '{session}'[/bold red]")
         console.print("[red]Any uncommitted changes will be lost![/red]\n")
 
@@ -1681,6 +1794,7 @@ def instance_remove(
         console.print(f"  [yellow]\u26a0[/yellow] Worktree not found on filesystem")
 
     state.remove_worktree(session, name)
+    _notify_sidebars(session)
     console.print(f"  [green]\u2713[/green] Removed '{name}' from tracking")
 
     if is_main_repo:
