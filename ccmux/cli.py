@@ -350,7 +350,7 @@ def _create_bash_window(session: str, instance_name: str, working_dir: str) -> N
     """Create a window in the bash session for an instance.
 
     Creates the bash session if it doesn't exist yet.
-    Skips if window already exists. Sets bg=#1e1e1e to match sidebar.
+    Skips if window already exists.
     """
     bash = _bash_session_name(session)
     try:
@@ -376,11 +376,6 @@ def _create_bash_window(session: str, instance_name: str, working_dir: str) -> N
                  "-n", instance_name, "-c", working_dir],
                 check=True, capture_output=True,
             )
-        subprocess.run(
-            ["tmux", "select-pane", "-t", f"{bash}:{instance_name}",
-             "-P", "bg=#1e1e1e"],
-            check=True, capture_output=True,
-        )
     except subprocess.CalledProcessError:
         pass
 
