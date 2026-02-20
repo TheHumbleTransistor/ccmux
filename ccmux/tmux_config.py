@@ -72,6 +72,7 @@ def apply_outer_session_config(session_name: str) -> bool:
         ("pane-active-border-style", "fg=#d7af5f"),
         ("set-titles", "on"),
         ("set-titles-string", display_title),
+        ("default-terminal", "tmux-256color"),
     ]
     try:
         for key, val in options:
@@ -79,6 +80,12 @@ def apply_outer_session_config(session_name: str) -> bool:
                 ["tmux", "set-option", "-t", session_name, key, val],
                 check=True, capture_output=True,
             )
+        # Append RGB capability for truecolor support
+        subprocess.run(
+            ["tmux", "set-option", "-as", "-t", session_name,
+             "terminal-features", ",xterm-256color:RGB"],
+            check=True, capture_output=True,
+        )
         return True
     except subprocess.CalledProcessError:
         return False

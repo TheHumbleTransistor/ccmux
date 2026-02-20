@@ -1,5 +1,5 @@
 Screen {
-    background: #e5e888;
+    background: #1e1e1e;
     layout: vertical;
 }
 

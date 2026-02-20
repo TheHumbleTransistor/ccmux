@@ -401,7 +401,7 @@ def _create_outer_session(session: str) -> None:
 
     python_exe = sys.executable or "python3"
     sidebar_cmd = (
-        f"COLORTERM=truecolor {python_exe} -m ccmux.sidebar {session} ; "
+        f"TERM=tmux-256color COLORTERM=truecolor {python_exe} -m ccmux.sidebar {session} ; "
         f"echo 'Sidebar exited. Press enter to close.' ; read"
     )
 
@@ -520,7 +520,7 @@ def _reload_session_sidebar(session: str) -> None:
 
     python_exe = sys.executable or "python3"
     sidebar_cmd = (
-        f"COLORTERM=truecolor {python_exe} -m ccmux.sidebar {session} ; "
+        f"TERM=tmux-256color COLORTERM=truecolor {python_exe} -m ccmux.sidebar {session} ; "
         f"echo 'Sidebar exited. Press enter to close.' ; read"
     )
 
