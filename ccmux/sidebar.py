@@ -35,6 +35,7 @@ class InstanceRow(Static):
         is_current: bool,
         is_last: bool,
         session: str,
+        alert_state: str | None = None,
         **kwargs,
     ) -> None:
         self.instance_name = instance_name
@@ -43,9 +44,11 @@ class InstanceRow(Static):
         self.is_current = is_current
         self.is_last = is_last
         self.session = session
+        self.alert_state = alert_state
         super().__init__(self._render_label(), **kwargs)
         if is_current:
             self.add_class("current")
+        self._apply_alert_class(alert_state)
 
     def _render_label(self) -> str:
         connector = "\u2514\u2500\u2500" if self.is_last else "\u251c\u2500\u2500"
@@ -54,16 +57,32 @@ class InstanceRow(Static):
         bottom = "" if self.is_last else "\u2502"
         return f"\u2502\n{content}\n{bottom}"
 
-    def update_state(self, is_active: bool, is_current: bool, is_last: bool) -> None:
+    def _apply_alert_class(self, alert_state: str | None) -> None:
+        """Add/remove bell and activity CSS classes based on alert state."""
+        if alert_state == "bell":
+            self.add_class("bell")
+            self.remove_class("activity")
+        elif alert_state == "activity":
+            self.add_class("activity")
+            self.remove_class("bell")
+        else:
+            self.remove_class("bell")
+            self.remove_class("activity")
+
+    def update_state(
+        self, is_active: bool, is_current: bool, is_last: bool, alert_state: str | None = None
+    ) -> None:
         """Update this row's display without remounting."""
         self.is_active = is_active
         self.is_current = is_current
         self.is_last = is_last
+        self.alert_state = alert_state
         self.update(self._render_label())
         if is_current:
             self.add_class("current")
         else:
             self.remove_class("current")
+        self._apply_alert_class(alert_state)
 
     def on_click(self) -> None:
         """Switch to this instance's tmux window in the inner session."""
@@ -149,30 +168,56 @@ class SidebarApp(App):
                 return inst_name
         return None
 
-    async def _get_tmux_window_ids(self) -> set[str]:
-        """Get active window IDs from the inner tmux session."""
+    async def _get_tmux_window_flags(self) -> dict[str, dict[str, bool]]:
+        """Get window IDs and their bell/activity/silence flags from inner session."""
         inner = f"{self.session_name}-inner"
+        fmt = "#{window_id} #{@ccmux_bell} #{window_activity_flag} #{window_silence_flag}"
         try:
             result = await asyncio.to_thread(
                 subprocess.run,
-                ["tmux", "list-windows", "-t", inner, "-F", "#{window_id}"],
+                ["tmux", "list-windows", "-t", inner, "-F", fmt],
                 capture_output=True,
                 text=True,
                 check=True,
             )
-            return set(result.stdout.strip().split("\n")) if result.stdout.strip() else set()
+            flags: dict[str, dict[str, bool]] = {}
+            for line in result.stdout.strip().split("\n"):
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) >= 4:
+                    wid = parts[0]
+                    flags[wid] = {
+                        "bell": parts[1] == "1",
+                        "activity": parts[2] == "1",
+                        "silence": parts[3] == "1",
+                    }
+            return flags
         except subprocess.CalledProcessError:
-            return set()
+            return {}
 
     def _build_demo_snapshot(self) -> list[tuple]:
         """Build dummy snapshot data for testing outside tmux."""
         return [
-            ("my-project", "main", "main", True, True),
-            ("my-project", "feat-auth", "worktree", True, False),
-            ("my-project", "fix-bug", "worktree", False, False),
-            ("other-repo", "default", "main", True, False),
-            ("other-repo", "refactor", "worktree", False, False),
+            ("my-project", "main", "main", True, True, None),
+            ("my-project", "feat-auth", "worktree", True, False, "bell"),
+            ("my-project", "fix-bug", "worktree", False, False, None),
+            ("other-repo", "default", "main", True, False, "activity"),
+            ("other-repo", "refactor", "worktree", False, False, None),
         ]
+
+    @staticmethod
+    def _resolve_alert_state(flags: dict[str, bool] | None) -> str | None:
+        """Determine alert state from window flags (bell > silence-reset > activity)."""
+        if not flags:
+            return None
+        if flags.get("bell"):
+            return "bell"
+        if flags.get("silence"):
+            return None  # silence overrides activity
+        if flags.get("activity"):
+            return "activity"
+        return None
 
     async def _build_snapshot(self) -> list[tuple]:
         """Build a comparable snapshot of the current instance state."""
@@ -183,16 +228,18 @@ class SidebarApp(App):
         if not instances:
             return []
 
-        active_window_ids = await self._get_tmux_window_ids()
+        window_flags = await self._get_tmux_window_flags()
         current_instance = await self._get_current_instance_name()
 
         snapshot = []
         for inst in instances:
             repo_name = Path(inst["repo_path"]).name
-            is_active = inst.get("tmux_window_id") in active_window_ids
+            wid = inst.get("tmux_window_id")
+            is_active = wid in window_flags
             is_current = inst["name"] == current_instance
             inst_type = "worktree" if inst.get("is_worktree", True) else "main"
-            snapshot.append((repo_name, inst["name"], inst_type, is_active, is_current))
+            alert_state = self._resolve_alert_state(window_flags.get(wid))
+            snapshot.append((repo_name, inst["name"], inst_type, is_active, is_current, alert_state))
         return snapshot
 
     def _build_widgets(self, snapshot: list[tuple]) -> list[Static]:
@@ -210,7 +257,9 @@ class SidebarApp(App):
             if idx > 0:
                 widgets.append(Static("", classes="repo-spacer"))
             widgets.append(RepoHeader(f"\u25cf {repo_name}/", id=f"repo-{repo_name}"))
-            for i, (_, inst_name, inst_type, is_active, is_current) in enumerate(repo_entries):
+            for i, (_, inst_name, inst_type, is_active, is_current, alert_state) in enumerate(
+                repo_entries
+            ):
                 widgets.append(
                     InstanceRow(
                         instance_name=inst_name,
@@ -219,6 +268,7 @@ class SidebarApp(App):
                         is_current=is_current,
                         is_last=(i == len(repo_entries) - 1),
                         session=self.session_name,
+                        alert_state=alert_state,
                         id=f"inst-{inst_name}",
                     )
                 )
@@ -244,9 +294,14 @@ class SidebarApp(App):
             for entry in snapshot:
                 repos.setdefault(entry[0], []).append(entry)
             for repo_entries in repos.values():
-                for i, (_, inst_name, inst_type, is_active, is_current) in enumerate(repo_entries):
+                for i, (_, inst_name, inst_type, is_active, is_current, alert_state) in enumerate(
+                    repo_entries
+                ):
                     row = self.query_one(f"#inst-{inst_name}", InstanceRow)
-                    row.update_state(is_active, is_current, is_last=(i == len(repo_entries) - 1))
+                    row.update_state(
+                        is_active, is_current, is_last=(i == len(repo_entries) - 1),
+                        alert_state=alert_state,
+                    )
             return
 
         # Structure changed — full rebuild

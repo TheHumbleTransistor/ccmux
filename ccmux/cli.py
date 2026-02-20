@@ -479,9 +479,11 @@ def _reload_session_sidebar(session: str) -> None:
 
 
 def _install_inner_hook(session: str) -> None:
-    """Install the after-select-window hook on the inner session.
+    """Install hooks on the inner session for sidebar refresh and bell tracking.
 
-    Sends SIGUSR1 to all sidebar PIDs when the user switches windows.
+    Registers two hooks:
+    - alert-bell: sets @ccmux_bell 1 on the triggering window, then notifies sidebars
+    - after-select-window: clears @ccmux_bell 0 on the selected window, then notifies sidebars
     """
     HOOKS_DIR.mkdir(parents=True, exist_ok=True)
     script_path = HOOKS_DIR / f"notify-sidebar-{session}.sh"
@@ -497,10 +499,24 @@ done
     script_path.chmod(0o755)
 
     inner = _inner_session_name(session)
+
+    # alert-bell: persist the bell flag and notify sidebars
     try:
         subprocess.run(
             ["tmux", "set-hook", "-t", inner,
-             "after-select-window", f"run-shell '{script_path}'"],
+             "alert-bell",
+             f"set -w @ccmux_bell 1 ; run-shell '{script_path}'"],
+            check=True, capture_output=True,
+        )
+    except subprocess.CalledProcessError:
+        pass
+
+    # after-select-window: clear the bell flag and notify sidebars
+    try:
+        subprocess.run(
+            ["tmux", "set-hook", "-t", inner,
+             "after-select-window",
+             f"set -w @ccmux_bell 0 ; run-shell '{script_path}'"],
             check=True, capture_output=True,
         )
     except subprocess.CalledProcessError:
@@ -508,15 +524,16 @@ done
 
 
 def _uninstall_inner_hook(session: str) -> None:
-    """Remove the after-select-window hook from the inner session."""
+    """Remove the alert-bell and after-select-window hooks from the inner session."""
     inner = _inner_session_name(session)
-    try:
-        subprocess.run(
-            ["tmux", "set-hook", "-u", "-t", inner, "after-select-window"],
-            check=True, capture_output=True,
-        )
-    except subprocess.CalledProcessError:
-        pass
+    for hook_name in ("alert-bell", "after-select-window"):
+        try:
+            subprocess.run(
+                ["tmux", "set-hook", "-u", "-t", inner, hook_name],
+                check=True, capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
 
     script_path = HOOKS_DIR / f"notify-sidebar-{session}.sh"
     try:

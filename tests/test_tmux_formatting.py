@@ -171,7 +171,7 @@ class TestTmuxFormatting:
         format_string = result.stdout.strip()
 
         # Format should have bell conditional that shows red background
-        assert "window_bell_flag" in format_string
+        assert "@ccmux_bell" in format_string
         assert "bg=red" in format_string
         assert "fg=white" in format_string  # White text on red background
         assert "#I:#W" in format_string
