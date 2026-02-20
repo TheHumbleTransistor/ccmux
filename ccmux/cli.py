@@ -773,7 +773,7 @@ def _show_instance_info(session_name: str, instance_name: str, instance_data: di
     console.print(f"[bold cyan]Path:[/bold cyan]       {worktree_path}\n")
 
 
-def _activate_all_in_session(session: str, no_confirm: bool = False) -> None:
+def _activate_all_in_session(session: str, yes: bool = False) -> None:
     """Activate all inactive instances in a session."""
     worktrees = state.get_all_worktrees(session)
 
@@ -798,7 +798,7 @@ def _activate_all_in_session(session: str, no_confirm: bool = False) -> None:
         console.print(f"  \u2022 {wt['name']}")
     console.print()
 
-    if not no_confirm:
+    if not yes:
         if not Confirm.ask(f"Activate all {len(inactive_worktrees)} instance(s)?", default=True):
             console.print("[yellow]Cancelled.[/yellow]")
             return
@@ -882,7 +882,7 @@ def _activate_all_in_session(session: str, no_confirm: bool = False) -> None:
     console.print(f"\n[bold green]Success![/bold green] Activated {activated_count} instance(s).")
 
 
-def _activate_single_instance(session: str, name: str, no_confirm: bool = False) -> None:
+def _activate_single_instance(session: str, name: str, yes: bool = False) -> None:
     """Activate a single instance by name."""
     worktrees = state.get_all_worktrees(session)
 
@@ -987,7 +987,7 @@ def _activate_single_instance(session: str, name: str, no_confirm: bool = False)
         # Auto-attach if not already in tmux
         if "TMUX" not in os.environ:
             console.print()
-            if no_confirm or Confirm.ask("Attach to tmux session now?", default=True):
+            if yes or Confirm.ask("Attach to tmux session now?", default=True):
                 os.execvp("tmux", ["tmux", "attach", "-t", f"={session}"])
 
     except subprocess.CalledProcessError as e:
@@ -1222,7 +1222,7 @@ def session_activate(
     name: Optional[str] = None,
     *,
     current: Annotated[bool, Parameter(name=["-c", "--current"], negative="")] = False,
-    no_confirm: bool = False,
+    yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
     common: CommonConfig,
 ) -> None:
     """Activate all inactive instances in a session.
@@ -1230,11 +1230,11 @@ def session_activate(
     Args:
         name: Session name (overrides --session)
         current: Use the current tmux session
-        no_confirm: Skip confirmation prompt
+        yes: Skip confirmation prompt
         common: Common parameters (session, etc.)
     """
     session = _resolve_session_name(name, current, common, allow_interactive=False)
-    _activate_all_in_session(session, no_confirm)
+    _activate_all_in_session(session, yes)
 
 
 @session_app.command(name="remove")
@@ -1242,7 +1242,7 @@ def session_remove(
     name: Optional[str] = None,
     *,
     current: Annotated[bool, Parameter(name=["-c", "--current"], negative="")] = False,
-    no_confirm: bool = False,
+    yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
     common: CommonConfig,
 ) -> None:
     """Remove an entire session and all its instances.
@@ -1250,7 +1250,7 @@ def session_remove(
     Args:
         name: Session name to remove
         current: Remove the current tmux session
-        no_confirm: Skip confirmation prompt
+        yes: Skip confirmation prompt
         common: Common parameters (session, etc.)
     """
     session = _resolve_session_name(name, current, common, allow_interactive=True)
@@ -1269,7 +1269,7 @@ def session_remove(
         console.print(f"  \u2022 {inst_name}")
     console.print()
 
-    if not no_confirm:
+    if not yes:
         if not Confirm.ask(f"[bold red]Permanently remove session '{session}'?[/bold red]", default=False):
             console.print("[yellow]Cancelled.[/yellow]")
             return
@@ -1811,7 +1811,7 @@ def instance_activate(
     name: Optional[str] = None,
     *,
     common: CommonConfig,
-    no_confirm: bool = False,
+    yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
     """Activate Claude Code in an instance (useful if tmux window was closed).
 
@@ -1820,13 +1820,13 @@ def instance_activate(
     Args:
         name: Instance name to activate (omit to activate all)
         common: Common parameters (session, etc.)
-        no_confirm: Skip confirmation prompt (default: False)
+        yes: Skip confirmation prompt (default: False)
     """
     session = common.session
     if name is None:
-        _activate_all_in_session(session, no_confirm)
+        _activate_all_in_session(session, yes)
     else:
-        _activate_single_instance(session, name, no_confirm)
+        _activate_single_instance(session, name, yes)
 
 
 @app.command(name="deactivate")
@@ -1834,7 +1834,7 @@ def instance_deactivate(
     name: Optional[str] = None,
     *,
     common: CommonConfig,
-    no_confirm: bool = False,
+    yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
     """Deactivate Claude Code instance(s) by killing tmux window (keeps instance).
 
@@ -1843,7 +1843,7 @@ def instance_deactivate(
     Args:
         name: Instance name to deactivate (omit to deactivate all)
         common: Common parameters (session, etc.)
-        no_confirm: Skip confirmation prompt (default: False)
+        yes: Skip confirmation prompt (default: False)
     """
     session = common.session
 
@@ -1869,7 +1869,7 @@ def instance_deactivate(
             console.print(f"  \u2022 {inst['name']}")
         console.print()
 
-        if not no_confirm:
+        if not yes:
             if not Confirm.ask(f"Deactivate all {len(active_instances)} instance(s)?", default=False):
                 console.print("[yellow]Cancelled.[/yellow]")
                 return
@@ -1930,7 +1930,7 @@ def instance_remove(
     name: Optional[str] = None,
     *,
     common: CommonConfig,
-    no_confirm: bool = False,
+    yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
     """Remove instance(s) permanently (deactivates and deletes worktree).
 
@@ -1939,7 +1939,7 @@ def instance_remove(
     Args:
         name: Instance name to remove (omit to remove all)
         common: Common parameters (session, etc.)
-        no_confirm: Skip confirmation prompt (default: False)
+        yes: Skip confirmation prompt (default: False)
     """
     session = common.session
 
@@ -1972,7 +1972,7 @@ def instance_remove(
                 console.print(f"    \u2022 {wt['name']}")
         console.print()
 
-        if not no_confirm:
+        if not yes:
             if not Confirm.ask(f"[bold red]Permanently remove all {len(worktrees)} instance(s)?[/bold red]", default=False):
                 console.print("[yellow]Cancelled.[/yellow]")
                 return
@@ -2088,7 +2088,7 @@ def instance_remove(
     console.print(f"  Path: {wt_path}")
     console.print(f"  Status: {'Active' if is_active else 'Inactive'}\n")
 
-    if not no_confirm:
+    if not yes:
         prompt = f"[bold red]Remove '{name}' from tracking?[/bold red]" if is_main_repo else f"[bold red]Permanently remove instance '{name}'?[/bold red]"
         if not Confirm.ask(prompt, default=False):
             console.print("[yellow]Cancelled.[/yellow]")
