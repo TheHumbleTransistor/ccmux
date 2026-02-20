@@ -433,9 +433,49 @@ def _kill_outer_session(session: str) -> bool:
 
 
 def _reload_session_sidebar(session: str) -> None:
-    """Kill and recreate the outer session (sidebar reload)."""
-    _kill_outer_session(session)
-    _ensure_outer_session(session)
+    """Respawn the sidebar pane in the outer session without killing the session.
+
+    Finds pane 0 (the sidebar), kills it, then splits a new sidebar pane
+    on the left. The nested tmux client pane is left untouched.
+    """
+    if not tmux_session_exists(session):
+        return
+
+    python_exe = sys.executable or "python3"
+    sidebar_cmd = (
+        f"COLORTERM=truecolor {python_exe} -m ccmux.sidebar {session} ; "
+        f"echo 'Sidebar exited. Press enter to close.' ; read"
+    )
+
+    try:
+        # Kill the existing sidebar pane (pane 0, leftmost)
+        subprocess.run(
+            ["tmux", "kill-pane", "-t", f"{session}:0.0"],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError:
+        pass
+
+    try:
+        # Split a new sidebar pane on the left (25% width)
+        subprocess.run(
+            [
+                "tmux", "split-window",
+                "-t", f"{session}:0",
+                "-hb",
+                "-l", "25%",
+                sidebar_cmd,
+            ],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        print(
+            f"ccmux: failed to respawn sidebar for '{session}': {exc}\n"
+            f"  stderr: {exc.stderr.decode() if exc.stderr else '(none)'}",
+            file=sys.stderr,
+        )
 
 
 def _install_inner_hook(session: str) -> None:
