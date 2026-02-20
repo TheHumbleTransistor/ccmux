@@ -201,7 +201,10 @@ class SidebarApp(App):
             repos.setdefault(entry[0], []).append(entry)
 
         widgets: list[Static] = []
-        for repo_name, repo_entries in repos.items():
+        repo_items = list(repos.items())
+        for idx, (repo_name, repo_entries) in enumerate(repo_items):
+            if idx > 0:
+                widgets.append(Static("", classes="repo-spacer"))
             widgets.append(RepoHeader(f"{repo_name}/", id=f"repo-{repo_name}"))
             for i, (_, inst_name, inst_type, is_active, is_current) in enumerate(repo_entries):
                 widgets.append(

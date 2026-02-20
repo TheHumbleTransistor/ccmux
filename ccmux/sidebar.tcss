@@ -50,3 +50,8 @@ RepoHeader {
     color: #d7af5f;
     text-style: bold;
 }
+
+.repo-spacer {
+    height: 1;
+    background: #1e1e1e;
+}
