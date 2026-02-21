@@ -51,12 +51,14 @@ class SidebarApp(App):
         self._poll_interval = poll_interval
         self._last_snapshot: list[tuple] = []
         self._refresh_lock = asyncio.Lock()
+        self._instance_list:Vertical | None = None
 
     def compose(self) -> ComposeResult:
         yield NonInteractiveStatic("CCMUX", id="title")
         yield NonInteractiveStatic(f"Session: {self.session_name}", id="header")
         yield NonInteractiveStatic("", id="spacer")
-        yield Vertical(id="instance-list")
+        self._instance_list = Vertical(id="instance-list")
+        yield self._instance_list
 
     async def on_mount(self) -> None:
         await self._refresh_instances(caller="mount")
@@ -65,6 +67,11 @@ class SidebarApp(App):
 
     async def _refresh_instances(self, caller: str = "unknown") -> None:
         """Refresh the instance list with a full rebuild every time."""
+        if self._instance_list is None:
+            return
+        if self._refresh_lock.locked():
+            log.debug("refresh SKIPPED (already running) caller=%s", caller)
+            return
         async with self._refresh_lock:
             log.debug("refresh START caller=%s", caller)
 
@@ -74,7 +81,7 @@ class SidebarApp(App):
                 snap = await snapshot.build_snapshot(self.session_name)
 
             log.debug("refresh REBUILD caller=%s", caller)
-            container = self.query_one("#instance-list", Vertical)
+            container = self._instance_list
             if not snap:
                 new_widgets = [NonInteractiveStatic("  No instances")]
             else:
@@ -102,5 +109,7 @@ class SidebarApp(App):
         """Handle SIGUSR1 signal by scheduling a refresh."""
         log.debug("SIGUSR1 received")
         self.run_worker(
-            self._refresh_instances(caller="signal"), group="refresh",
+            self._refresh_instances(caller="signal"),
+            group="refresh",
+            exit_on_error=False,
         )
