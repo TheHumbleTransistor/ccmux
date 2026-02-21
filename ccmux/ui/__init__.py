@@ -5,6 +5,7 @@ from ccmux.ui.sidebar import (  # noqa: F401
     InstanceRow,
     NonInteractiveStatic,
     RepoHeader,
+    RepoInstancesList,
     SidebarApp,
     remove_pid_file,
     write_pid_file,

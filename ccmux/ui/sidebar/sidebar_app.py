@@ -9,8 +9,8 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 
-from ccmux.ui.sidebar import model, view
-from ccmux.ui.sidebar.widgets import NonInteractiveStatic
+from ccmux.ui.sidebar import snapshot
+from ccmux.ui.sidebar.widgets import NonInteractiveStatic, RepoInstancesList
 
 POLL_INTERVAL = 5.0
 DEMO_POLL_INTERVAL = 1.0
@@ -69,13 +69,20 @@ class SidebarApp(App):
             log.debug("refresh START caller=%s", caller)
 
             if self._snapshot_fn is not None:
-                snapshot = await self._snapshot_fn()
+                snap = await self._snapshot_fn()
             else:
-                snapshot = await model.build_snapshot(self.session_name)
+                snap = await snapshot.build_snapshot(self.session_name)
 
             log.debug("refresh REBUILD caller=%s", caller)
             container = self.query_one("#instance-list", Vertical)
-            new_widgets = view.build_widgets(snapshot, self.session_name)
+            if not snap:
+                new_widgets = [NonInteractiveStatic("  No instances")]
+            else:
+                grouped = snapshot.group_by_repo(snap)
+                new_widgets = [
+                    RepoInstancesList(repo_name, entries, self.session_name, id=f"repo-group-{repo_name}")
+                    for repo_name, entries in grouped.items()
+                ]
             await container.remove_children()
             await container.mount(*new_widgets)
 

@@ -1,0 +1,43 @@
+InstanceRow {
+    height: 1;
+    padding: 0 1;
+    color: #9e9e9e;
+}
+
+InstanceRow .indicator {
+    width: 2;
+}
+
+InstanceRow .name {
+    width: 1fr;
+}
+
+InstanceRow .type {
+    color: #666666;
+}
+
+InstanceRow:hover {
+    background: #2c2c2c;
+}
+
+InstanceRow.current {
+    background: #3a3a3a;
+    color: #bcbcbc;
+    text-style: bold;
+}
+
+InstanceRow.bell {
+    background: #402020;
+}
+
+InstanceRow.activity {
+    background: #1e3520;
+}
+
+InstanceRow.current.bell {
+    background: #4a2828;
+}
+
+InstanceRow.current.activity {
+    background: #284a28;
+}

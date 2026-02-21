@@ -3,7 +3,7 @@
 import atexit
 import sys
 
-from ccmux.ui.sidebar.controller import DEMO_POLL_INTERVAL, SidebarApp
+from ccmux.ui.sidebar.sidebar_app import DEMO_POLL_INTERVAL, SidebarApp
 from ccmux.ui.sidebar.process_id import remove_pid_file, write_pid_file
 
 

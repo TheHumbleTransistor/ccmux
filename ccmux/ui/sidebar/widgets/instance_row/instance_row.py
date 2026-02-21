@@ -1,21 +1,17 @@
-"""Sidebar widget classes."""
+"""InstanceRow — horizontal container with indicator, name, and type labels."""
 
 import asyncio
 import subprocess
 
-from textual import events
+from textual.app import ComposeResult
+from textual.containers import Horizontal
 from textual.widgets import Static
 
 
-class NonInteractiveStatic(Static):
-    """Static widget that consumes click events to prevent propagation."""
+class InstanceRow(Horizontal):
+    """A clickable row showing instance status, name, and type."""
 
-    def on_click(self, event: events.Click) -> None:
-        event.stop()
-
-
-class InstanceRow(Static):
-    """A clickable 3-row block: tree pad above, content, tree pad below."""
+    CSS_PATH = "instance_row.tcss"
 
     def __init__(
         self,
@@ -23,29 +19,26 @@ class InstanceRow(Static):
         instance_type: str,
         is_active: bool,
         is_current: bool,
-        is_last: bool,
         session: str,
         alert_state: str | None = None,
         **kwargs,
     ) -> None:
+        super().__init__(**kwargs)
         self.instance_name = instance_name
         self.instance_type = instance_type
         self.is_active = is_active
         self.is_current = is_current
-        self.is_last = is_last
         self.session = session
         self.alert_state = alert_state
-        super().__init__(self._render_label(), **kwargs)
         if is_current:
             self.add_class("current")
         self._apply_alert_class(alert_state)
 
-    def _render_label(self) -> str:
-        connector = "\u2514\u2500\u2500" if self.is_last else "\u251c\u2500\u2500"
+    def compose(self) -> ComposeResult:
         indicator = "\u25cf" if self.is_active else "\u25cb"
-        content = f"{connector} {indicator} {self.instance_name:<10} {self.instance_type}"
-        bottom = "" if self.is_last else "\u2502"
-        return f"\u2502\n{content}\n{bottom}"
+        yield Static(indicator, classes="indicator")
+        yield Static(self.instance_name, classes="name")
+        yield Static(self.instance_type, classes="type")
 
     def _apply_alert_class(self, alert_state: str | None) -> None:
         """Add/remove bell and activity CSS classes based on alert state."""
@@ -70,7 +63,3 @@ class InstanceRow(Static):
             )
         except subprocess.CalledProcessError:
             pass
-
-
-class RepoHeader(NonInteractiveStatic):
-    """Non-clickable section header for a repository group."""

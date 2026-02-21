@@ -1,0 +1,6 @@
+RepoHeader {
+    height: 1;
+    padding: 0 1;
+    color: #d7af5f;
+    text-style: bold;
+}
