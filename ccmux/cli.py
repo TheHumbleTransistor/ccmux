@@ -106,11 +106,15 @@ def get_default_branch() -> Optional[str]:
     return None
 
 
-def worktree_exists(worktree_path: Path) -> bool:
+def worktree_exists(worktree_path: Path, repo_path: Path | None = None) -> bool:
     """Check if a worktree exists and is registered."""
     try:
+        cmd = ["git"]
+        if repo_path:
+            cmd += ["-C", str(repo_path)]
+        cmd += ["worktree", "list"]
         result = subprocess.run(
-            ["git", "worktree", "list"],
+            cmd,
             capture_output=True,
             text=True,
             check=True,
@@ -1114,7 +1118,7 @@ def instance_new(
             candidate = sanitize_name(generate_animal_name())
             if create_as_worktree:
                 test_path = repo_root / ".worktrees" / candidate
-                if not worktree_exists(test_path):
+                if not worktree_exists(test_path, repo_root):
                     name = candidate
                     break
             else:
@@ -1150,7 +1154,7 @@ def instance_new(
     # Create worktree if needed
     if create_as_worktree:
         try:
-            if worktree_exists(instance_path):
+            if worktree_exists(instance_path, repo_root):
                 console.print("  [yellow]Worktree already exists, reusing it.[/yellow]")
             else:
                 subprocess.run(
@@ -1683,7 +1687,7 @@ def instance_remove(
 
             if is_main_repo:
                 console.print(f"{prefix}[dim]Main repository - no git worktree to remove[/dim]")
-            elif worktree_exists(wt_path):
+            elif worktree_exists(wt_path, Path(wt.repo_path)):
                 try:
                     repo_path = Path(wt.repo_path)
                     subprocess.run(
@@ -1792,7 +1796,7 @@ def instance_remove(
 
     if is_main_repo:
         console.print(f"  [dim]Main repository - no git worktree to remove[/dim]")
-    elif worktree_exists(wt_path):
+    elif worktree_exists(wt_path, Path(worktree.repo_path)):
         try:
             repo_path = Path(worktree.repo_path)
             subprocess.run(
