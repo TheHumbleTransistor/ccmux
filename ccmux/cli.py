@@ -649,13 +649,13 @@ def _uninstall_inner_hook(session: str) -> None:
 
 # --- Detection Helpers ---
 
-def detect_current_ccmux_session() -> Optional[tuple[str, dict]]:
+def detect_current_ccmux_session() -> Optional[tuple[str, "state.Session"]]:
     """Detect the current ccmux session from tmux environment.
 
     Strips '-inner' suffix since get_current_tmux_session() returns
     the inner session name when called from within an instance.
 
-    Returns (session_name, session_data) or None.
+    Returns (session_name, Session) or None.
     """
     tmux_session = get_current_tmux_session()
     if not tmux_session:
@@ -668,10 +668,10 @@ def detect_current_ccmux_session() -> Optional[tuple[str, dict]]:
     return None
 
 
-def detect_current_ccmux_instance() -> Optional[tuple[str, str, dict]]:
+def detect_current_ccmux_instance() -> Optional[tuple[str, str, "state.Instance"]]:
     """Detect the current ccmux instance from tmux environment.
 
-    Returns (session_name, instance_name, instance_data) or None.
+    Returns (session_name, instance_name, Instance) or None.
     """
     if "TMUX" not in os.environ:
         return None
@@ -689,10 +689,10 @@ def detect_current_ccmux_instance() -> Optional[tuple[str, str, dict]]:
     except subprocess.CalledProcessError:
         return None
 
-    return state.find_worktree_by_tmux_ids(tmux_session_id, tmux_window_id)
+    return state.find_instance_by_tmux_ids(tmux_session_id, tmux_window_id)
 
 
-def detect_current_ccmux_instance_any() -> Optional[tuple[str, str, dict]]:
+def detect_current_ccmux_instance_any() -> Optional[tuple[str, str, "state.Instance"]]:
     """Detect the current ccmux instance from inner or bash session.
 
     First tries the inner-session detection (detect_current_ccmux_instance).
@@ -700,7 +700,7 @@ def detect_current_ccmux_instance_any() -> Optional[tuple[str, str, dict]]:
     (e.g. 'default-bash') and window name (= instance name) to look up
     the instance in state.
 
-    Returns (session_name, instance_name, instance_data) or None.
+    Returns (session_name, instance_name, Instance) or None.
     """
     result = detect_current_ccmux_instance()
     if result:
@@ -715,7 +715,7 @@ def detect_current_ccmux_instance_any() -> Optional[tuple[str, str, dict]]:
     if not window_name:
         return None
 
-    instance_data = state.get_worktree(ccmux_session, window_name)
+    instance_data = state.get_instance(ccmux_session, window_name)
     if instance_data:
         return (ccmux_session, window_name, instance_data)
     return None
@@ -729,7 +729,7 @@ def _display_session_table(session: str) -> None:
     Args:
         session: Session name to display
     """
-    instances = state.get_all_worktrees(session)
+    instances = state.get_all_instances(session)
 
     if not instances:
         console.print(f"\n[yellow]No instances found in session '{session}'.[/yellow]")
@@ -747,11 +747,11 @@ def _display_session_table(session: str) -> None:
 
     active_count = 0
     for inst in instances:
-        name = inst["name"]
-        repo_path = Path(inst["repo_path"])
-        instance_path = Path(inst["instance_path"])
-        tmux_window_id = inst.get("tmux_window_id")
-        is_worktree = inst.get("is_worktree", True)  # Default to True for backward compat
+        name = inst.name
+        repo_path = Path(inst.repo_path)
+        instance_path = Path(inst.instance_path)
+        tmux_window_id = inst.tmux_window_id
+        is_worktree = inst.is_worktree
 
         # Get repository name
         repo_name = repo_path.name
@@ -805,12 +805,12 @@ def _display_session_table(session: str) -> None:
     console.print()
 
 
-def _show_instance_info(session_name: str, instance_name: str, instance_data: dict) -> None:
+def _show_instance_info(session_name: str, instance_name: str, instance_data) -> None:
     """Display info about a specific instance."""
-    repo_path = Path(instance_data["repo_path"])
+    repo_path = Path(instance_data.repo_path)
     repo_name = repo_path.name
-    worktree_path = Path(instance_data["instance_path"])
-    is_worktree = instance_data.get("is_worktree", True)
+    worktree_path = Path(instance_data.instance_path)
+    is_worktree = instance_data.is_worktree
 
     try:
         branch_result = subprocess.run(
@@ -833,7 +833,7 @@ def _show_instance_info(session_name: str, instance_name: str, instance_data: di
 
 def _activate_all_in_session(session: str, yes: bool = False) -> None:
     """Activate all inactive instances in a session."""
-    worktrees = state.get_all_worktrees(session)
+    worktrees = state.get_all_instances(session)
 
     if not worktrees:
         console.print(f"[yellow]No instances found in session '{session}'.[/yellow]")
@@ -843,7 +843,7 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
     # Check which are inactive (checks inner session)
     inactive_worktrees = []
     for wt in worktrees:
-        if not is_instance_window_active(session, wt.get("tmux_window_id")):
+        if not is_instance_window_active(session, wt.tmux_window_id):
             inactive_worktrees.append(wt)
 
     if not inactive_worktrees:
@@ -853,7 +853,7 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
 
     console.print(f"\n[bold cyan]Found {len(inactive_worktrees)} inactive instance(s):[/bold cyan]")
     for wt in inactive_worktrees:
-        console.print(f"  \u2022 {wt['name']}")
+        console.print(f"  \u2022 {wt.name}")
     console.print()
 
     if not yes:
@@ -866,8 +866,8 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
 
     activated_count = 0
     for i, wt in enumerate(inactive_worktrees):
-        wt_name = wt["name"]
-        wt_path = wt["instance_path"]
+        wt_name = wt.name
+        wt_path = wt.instance_path
 
         launch_cmd = (
             f"echo 'Activating Claude Code in {wt_path}'; "
@@ -942,7 +942,7 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
 
 def _activate_single_instance(session: str, name: str, yes: bool = False) -> None:
     """Activate a single instance by name."""
-    worktrees = state.get_all_worktrees(session)
+    worktrees = state.get_all_instances(session)
 
     if not worktrees:
         console.print(f"[yellow]No instances found in session '{session}'.[/yellow]")
@@ -952,7 +952,7 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
     # Find the instance
     worktree = None
     for wt in worktrees:
-        if wt["name"] == name:
+        if wt.name == name:
             worktree = wt
             break
 
@@ -962,12 +962,12 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
         sys.exit(1)
 
     # Check if already active - ensure outer session even if window exists
-    if is_instance_window_active(session, worktree.get("tmux_window_id")):
+    if is_instance_window_active(session, worktree.tmux_window_id):
         _ensure_outer_session(session)
         console.print(f"[yellow]Instance '{name}' already has an active tmux window.[/yellow]")
         return
 
-    wt_path = worktree["instance_path"]
+    wt_path = worktree.instance_path
 
     console.print(f"\n[bold cyan]Activating Claude Code instance:[/bold cyan] {name}")
     console.print(f"  Instance: {wt_path}")
@@ -1082,23 +1082,23 @@ def _resolve_session_name(
         return name
 
     if allow_interactive:
-        all_state = state.load_state()
-        sessions = list(all_state.get("sessions", {}).keys())
-        if not sessions:
+        all_sessions = state.get_all_sessions()
+        session_names = [s.name for s in all_sessions]
+        if not session_names:
             console.print("[yellow]No sessions found.[/yellow]")
             sys.exit(1)
-        if len(sessions) == 1:
-            return sessions[0]
+        if len(session_names) == 1:
+            return session_names[0]
 
         console.print("\n[bold]Sessions:[/bold]")
-        for i, s in enumerate(sessions):
+        for i, s in enumerate(session_names):
             console.print(f"  {i + 1}. {s}")
 
         choice = Prompt.ask(
             "\nSelect session",
-            choices=[str(i + 1) for i in range(len(sessions))],
+            choices=[str(i + 1) for i in range(len(session_names))],
         )
-        return sessions[int(choice) - 1]
+        return session_names[int(choice) - 1]
 
     return common.session
 
@@ -1121,12 +1121,11 @@ def session_info(name: Optional[str] = None, *, common: CommonConfig) -> None:
         console.print(f"\nCreate one with: [cyan]ccmux new --session {session_name}[/cyan]")
         return
 
-    instances = session_data.get("instances", session_data.get("worktrees", {}))
-    total = len(instances)
+    total = len(session_data.instances)
 
     active = 0
-    for inst_data in instances.values():
-        if is_instance_window_active(session_name, inst_data.get("tmux_window_id")):
+    for inst in session_data.instances.values():
+        if is_instance_window_active(session_name, inst.tmux_window_id):
             active += 1
 
     tmux_status = "Running" if tmux_session_exists(_inner_session_name(session_name)) else "Not running"
@@ -1139,8 +1138,7 @@ def session_info(name: Optional[str] = None, *, common: CommonConfig) -> None:
 @session_app.command(name="list")
 def session_list(*, common: CommonConfig) -> None:
     """List all ccmux sessions with summary info."""
-    all_state = state.load_state()
-    sessions = all_state.get("sessions", {})
+    sessions = state.get_all_sessions()
 
     if not sessions:
         console.print("\n[yellow]No sessions found.[/yellow]")
@@ -1153,17 +1151,16 @@ def session_list(*, common: CommonConfig) -> None:
     table.add_column("Active", justify="right", style="green")
     table.add_column("Tmux Status", style="bold")
 
-    for session_name, session_data in sessions.items():
-        instances = session_data.get("instances", session_data.get("worktrees", {}))
-        total = len(instances)
+    for sess in sessions:
+        total = len(sess.instances)
 
         active = 0
-        for inst_data in instances.values():
-            if is_instance_window_active(session_name, inst_data.get("tmux_window_id")):
+        for inst in sess.instances.values():
+            if is_instance_window_active(sess.name, inst.tmux_window_id):
                 active += 1
 
-        tmux_status = "[green]Running[/green]" if tmux_session_exists(_inner_session_name(session_name)) else "[dim]Not running[/dim]"
-        table.add_row(session_name, str(total), str(active), tmux_status)
+        tmux_status = "[green]Running[/green]" if tmux_session_exists(_inner_session_name(sess.name)) else "[dim]Not running[/dim]"
+        table.add_row(sess.name, str(total), str(active), tmux_status)
 
     console.print()
     console.print(table)
@@ -1198,21 +1195,21 @@ def session_rename(
         old_name = detected[0]
     elif old is None and new is None:
         # Interactive mode
-        all_state = state.load_state()
-        sessions = list(all_state.get("sessions", {}).keys())
-        if not sessions:
+        all_sessions = state.get_all_sessions()
+        session_names = [s.name for s in all_sessions]
+        if not session_names:
             console.print("[yellow]No sessions found.[/yellow]")
             return
 
         console.print("\n[bold]Sessions:[/bold]")
-        for i, s in enumerate(sessions):
+        for i, s in enumerate(session_names):
             console.print(f"  {i + 1}. {s}")
 
         choice = Prompt.ask(
             "\nSelect session to rename",
-            choices=[str(i + 1) for i in range(len(sessions))],
+            choices=[str(i + 1) for i in range(len(session_names))],
         )
-        old_name = sessions[int(choice) - 1]
+        old_name = session_names[int(choice) - 1]
         raw_new = Prompt.ask("New name")
         new_name = sanitize_name(raw_new)
     else:
@@ -1315,12 +1312,12 @@ def session_remove(
     """
     session = _resolve_session_name(name, current, common, allow_interactive=True)
 
-    session_data = state.get_session(session)
-    if not session_data:
+    session_obj = state.get_session(session)
+    if not session_obj:
         console.print(f"[red]Error:[/red] Session '{session}' not found.", style="bold")
         sys.exit(1)
 
-    instances = session_data.get("instances", session_data.get("worktrees", {}))
+    instances = session_obj.instances
 
     console.print(f"\n[bold red]Removing session '{session}' and all {len(instances)} instance(s)[/bold red]")
     console.print("[red]Worktree instances will be permanently deleted![/red]\n")
@@ -1336,11 +1333,11 @@ def session_remove(
 
     # Deactivate and remove each instance
     removed_count = 0
-    for inst_name, inst_data in instances.items():
-        tmux_window_id = inst_data.get("tmux_window_id")
-        is_wt = inst_data.get("is_worktree", True)
-        inst_path = Path(inst_data.get("instance_path", inst_data.get("worktree_path", "")))
-        repo_path = Path(inst_data.get("repo_path", ""))
+    for inst_name, inst in instances.items():
+        tmux_window_id = inst.tmux_window_id
+        is_wt = inst.is_worktree
+        inst_path = Path(inst.instance_path)
+        repo_path = Path(inst.repo_path)
 
         # Kill tmux window if active (in inner session)
         if is_instance_window_active(session, tmux_window_id):
@@ -1416,8 +1413,8 @@ def session_attach(*, common: CommonConfig) -> None:
     """
     session = common.session
 
-    session_data = state.get_session(session)
-    if session_data is None:
+    session_obj = state.get_session(session)
+    if session_obj is None:
         console.print(f"[red]Error:[/red] ccmux session '{session}' not found.", style="bold")
         console.print(f"\nCreate an instance with: [cyan]ccmux new --session {session}[/cyan]")
         sys.exit(1)
@@ -1496,7 +1493,7 @@ def instance_new(
     if not worktree:
         existing_main = state.find_main_repo_instance(str(repo_root), session)
         if existing_main:
-            console.print(f"[yellow]Warning:[/yellow] Main repository already has an instance: '{existing_main['name']}'")
+            console.print(f"[yellow]Warning:[/yellow] Main repository already has an instance: '{existing_main.name}'")
             if yes or Confirm.ask("Create a worktree instead?", default=True):
                 create_as_worktree = True
             else:
@@ -1513,7 +1510,7 @@ def instance_new(
                     name = candidate
                     break
             else:
-                if not state.get_worktree(session, candidate):
+                if not state.get_instance(session, candidate):
                     name = candidate
                     break
 
@@ -1633,21 +1630,21 @@ def instance_new(
             capture_output=True, text=True, check=True,
         ).stdout.strip()
 
-        state.add_worktree(
+        state.add_instance(
             session_name=session,
-            worktree_name=name,
+            instance_name=name,
             repo_path=str(repo_root),
-            worktree_path=str(instance_path),
+            instance_path=str(instance_path),
             tmux_session_id=tmux_session_id,
             tmux_window_id=tmux_window_id,
             is_worktree=create_as_worktree
         )
     except subprocess.CalledProcessError:
-        state.add_worktree(
+        state.add_instance(
             session_name=session,
-            worktree_name=name,
+            instance_name=name,
             repo_path=str(repo_root),
-            worktree_path=str(instance_path),
+            instance_path=str(instance_path),
             is_worktree=create_as_worktree
         )
 
@@ -1656,18 +1653,18 @@ def instance_new(
 
     # Auto-reactivate orphaned instances when a new session was just created
     if is_first_instance:
-        existing_instances = state.get_all_worktrees(session)
+        existing_instances = state.get_all_instances(session)
         orphans = [
             inst for inst in existing_instances
-            if inst["name"] != name
+            if inst.name != name
         ]
 
         if orphans:
             console.print(f"\n[bold cyan]Reactivating {len(orphans)} orphaned instance(s):[/bold cyan]")
             for inst in orphans:
-                inst_name = inst["name"]
-                inst_path = inst["instance_path"]
-                inst_type = "worktree" if inst.get("is_worktree", True) else "main repo"
+                inst_name = inst.name
+                inst_path = inst.instance_path
+                inst_type = inst.instance_type + " repo" if not inst.is_worktree else "worktree"
 
                 reactivate_cmd = (
                     f"echo 'Reactivating Claude Code in {inst_path} ({inst_type} instance: {inst_name})'; "
@@ -1735,19 +1732,18 @@ def instance_list(
         all_sessions: List instances for all sessions
     """
     if all_sessions:
-        all_state = state.load_state()
-        sessions = all_state.get("sessions", {})
+        sessions = state.get_all_sessions()
 
         if not sessions:
             console.print("\n[yellow]No sessions found.[/yellow]")
             console.print(f"Create one with: [cyan]ccmux new[/cyan]")
             return
 
-        for session_name in sessions.keys():
-            _display_session_table(session_name)
+        for sess in sessions:
+            _display_session_table(sess.name)
     else:
         session = common.session
-        instances = state.get_all_worktrees(session)
+        instances = state.get_all_instances(session)
 
         if not instances:
             console.print("\n[yellow]No instances found.[/yellow]")
@@ -1777,7 +1773,7 @@ def instance_rename(
         # Explicit: ccmux instance rename <old> <new>
         old_name = old
         new_name = sanitize_name(new)
-        instance_data = state.get_worktree(session, old_name)
+        instance_data = state.get_instance(session, old_name)
         if not instance_data:
             console.print(f"[red]Error:[/red] Instance '{old_name}' not found in session '{session}'.", style="bold")
             sys.exit(1)
@@ -1793,21 +1789,21 @@ def instance_rename(
         instance_data = detected[2]
     elif old is None and new is None:
         # Interactive mode
-        instances = state.get_all_worktrees(session)
+        instances = state.get_all_instances(session)
         if not instances:
             console.print(f"[yellow]No instances found in session '{session}'.[/yellow]")
             return
 
         console.print(f"\n[bold]Instances in session '{session}':[/bold]")
         for i, inst in enumerate(instances):
-            console.print(f"  {i + 1}. {inst['name']}")
+            console.print(f"  {i + 1}. {inst.name}")
 
         choice = Prompt.ask(
             "\nSelect instance to rename",
             choices=[str(i + 1) for i in range(len(instances))],
         )
-        old_name = instances[int(choice) - 1]["name"]
-        instance_data = state.get_worktree(session, old_name)
+        old_name = instances[int(choice) - 1].name
+        instance_data = state.get_instance(session, old_name)
         raw_new = Prompt.ask("New name")
         new_name = sanitize_name(raw_new)
     else:
@@ -1819,10 +1815,10 @@ def instance_rename(
         return
 
     # If it's a worktree, move the directory first (most likely to fail)
-    is_wt = instance_data.get("is_worktree", True)
+    is_wt = instance_data.is_worktree
     if is_wt:
-        old_path = Path(instance_data["instance_path"])
-        repo_path = Path(instance_data["repo_path"])
+        old_path = Path(instance_data.instance_path)
+        repo_path = Path(instance_data.repo_path)
         new_path = old_path.parent / new_name
 
         if old_path.exists():
@@ -1838,7 +1834,7 @@ def instance_rename(
 
     # Rename in state
     if not state.rename_instance(session, old_name, new_name):
-        if not state.get_worktree(session, old_name):
+        if not state.get_instance(session, old_name):
             console.print(f"[red]Error:[/red] Instance '{old_name}' not found.", style="bold")
         else:
             console.print(f"[red]Error:[/red] Instance '{new_name}' already exists.", style="bold")
@@ -1846,13 +1842,10 @@ def instance_rename(
 
     # Update instance_path in state if worktree was moved
     if is_wt:
-        s = state.load_state()
-        inst = s["sessions"][session]["instances"][new_name]
-        inst["instance_path"] = str(new_path)
-        state.save_state(s)
+        state.update_instance(session, new_name, instance_path=str(new_path))
 
     # Rename tmux window if active (in inner session)
-    tmux_window_id = instance_data.get("tmux_window_id")
+    tmux_window_id = instance_data.tmux_window_id
     if tmux_window_id and is_instance_window_active(session, tmux_window_id):
         try:
             subprocess.run(
@@ -1908,7 +1901,7 @@ def instance_deactivate(
     """
     session = common.session
 
-    instances = state.get_all_worktrees(session)
+    instances = state.get_all_instances(session)
 
     if not instances:
         console.print(f"[yellow]No instances found in session '{session}'.[/yellow]")
@@ -1917,7 +1910,7 @@ def instance_deactivate(
     # Check which instances are active (checks inner session)
     active_instances = []
     for inst in instances:
-        if is_instance_window_active(session, inst.get("tmux_window_id")):
+        if is_instance_window_active(session, inst.tmux_window_id):
             active_instances.append(inst)
 
     if name is None:
@@ -1927,7 +1920,7 @@ def instance_deactivate(
 
         console.print(f"\n[bold yellow]Deactivating {len(active_instances)} active instance(s) in session '{session}':[/bold yellow]")
         for inst in active_instances:
-            console.print(f"  \u2022 {inst['name']}")
+            console.print(f"  \u2022 {inst.name}")
         console.print()
 
         if not yes:
@@ -1937,8 +1930,8 @@ def instance_deactivate(
 
         deactivated_count = 0
         for inst in active_instances:
-            inst_name = inst["name"]
-            tmux_window_id = inst.get("tmux_window_id")
+            inst_name = inst.name
+            tmux_window_id = inst.tmux_window_id
             if tmux_window_id:
                 try:
                     subprocess.run(
@@ -1957,7 +1950,7 @@ def instance_deactivate(
     # Deactivate single instance
     instance = None
     for inst in instances:
-        if inst["name"] == name:
+        if inst.name == name:
             instance = inst
             break
 
@@ -1971,11 +1964,11 @@ def instance_deactivate(
 
     console.print(f"\n[bold yellow]Deactivating instance '{name}' in session '{session}'[/bold yellow]")
 
-    tmux_window_id = instance.get("tmux_window_id")
-    if tmux_window_id:
+    tmux_wid = instance.tmux_window_id
+    if tmux_wid:
         try:
             subprocess.run(
-                ["tmux", "kill-window", "-t", tmux_window_id],
+                ["tmux", "kill-window", "-t", tmux_wid],
                 check=True, capture_output=True,
             )
             console.print(f"  [green]\u2713[/green] Deactivated '{name}'")
@@ -2020,7 +2013,7 @@ def instance_remove(
             console.print("    [cyan]ccmux remove --all[/cyan]")
             sys.exit(1)
 
-    worktrees = state.get_all_worktrees(session)
+    worktrees = state.get_all_instances(session)
 
     if not worktrees:
         console.print(f"[yellow]No instances found in session '{session}'.[/yellow]")
@@ -2030,7 +2023,7 @@ def instance_remove(
     active_worktrees = []
     inactive_worktrees = []
     for wt in worktrees:
-        if is_instance_window_active(session, wt.get("tmux_window_id")):
+        if is_instance_window_active(session, wt.tmux_window_id):
             active_worktrees.append(wt)
         else:
             inactive_worktrees.append(wt)
@@ -2042,11 +2035,11 @@ def instance_remove(
         if active_worktrees:
             console.print(f"  Active ({len(active_worktrees)}):")
             for wt in active_worktrees:
-                console.print(f"    \u2022 {wt['name']}")
+                console.print(f"    \u2022 {wt.name}")
         if inactive_worktrees:
             console.print(f"  Inactive ({len(inactive_worktrees)}):")
             for wt in inactive_worktrees:
-                console.print(f"    \u2022 {wt['name']}")
+                console.print(f"    \u2022 {wt.name}")
         console.print()
 
         if not yes:
@@ -2056,13 +2049,13 @@ def instance_remove(
 
         removed_count = 0
         for wt in worktrees:
-            wt_name = wt["name"]
-            wt_path = Path(wt["instance_path"])
+            wt_name = wt.name
+            wt_path = Path(wt.instance_path)
             is_active = wt in active_worktrees
-            is_main_repo = not wt.get("is_worktree", True)
+            is_main_repo = not wt.is_worktree
 
             if is_active:
-                tmux_window_id = wt.get("tmux_window_id")
+                tmux_window_id = wt.tmux_window_id
                 if tmux_window_id:
                     try:
                         subprocess.run(
@@ -2089,7 +2082,7 @@ def instance_remove(
                 console.print(f"{prefix}[dim]Main repository - no git worktree to remove[/dim]")
             elif worktree_exists(wt_path):
                 try:
-                    repo_path = Path(wt["repo_path"])
+                    repo_path = Path(wt.repo_path)
                     subprocess.run(
                         ["git", "-C", str(repo_path), "worktree", "remove", "--force", str(wt_path)],
                         check=True,
@@ -2101,7 +2094,7 @@ def instance_remove(
             else:
                 console.print(f"{prefix}[yellow]\u26a0[/yellow] Worktree not found on filesystem")
 
-            state.remove_worktree(session, wt_name)
+            state.remove_instance(session, wt_name)
             console.print(f"{prefix}[green]\u2713[/green] Removed '{wt_name}' from tracking")
             removed_count += 1
 
@@ -2143,7 +2136,7 @@ def instance_remove(
     # Remove single instance
     worktree = None
     for wt in worktrees:
-        if wt["name"] == name:
+        if wt.name == name:
             worktree = wt
             break
 
@@ -2152,9 +2145,9 @@ def instance_remove(
         console.print(f"List instances with: [cyan]ccmux list --session {session}[/cyan]")
         sys.exit(1)
 
-    wt_path = Path(worktree["instance_path"])
+    wt_path = Path(worktree.instance_path)
     is_active = worktree in active_worktrees
-    is_main_repo = not worktree.get("is_worktree", True)
+    is_main_repo = not worktree.is_worktree
 
     if is_main_repo:
         console.print(f"\n[bold red]WARNING: Removing main repository '{name}' from tracking[/bold red]")
@@ -2173,7 +2166,7 @@ def instance_remove(
             return
 
     if is_active:
-        tmux_window_id = worktree.get("tmux_window_id")
+        tmux_window_id = worktree.tmux_window_id
         if tmux_window_id:
             try:
                 subprocess.run(
@@ -2198,7 +2191,7 @@ def instance_remove(
         console.print(f"  [dim]Main repository - no git worktree to remove[/dim]")
     elif worktree_exists(wt_path):
         try:
-            repo_path = Path(worktree["repo_path"])
+            repo_path = Path(worktree.repo_path)
             subprocess.run(
                 ["git", "-C", str(repo_path), "worktree", "remove", "--force", str(wt_path)],
                 check=True,
@@ -2210,12 +2203,12 @@ def instance_remove(
     else:
         console.print(f"  [yellow]\u26a0[/yellow] Worktree not found on filesystem")
 
-    state.remove_worktree(session, name)
+    state.remove_instance(session, name)
     _notify_sidebars(session)
     console.print(f"  [green]\u2713[/green] Removed '{name}' from tracking")
 
     # If no instances remain, clean up all tmux sessions
-    remaining = state.get_all_worktrees(session)
+    remaining = state.get_all_instances(session)
     if not remaining:
         _uninstall_inner_hook(session)
         _kill_outer_session(session)

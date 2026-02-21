@@ -49,12 +49,11 @@ async def get_current_instance_name(session_name: str) -> str | None:
     window_id = await get_current_window_id(session_name)
     if not window_id:
         return None
-    session_data = state.get_session(session_name)
-    if not session_data:
+    session_obj = state.get_session(session_name)
+    if not session_obj:
         return None
-    instances = session_data.get("instances", session_data.get("worktrees", {}))
-    for inst_name, inst_data in instances.items():
-        if inst_data.get("tmux_window_id") == window_id:
+    for inst_name, inst in session_obj.instances.items():
+        if inst.tmux_window_id == window_id:
             return inst_name
     return None
 
@@ -90,7 +89,7 @@ async def get_tmux_window_flags(session_name: str) -> dict[str, dict[str, bool]]
 
 async def build_snapshot(session_name: str) -> list[tuple]:
     """Build a comparable snapshot of the current instance state."""
-    instances = state.get_all_worktrees(session_name)
+    instances = state.get_all_instances(session_name)
     if not instances:
         return []
 
@@ -99,11 +98,11 @@ async def build_snapshot(session_name: str) -> list[tuple]:
 
     snapshot = []
     for inst in instances:
-        repo_name = Path(inst["repo_path"]).name
-        wid = inst.get("tmux_window_id")
+        repo_name = Path(inst.repo_path).name
+        wid = inst.tmux_window_id
         is_active = wid in window_flags
-        is_current = inst["name"] == current_instance
-        inst_type = "worktree" if inst.get("is_worktree", True) else "main"
+        is_current = inst.name == current_instance
+        inst_type = inst.instance_type
         alert_state = resolve_alert_state(window_flags.get(wid))
-        snapshot.append((repo_name, inst["name"], inst_type, is_active, is_current, alert_state))
+        snapshot.append((repo_name, inst.name, inst_type, is_active, is_current, alert_state))
     return snapshot

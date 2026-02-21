@@ -11,6 +11,7 @@ from unittest import mock
 import pytest
 
 from ccmux import state
+from ccmux.state import store as state_store
 from ccmux.ui import (
     SidebarApp,
     NonInteractiveStatic,
@@ -27,8 +28,8 @@ def temp_state_dir(monkeypatch):
     """Create a temporary state directory for testing."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
-        monkeypatch.setattr(state, "STATE_DIR", tmpdir_path)
-        monkeypatch.setattr(state, "STATE_FILE", tmpdir_path / "state.json")
+        monkeypatch.setattr(state_store, "STATE_DIR", tmpdir_path)
+        monkeypatch.setattr(state_store, "STATE_FILE", tmpdir_path / "state.json")
         yield tmpdir_path
 
 
@@ -49,32 +50,32 @@ class TestSidebarDataHelpers:
 
     def test_get_current_instance_by_window_id(self, temp_state_dir):
         """Sidebar identifies current instance by window_id, not name."""
-        state.add_worktree(
+        state.add_instance(
             session_name="test",
-            worktree_name="fox",
+            instance_name="fox",
             repo_path="/home/user/my-project",
-            worktree_path="/home/user/my-project/.worktrees/fox",
+            instance_path="/home/user/my-project/.worktrees/fox",
             tmux_session_id="$0",
             tmux_window_id="@1",
         )
-        state.add_worktree(
+        state.add_instance(
             session_name="test",
-            worktree_name="bear",
+            instance_name="bear",
             repo_path="/home/user/my-project",
-            worktree_path="/home/user/my-project",
+            instance_path="/home/user/my-project",
             tmux_session_id="$0",
             tmux_window_id="@2",
             is_worktree=False,
         )
 
-        session_data = state.get_session("test")
-        instances = session_data.get("instances", {})
+        session_obj = state.get_session("test")
+        instances = session_obj.instances
 
         # Simulate what the sidebar does to find current instance
         window_id = "@1"
         current_name = None
-        for inst_name, inst_data in instances.items():
-            if inst_data.get("tmux_window_id") == window_id:
+        for inst_name, inst in instances.items():
+            if inst.tmux_window_id == window_id:
                 current_name = inst_name
                 break
 
@@ -82,35 +83,35 @@ class TestSidebarDataHelpers:
 
     def test_instances_grouped_by_repo(self, temp_state_dir):
         """Instances should be groupable by repository path."""
-        state.add_worktree(
+        state.add_instance(
             session_name="test",
-            worktree_name="fox",
+            instance_name="fox",
             repo_path="/home/user/project-a",
-            worktree_path="/home/user/project-a/.worktrees/fox",
+            instance_path="/home/user/project-a/.worktrees/fox",
             tmux_window_id="@1",
         )
-        state.add_worktree(
+        state.add_instance(
             session_name="test",
-            worktree_name="bear",
+            instance_name="bear",
             repo_path="/home/user/project-a",
-            worktree_path="/home/user/project-a",
+            instance_path="/home/user/project-a",
             tmux_window_id="@2",
             is_worktree=False,
         )
-        state.add_worktree(
+        state.add_instance(
             session_name="test",
-            worktree_name="hawk",
+            instance_name="hawk",
             repo_path="/home/user/project-b",
-            worktree_path="/home/user/project-b/.worktrees/hawk",
+            instance_path="/home/user/project-b/.worktrees/hawk",
             tmux_window_id="@3",
         )
 
-        instances = state.get_all_worktrees("test")
+        instances = state.get_all_instances("test")
 
         # Group by repo like the sidebar does
         repos: dict[str, list] = {}
         for inst in instances:
-            repo_name = Path(inst["repo_path"]).name
+            repo_name = Path(inst.repo_path).name
             repos.setdefault(repo_name, []).append(inst)
 
         assert "project-a" in repos
@@ -120,57 +121,56 @@ class TestSidebarDataHelpers:
 
     def test_active_inactive_detection(self, temp_state_dir):
         """Active/inactive detection based on window ID presence."""
-        state.add_worktree(
+        state.add_instance(
             session_name="test",
-            worktree_name="fox",
+            instance_name="fox",
             repo_path="/repo",
-            worktree_path="/repo/.worktrees/fox",
+            instance_path="/repo/.worktrees/fox",
             tmux_window_id="@1",
         )
-        state.add_worktree(
+        state.add_instance(
             session_name="test",
-            worktree_name="bear",
+            instance_name="bear",
             repo_path="/repo",
-            worktree_path="/repo/.worktrees/bear",
+            instance_path="/repo/.worktrees/bear",
             tmux_window_id="@2",
         )
 
-        instances = state.get_all_worktrees("test")
+        instances = state.get_all_instances("test")
         active_window_ids = {"@1"}  # Simulate: only @1 is in tmux
 
         for inst in instances:
-            is_active = inst.get("tmux_window_id") in active_window_ids
-            if inst["name"] == "fox":
+            is_active = inst.tmux_window_id in active_window_ids
+            if inst.name == "fox":
                 assert is_active
-            elif inst["name"] == "bear":
+            elif inst.name == "bear":
                 assert not is_active
 
     def test_instance_type_detection(self, temp_state_dir):
         """Worktree vs main repo type detection."""
-        state.add_worktree(
+        state.add_instance(
             session_name="test",
-            worktree_name="fox",
+            instance_name="fox",
             repo_path="/repo",
-            worktree_path="/repo/.worktrees/fox",
+            instance_path="/repo/.worktrees/fox",
             tmux_window_id="@1",
             is_worktree=True,
         )
-        state.add_worktree(
+        state.add_instance(
             session_name="test",
-            worktree_name="bear",
+            instance_name="bear",
             repo_path="/repo",
-            worktree_path="/repo",
+            instance_path="/repo",
             tmux_window_id="@2",
             is_worktree=False,
         )
 
-        instances = state.get_all_worktrees("test")
+        instances = state.get_all_instances("test")
         for inst in instances:
-            inst_type = "worktree" if inst.get("is_worktree", True) else "main"
-            if inst["name"] == "fox":
-                assert inst_type == "worktree"
-            elif inst["name"] == "bear":
-                assert inst_type == "main"
+            if inst.name == "fox":
+                assert inst.instance_type == "worktree"
+            elif inst.name == "bear":
+                assert inst.instance_type == "main"
 
 
 class TestPidTracking:
