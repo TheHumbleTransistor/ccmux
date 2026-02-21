@@ -1,8 +1,0 @@
-RepoInstancesList {
-    height: auto;
-    margin-bottom: 1;
-}
-
-RepoInstancesList:last-of-type {
-    margin-bottom: 0;
-}

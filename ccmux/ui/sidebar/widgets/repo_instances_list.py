@@ -10,8 +10,6 @@ from ccmux.ui.sidebar.widgets.instance_row import InstanceRow
 class RepoInstancesList(Vertical):
     """A repo group: header followed by instance rows."""
 
-    CSS_PATH = "repo_instances_list.tcss"
-
     def __init__(
         self,
         repo_name: str,

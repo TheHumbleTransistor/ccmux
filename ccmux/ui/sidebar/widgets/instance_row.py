@@ -9,8 +9,6 @@ from textual.widgets import Static
 class InstanceRow(Horizontal):
     """A clickable row showing instance status, name, and type."""
 
-    CSS_PATH = "instance_row.tcss"
-
     class Selected(Message):
         """Posted when the user clicks an instance row."""
 
