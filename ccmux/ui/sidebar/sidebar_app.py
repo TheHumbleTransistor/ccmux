@@ -147,13 +147,31 @@ class SidebarApp(App):
         )
 
     async def on_instance_row_selected(self, message: InstanceRow.Selected) -> None:
-        """Switch to the clicked instance's tmux window."""
+        """Switch to the clicked instance's tmux window and clear bell alert."""
+        target = f"{message.session}-inner:{message.instance_name}"
         try:
             await asyncio.to_thread(
                 subprocess.run,
-                ["tmux", "select-window", "-t", f"{message.session}-inner:{message.instance_name}"],
+                ["tmux", "select-window", "-t", target],
                 check=True,
                 capture_output=True,
             )
         except subprocess.CalledProcessError:
+            pass
+        # Clear bell flag on the tmux window (needed when re-selecting the current window)
+        try:
+            await asyncio.to_thread(
+                subprocess.run,
+                ["tmux", "set", "-w", "-t", target, "@ccmux_bell", "0"],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
+        # Immediately clear bell styling on the widget for instant feedback
+        try:
+            row = self.query_one(f"#inst-{message.instance_name}", InstanceRow)
+            if row.alert_state == "bell":
+                row.update_state(row.is_active, row.is_current, None)
+        except Exception:
             pass
