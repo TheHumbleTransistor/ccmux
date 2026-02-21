@@ -9,6 +9,7 @@ Screen {
     color: #d7af5f;
     background: #1e1e1e;
     text-style: bold;
+    text-align: center;
 }
 
 #header {
@@ -16,6 +17,7 @@ Screen {
     padding: 0 1;
     background: #1e1e1e;
     color: #bcbcbc;
+    text-align: center;
 }
 
 #spacer {
