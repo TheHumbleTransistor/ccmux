@@ -64,7 +64,6 @@ class SidebarApp(App):
             "                                     ",
             id="title",
         )
-        yield NonInteractiveStatic(f"Session: {self.session_name}", id="header")
         yield NonInteractiveStatic("", id="spacer")
         self._instance_list = Vertical(id="instance-list")
         yield self._instance_list

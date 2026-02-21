@@ -23,7 +23,6 @@ def _load_raw() -> dict:
     if not STATE_FILE.exists():
         return {
             "sessions": {},
-            "default_session": DEFAULT_SESSION
         }
 
     try:
@@ -32,7 +31,6 @@ def _load_raw() -> dict:
     except (json.JSONDecodeError, IOError):
         return {
             "sessions": {},
-            "default_session": DEFAULT_SESSION
         }
 
 
@@ -45,7 +43,7 @@ def _save_raw(state: dict):
 
 # --- Session CRUD ---
 
-def get_session(session_name: str) -> Optional[Session]:
+def get_session(session_name: str = DEFAULT_SESSION) -> Optional[Session]:
     """Get a session from state.
 
     Returns a Session object, or None if not found.
@@ -57,66 +55,13 @@ def get_session(session_name: str) -> Optional[Session]:
     return Session.from_dict(session_name, raw)
 
 
-def get_all_sessions() -> list[Session]:
-    """Get all sessions.
-
-    Returns a list of Session objects.
-    """
-    state = _load_raw()
-    return [
-        Session.from_dict(name, data)
-        for name, data in state["sessions"].items()
-    ]
-
-
-def rename_session(old_name: str, new_name: str) -> bool:
-    """Rename a session in state.
-
-    Returns True if the rename succeeded, False if old_name not found
-    or new_name already exists.
-    """
-    s = _load_raw()
-
-    if old_name not in s["sessions"]:
-        return False
-    if new_name in s["sessions"]:
-        return False
-
-    s["sessions"][new_name] = s["sessions"].pop(old_name)
-
-    if s.get("default_session") == old_name:
-        s["default_session"] = new_name
-
-    _save_raw(s)
-    return True
-
-
-def remove_session(session_name: str) -> bool:
-    """Remove an entire session and all its instances from state.
-
-    Returns True if the session was found and removed, False otherwise.
-    """
-    s = _load_raw()
-
-    if session_name not in s["sessions"]:
-        return False
-
-    del s["sessions"][session_name]
-
-    if s.get("default_session") == session_name:
-        s["default_session"] = DEFAULT_SESSION
-
-    _save_raw(s)
-    return True
-
-
 # --- Instance CRUD ---
 
 def add_instance(
-    session_name: str,
     instance_name: str,
     repo_path: str,
     instance_path: str,
+    session_name: str = DEFAULT_SESSION,
     tmux_session_id: Optional[str] = None,
     tmux_window_id: Optional[str] = None,
     is_worktree: bool = True
@@ -143,7 +88,7 @@ def add_instance(
     _save_raw(state)
 
 
-def remove_instance(session_name: str, instance_name: str):
+def remove_instance(instance_name: str, session_name: str = DEFAULT_SESSION):
     """Remove an instance from the state."""
     state = _load_raw()
 
@@ -160,8 +105,8 @@ def remove_instance(session_name: str, instance_name: str):
 
 
 def update_tmux_ids(
-    session_name: str,
     instance_name: str,
+    session_name: str = DEFAULT_SESSION,
     tmux_session_id: Optional[str] = None,
     tmux_window_id: Optional[str] = None
 ):
@@ -183,7 +128,7 @@ def update_tmux_ids(
     _save_raw(state)
 
 
-def get_instance(session_name: str, instance_name: str) -> Optional[Instance]:
+def get_instance(instance_name: str, session_name: str = DEFAULT_SESSION) -> Optional[Instance]:
     """Get a specific instance from state.
 
     Returns an Instance object, or None if not found.
@@ -194,24 +139,21 @@ def get_instance(session_name: str, instance_name: str) -> Optional[Instance]:
     return None
 
 
-def get_all_instances(session_name: Optional[str] = None) -> list[Instance]:
-    """Get all instances, optionally filtered by session.
+def get_all_instances(session_name: str = DEFAULT_SESSION) -> list[Instance]:
+    """Get all instances in the default session.
 
     Returns list of Instance objects with a 'session' attribute set.
     """
     state = _load_raw()
     instances_list = []
 
-    sessions_to_query = [session_name] if session_name else state["sessions"].keys()
+    if session_name not in state["sessions"]:
+        return instances_list
 
-    for sess_name in sessions_to_query:
-        if sess_name not in state["sessions"]:
-            continue
-
-        session = Session.from_dict(sess_name, state["sessions"][sess_name])
-        for inst in session.instances.values():
-            inst.session = sess_name
-            instances_list.append(inst)
+    session = Session.from_dict(session_name, state["sessions"][session_name])
+    for inst in session.instances.values():
+        inst.session = session_name
+        instances_list.append(inst)
 
     return instances_list
 
@@ -233,7 +175,7 @@ def find_instance_by_tmux_ids(tmux_session_id: str, tmux_window_id: str) -> Opti
     return None
 
 
-def rename_instance(session_name: str, old_name: str, new_name: str) -> bool:
+def rename_instance(old_name: str, new_name: str, session_name: str = DEFAULT_SESSION) -> bool:
     """Rename an instance within a session.
 
     Returns True if the rename succeeded, False if the instance was not found
@@ -257,7 +199,7 @@ def rename_instance(session_name: str, old_name: str, new_name: str) -> bool:
     return True
 
 
-def update_instance(session_name: str, instance_name: str, **fields) -> bool:
+def update_instance(instance_name: str, session_name: str = DEFAULT_SESSION, **fields) -> bool:
     """Update fields on an instance in state.
 
     Returns True if the instance was found and updated, False otherwise.
@@ -277,7 +219,7 @@ def update_instance(session_name: str, instance_name: str, **fields) -> bool:
     return True
 
 
-def find_main_repo_instance(repo_path: str, session_name: Optional[str] = None) -> Optional[Instance]:
+def find_main_repo_instance(repo_path: str, session_name: str = DEFAULT_SESSION) -> Optional[Instance]:
     """Find if a main repo instance already exists for the given repository.
 
     Returns the Instance if found, None otherwise.

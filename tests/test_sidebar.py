@@ -565,14 +565,12 @@ class TestSidebarRendering:
 
     @pytest.mark.asyncio
     async def test_widgets_present_after_instance_click(self, demo_app):
-        """Click InstanceRow, verify title/header/instances still mounted and displayed."""
+        """Click InstanceRow, verify title and instances still mounted and displayed."""
         async with demo_app.run_test() as pilot:
-            # Verify initial state — title, header, and instances are present
+            # Verify initial state — title and instances are present
             app = pilot.app
             title = app.query_one("#title", NonInteractiveStatic)
-            header = app.query_one("#header", NonInteractiveStatic)
             assert title.display is True
-            assert header.display is True
 
             # Find and click an InstanceRow
             rows = app.query(InstanceRow)
@@ -581,9 +579,7 @@ class TestSidebarRendering:
 
             # After click, all structural widgets must still be mounted and visible
             title = app.query_one("#title", NonInteractiveStatic)
-            header = app.query_one("#header", NonInteractiveStatic)
             assert title.display is True
-            assert header.display is True
             assert len(app.query(InstanceRow)) > 0
 
     @pytest.mark.asyncio
@@ -596,9 +592,7 @@ class TestSidebarRendering:
             await pilot.click("#title")
 
             title = app.query_one("#title", NonInteractiveStatic)
-            header = app.query_one("#header", NonInteractiveStatic)
             assert title.display is True
-            assert header.display is True
 
             # Click a RepoHeader
             repo_headers = app.query(RepoHeader)
@@ -606,7 +600,6 @@ class TestSidebarRendering:
                 await pilot.click(RepoHeader)
                 # Verify everything still intact
                 assert app.query_one("#title", NonInteractiveStatic).display is True
-                assert app.query_one("#header", NonInteractiveStatic).display is True
                 assert len(app.query(InstanceRow)) > 0
 
     @pytest.mark.asyncio
@@ -615,9 +608,8 @@ class TestSidebarRendering:
         async with demo_app.run_test() as pilot:
             app = pilot.app
 
-            # Click title, header, then each InstanceRow
+            # Click title, then each InstanceRow
             await pilot.click("#title")
-            await pilot.click("#header")
 
             rows = app.query(InstanceRow)
             for row in rows:
@@ -625,7 +617,6 @@ class TestSidebarRendering:
 
             # All structural widgets must survive rapid clicking
             assert app.query_one("#title", NonInteractiveStatic).display is True
-            assert app.query_one("#header", NonInteractiveStatic).display is True
             assert app.query_one("#instance-list") is not None
             assert len(app.query(InstanceRow)) > 0
 

@@ -8,7 +8,7 @@ from ccmux.ui.sidebar.process_id import remove_pid_file, write_pid_file
 
 
 def main() -> None:
-    """Entry point: python -m ccmux.ui.sidebar <session>"""
+    """Entry point: python -m ccmux.ui.sidebar [session]"""
     if "--demo" in sys.argv:
         try:
             from tests.demo_sidebar import make_demo_provider
@@ -24,12 +24,7 @@ def main() -> None:
         app.run()
         return
 
-    if len(sys.argv) < 2:
-        print("Usage: python -m ccmux.ui.sidebar <session>", file=sys.stderr)
-        print("       python -m ccmux.ui.sidebar --demo", file=sys.stderr)
-        sys.exit(1)
-
-    session = sys.argv[1]
+    session = sys.argv[1] if len(sys.argv) >= 2 else "default"
 
     # PID tracking
     write_pid_file(session)

@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """Claude Code Multiplexer CLI - Manage multiple Claude Code instances."""
 
-import inspect
 import os
 import random
 import re
 import signal
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -26,30 +24,11 @@ from ccmux.ui.tmux import apply_outer_session_config, apply_tmux_config
 DEFAULT_SESSION = "default"
 
 
-# Common parameters shared across all commands
-@dataclass
-class Common:
-    """Common parameters for all commands."""
-    session: str = DEFAULT_SESSION
-
-
-# Type alias for Common config parameter
-CommonConfig = Annotated[Common, Parameter(parse=False, show=False)]
-
-
 console = Console()
 app = cyclopts.App(
     name="ccmux",
     help="Claude Code Multiplexer - Manage multiple Claude Code instances.",
 )
-
-session_app = cyclopts.App(name="session", help="Manage ccmux sessions")
-app.command(session_app)
-
-# Top-level aliases: rewrite these to sub-app paths in meta
-TOP_LEVEL_ALIASES = {
-    "attach": ("session", "attach"),
-}
 
 
 # --- Utility Functions ---
@@ -369,11 +348,13 @@ def _create_bash_window(session: str, instance_name: str, working_dir: str) -> N
     Skips if window already exists.
     """
     bash = _bash_session_name(session)
+    bash_cmd = f"export CCMUX_INSTANCE={instance_name}; exec $SHELL"
     try:
         if not tmux_session_exists(bash):
             subprocess.run(
                 ["tmux", "new-session", "-d", "-s", bash,
-                 "-n", instance_name, "-c", working_dir],
+                 "-n", instance_name, "-c", working_dir,
+                 bash_cmd],
                 check=True, capture_output=True,
             )
             subprocess.run(
@@ -389,7 +370,8 @@ def _create_bash_window(session: str, instance_name: str, working_dir: str) -> N
                 return
             subprocess.run(
                 ["tmux", "new-window", "-t", bash,
-                 "-n", instance_name, "-c", working_dir],
+                 "-n", instance_name, "-c", working_dir,
+                 bash_cmd],
                 check=True, capture_output=True,
             )
         # Set background on the newly created window (window-level option)
@@ -649,30 +631,22 @@ def _uninstall_inner_hook(session: str) -> None:
 
 # --- Detection Helpers ---
 
-def detect_current_ccmux_session() -> Optional[tuple[str, "state.Session"]]:
-    """Detect the current ccmux session from tmux environment.
-
-    Strips '-inner' suffix since get_current_tmux_session() returns
-    the inner session name when called from within an instance.
-
-    Returns (session_name, Session) or None.
-    """
-    tmux_session = get_current_tmux_session()
-    if not tmux_session:
-        return None
-
-    ccmux_session = _ccmux_session_from_tmux(tmux_session)
-    session_data = state.get_session(ccmux_session)
-    if session_data:
-        return (ccmux_session, session_data)
-    return None
-
-
 def detect_current_ccmux_instance() -> Optional[tuple[str, str, "state.Instance"]]:
-    """Detect the current ccmux instance from tmux environment.
+    """Detect the current ccmux instance.
+
+    Checks CCMUX_INSTANCE env var first (set in each pane),
+    then falls back to tmux ID matching for backward compat.
 
     Returns (session_name, instance_name, Instance) or None.
     """
+    # Fast path: env var set by ccmux in every pane
+    env_name = os.environ.get("CCMUX_INSTANCE")
+    if env_name:
+        inst = state.get_instance(env_name, DEFAULT_SESSION)
+        if inst:
+            return (DEFAULT_SESSION, env_name, inst)
+
+    # Fallback: tmux ID matching (backward compat for pre-env-var panes)
     if "TMUX" not in os.environ:
         return None
 
@@ -695,7 +669,7 @@ def detect_current_ccmux_instance() -> Optional[tuple[str, str, "state.Instance"
 def detect_current_ccmux_instance_any() -> Optional[tuple[str, str, "state.Instance"]]:
     """Detect the current ccmux instance from inner or bash session.
 
-    First tries the inner-session detection (detect_current_ccmux_instance).
+    First tries detect_current_ccmux_instance (env var + inner-session tmux IDs).
     Falls back to bash-session detection: uses the tmux session name
     (e.g. 'default-bash') and window name (= instance name) to look up
     the instance in state.
@@ -715,7 +689,7 @@ def detect_current_ccmux_instance_any() -> Optional[tuple[str, str, "state.Insta
     if not window_name:
         return None
 
-    instance_data = state.get_instance(ccmux_session, window_name)
+    instance_data = state.get_instance(window_name, ccmux_session)
     if instance_data:
         return (ccmux_session, window_name, instance_data)
     return None
@@ -724,7 +698,7 @@ def detect_current_ccmux_instance_any() -> Optional[tuple[str, str, "state.Insta
 # --- Internal Helpers ---
 
 def _display_session_table(session: str) -> None:
-    """Display a table for a single session.
+    """Display a table of instances.
 
     Args:
         session: Session name to display
@@ -732,11 +706,11 @@ def _display_session_table(session: str) -> None:
     instances = state.get_all_instances(session)
 
     if not instances:
-        console.print(f"\n[yellow]No instances found in session '{session}'.[/yellow]")
+        console.print(f"\n[yellow]No instances found.[/yellow]")
         return
 
     # Create Rich table
-    table = Table(title=f"Claude Code Instances (session: {session})", show_header=True)
+    table = Table(title="Claude Code Instances", show_header=True)
     table.add_column("Repository", style="yellow")
     table.add_column("Instance", style="cyan", no_wrap=True)
     table.add_column("Type", style="green")
@@ -824,7 +798,6 @@ def _show_instance_info(session_name: str, instance_name: str, instance_data) ->
         branch = "unknown"
 
     console.print(f"\n[bold cyan]Instance:[/bold cyan]   {instance_name}")
-    console.print(f"[bold cyan]Session:[/bold cyan]    {session_name}")
     console.print(f"[bold cyan]Repository:[/bold cyan] {repo_name}")
     console.print(f"[bold cyan]Type:[/bold cyan]       {'worktree' if is_worktree else 'main repo'}")
     console.print(f"[bold cyan]Branch:[/bold cyan]     {branch}")
@@ -836,8 +809,8 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
     worktrees = state.get_all_instances(session)
 
     if not worktrees:
-        console.print(f"[yellow]No instances found in session '{session}'.[/yellow]")
-        console.print(f"Create one with: [cyan]ccmux new --session {session}[/cyan]")
+        console.print(f"[yellow]No instances found.[/yellow]")
+        console.print(f"Create one with: [cyan]ccmux new[/cyan]")
         sys.exit(0)
 
     # Check which are inactive (checks inner session)
@@ -870,6 +843,7 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
         wt_path = wt.instance_path
 
         launch_cmd = (
+            f"export CCMUX_INSTANCE={wt_name}; "
             f"echo 'Activating Claude Code in {wt_path}'; "
             f"unset CLAUDECODE; "
             f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
@@ -927,7 +901,7 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
                     ["tmux", "display-message", "-t", inner, "-p", "#{session_id}"],
                     capture_output=True, text=True, check=True,
                 ).stdout.strip()
-                state.update_tmux_ids(session, wt_name, new_tmux_session_id, new_tmux_window_id)
+                state.update_tmux_ids(wt_name, session, new_tmux_session_id, new_tmux_window_id)
             except subprocess.CalledProcessError:
                 pass
 
@@ -945,8 +919,8 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
     worktrees = state.get_all_instances(session)
 
     if not worktrees:
-        console.print(f"[yellow]No instances found in session '{session}'.[/yellow]")
-        console.print(f"Create one with: [cyan]ccmux new --session {session}[/cyan]")
+        console.print(f"[yellow]No instances found.[/yellow]")
+        console.print(f"Create one with: [cyan]ccmux new[/cyan]")
         sys.exit(0)
 
     # Find the instance
@@ -957,8 +931,8 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
             break
 
     if worktree is None:
-        console.print(f"[red]Error:[/red] Instance '{name}' not found in session '{session}'.", style="bold")
-        console.print(f"List instances with: [cyan]ccmux list --session {session}[/cyan]")
+        console.print(f"[red]Error:[/red] Instance '{name}' not found.", style="bold")
+        console.print(f"List instances with: [cyan]ccmux list[/cyan]")
         sys.exit(1)
 
     # Check if already active - ensure outer session even if window exists
@@ -976,6 +950,7 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
     inner_exists_flag = tmux_session_exists(inner)
 
     launch_cmd = (
+        f"export CCMUX_INSTANCE={name}; "
         f"echo 'Activating Claude Code in {wt_path}'; "
         f"unset CLAUDECODE; "
         f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
@@ -1033,14 +1008,14 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
                 ["tmux", "display-message", "-t", inner, "-p", "#{session_id}"],
                 capture_output=True, text=True, check=True,
             ).stdout.strip()
-            state.update_tmux_ids(session, name, tmux_session_id, tmux_window_id)
+            state.update_tmux_ids(name, session, tmux_session_id, tmux_window_id)
         except subprocess.CalledProcessError:
             pass
 
         _ensure_outer_session(session)
         _notify_sidebars(session)
         console.print(f"\n[bold green]Success![/bold green] Claude Code is running.")
-        console.print(f"Attach with: [cyan]ccmux attach --session {session}[/cyan]")
+        console.print(f"Attach with: [cyan]ccmux attach[/cyan]")
 
         # Auto-attach if not already in tmux
         if "TMUX" not in os.environ:
@@ -1053,389 +1028,12 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
         sys.exit(1)
 
 
-def _resolve_session_name(
-    name: Optional[str],
-    current: bool,
-    common: Common,
-    allow_interactive: bool = True,
-) -> str:
-    """Resolve a session name from positional arg, -c flag, or interactive selection.
-
-    Args:
-        name: Positional session name argument
-        current: Whether -c/--current was passed
-        common: Common config (for default session)
-        allow_interactive: Whether to prompt if no name or -c given
-
-    Returns:
-        The resolved session name
-    """
-    if current:
-        detected = detect_current_ccmux_session()
-        if not detected:
-            console.print("[red]Error:[/red] Not in a ccmux session.", style="bold")
-            console.print("Run this from within a tmux window managed by ccmux, or provide a session name.")
-            sys.exit(1)
-        return detected[0]
-
-    if name:
-        return name
-
-    if allow_interactive:
-        all_sessions = state.get_all_sessions()
-        session_names = [s.name for s in all_sessions]
-        if not session_names:
-            console.print("[yellow]No sessions found.[/yellow]")
-            sys.exit(1)
-        if len(session_names) == 1:
-            return session_names[0]
-
-        console.print("\n[bold]Sessions:[/bold]")
-        for i, s in enumerate(session_names):
-            console.print(f"  {i + 1}. {s}")
-
-        choice = Prompt.ask(
-            "\nSelect session",
-            choices=[str(i + 1) for i in range(len(session_names))],
-        )
-        return session_names[int(choice) - 1]
-
-    return common.session
-
-
-# --- Session Sub-App Commands ---
-
-@session_app.default
-def session_info(name: Optional[str] = None, *, common: CommonConfig) -> None:
-    """Show session info.
-
-    Args:
-        name: Session name to show info for (defaults to the --session value)
-        common: Common parameters (session, etc.)
-    """
-    session_name = name if name else common.session
-    session_data = state.get_session(session_name)
-
-    if not session_data:
-        console.print(f"[yellow]Session '{session_name}' not found.[/yellow]")
-        console.print(f"\nCreate one with: [cyan]ccmux new --session {session_name}[/cyan]")
-        return
-
-    total = len(session_data.instances)
-
-    active = 0
-    for inst in session_data.instances.values():
-        if is_instance_window_active(session_name, inst.tmux_window_id):
-            active += 1
-
-    tmux_status = "Running" if tmux_session_exists(_inner_session_name(session_name)) else "Not running"
-
-    console.print(f"\n[bold cyan]Session:[/bold cyan]    {session_name}")
-    console.print(f"[bold cyan]Instances:[/bold cyan]  {total} ({active} active, {total - active} inactive)")
-    console.print(f"[bold cyan]Tmux:[/bold cyan]       {tmux_status}\n")
-
-
-@session_app.command(name="list")
-def session_list(*, common: CommonConfig) -> None:
-    """List all ccmux sessions with summary info."""
-    sessions = state.get_all_sessions()
-
-    if not sessions:
-        console.print("\n[yellow]No sessions found.[/yellow]")
-        console.print("Create one with: [cyan]ccmux new[/cyan]")
-        return
-
-    table = Table(title="ccmux Sessions", show_header=True)
-    table.add_column("Session", style="cyan")
-    table.add_column("Instances", justify="right")
-    table.add_column("Active", justify="right", style="green")
-    table.add_column("Tmux Status", style="bold")
-
-    for sess in sessions:
-        total = len(sess.instances)
-
-        active = 0
-        for inst in sess.instances.values():
-            if is_instance_window_active(sess.name, inst.tmux_window_id):
-                active += 1
-
-        tmux_status = "[green]Running[/green]" if tmux_session_exists(_inner_session_name(sess.name)) else "[dim]Not running[/dim]"
-        table.add_row(sess.name, str(total), str(active), tmux_status)
-
-    console.print()
-    console.print(table)
-    console.print()
-
-
-@session_app.command(name="rename")
-def session_rename(
-    old: Optional[str] = None,
-    new: Optional[str] = None,
-    *,
-    common: CommonConfig,
-) -> None:
-    """Rename a ccmux session.
-
-    Args:
-        old: Current session name (or new name if only 1 arg given)
-        new: New session name
-        common: Common parameters (session, etc.)
-    """
-    if old is not None and new is not None:
-        # Explicit: ccmux session rename <old> <new>
-        old_name = old
-        new_name = sanitize_name(new)
-    elif old is not None and new is None:
-        # 1 arg: rename current session to <new-name>
-        new_name = sanitize_name(old)
-        detected = detect_current_ccmux_session()
-        if not detected:
-            console.print("[red]Error:[/red] Not in a ccmux session.", style="bold")
-            sys.exit(1)
-        old_name = detected[0]
-    elif old is None and new is None:
-        # Interactive mode
-        all_sessions = state.get_all_sessions()
-        session_names = [s.name for s in all_sessions]
-        if not session_names:
-            console.print("[yellow]No sessions found.[/yellow]")
-            return
-
-        console.print("\n[bold]Sessions:[/bold]")
-        for i, s in enumerate(session_names):
-            console.print(f"  {i + 1}. {s}")
-
-        choice = Prompt.ask(
-            "\nSelect session to rename",
-            choices=[str(i + 1) for i in range(len(session_names))],
-        )
-        old_name = session_names[int(choice) - 1]
-        raw_new = Prompt.ask("New name")
-        new_name = sanitize_name(raw_new)
-    else:
-        console.print("[red]Error:[/red] Provide both old and new names, one name to rename current session, or run without args for interactive mode.", style="bold")
-        sys.exit(1)
-
-    if old_name == new_name:
-        console.print(f"[yellow]Session is already named '{old_name}'.[/yellow]")
-        return
-
-    # Rename in state
-    if not state.rename_session(old_name, new_name):
-        # Check why it failed
-        if not state.get_session(old_name):
-            console.print(f"[red]Error:[/red] Session '{old_name}' not found.", style="bold")
-        else:
-            console.print(f"[red]Error:[/red] Session '{new_name}' already exists.", style="bold")
-        sys.exit(1)
-
-    # Rename inner tmux session if it exists
-    old_inner = _inner_session_name(old_name)
-    new_inner = _inner_session_name(new_name)
-    if tmux_session_exists(old_inner):
-        try:
-            subprocess.run(
-                ["tmux", "rename-session", "-t", f"={old_inner}", new_inner],
-                check=True, capture_output=True,
-            )
-            console.print(f"  [green]\u2713[/green] Renamed inner tmux session '{old_inner}' -> '{new_inner}'")
-        except subprocess.CalledProcessError:
-            console.print(f"  [yellow]\u26a0[/yellow] Could not rename inner tmux session")
-
-    # Rename bash tmux session if it exists
-    old_bash = _bash_session_name(old_name)
-    new_bash = _bash_session_name(new_name)
-    if tmux_session_exists(old_bash):
-        try:
-            subprocess.run(
-                ["tmux", "rename-session", "-t", f"={old_bash}", new_bash],
-                check=True, capture_output=True,
-            )
-            console.print(f"  [green]\u2713[/green] Renamed bash tmux session '{old_bash}' -> '{new_bash}'")
-        except subprocess.CalledProcessError:
-            console.print(f"  [yellow]\u26a0[/yellow] Could not rename bash tmux session")
-
-    # Rename outer tmux session if it exists
-    old_outer = _outer_session_name(old_name)
-    new_outer = _outer_session_name(new_name)
-    if tmux_session_exists(old_outer):
-        try:
-            subprocess.run(
-                ["tmux", "rename-session", "-t", f"={old_outer}", new_outer],
-                check=True, capture_output=True,
-            )
-            console.print(f"  [green]\u2713[/green] Renamed outer tmux session '{old_outer}' -> '{new_outer}'")
-        except subprocess.CalledProcessError:
-            console.print(f"  [yellow]\u26a0[/yellow] Could not rename outer tmux session")
-
-    _uninstall_inner_hook(old_name)
-    _install_inner_hook(new_name)
-    _notify_sidebars(new_name)
-    console.print(f"\n[bold green]Success![/bold green] Session renamed: '{old_name}' -> '{new_name}'")
-
-
-@session_app.command(name="activate")
-def session_activate(
-    name: Optional[str] = None,
-    *,
-    current: Annotated[bool, Parameter(name=["-c", "--current"], negative="")] = False,
-    yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
-    common: CommonConfig,
-) -> None:
-    """Activate all inactive instances in a session.
-
-    Args:
-        name: Session name (overrides --session)
-        current: Use the current tmux session
-        yes: Skip confirmation prompt
-        common: Common parameters (session, etc.)
-    """
-    session = _resolve_session_name(name, current, common, allow_interactive=False)
-    _activate_all_in_session(session, yes)
-
-
-@session_app.command(name="remove")
-def session_remove(
-    name: Optional[str] = None,
-    *,
-    current: Annotated[bool, Parameter(name=["-c", "--current"], negative="")] = False,
-    yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
-    common: CommonConfig,
-) -> None:
-    """Remove an entire session and all its instances.
-
-    Args:
-        name: Session name to remove
-        current: Remove the current tmux session
-        yes: Skip confirmation prompt
-        common: Common parameters (session, etc.)
-    """
-    session = _resolve_session_name(name, current, common, allow_interactive=True)
-
-    session_obj = state.get_session(session)
-    if not session_obj:
-        console.print(f"[red]Error:[/red] Session '{session}' not found.", style="bold")
-        sys.exit(1)
-
-    instances = session_obj.instances
-
-    console.print(f"\n[bold red]Removing session '{session}' and all {len(instances)} instance(s)[/bold red]")
-    console.print("[red]Worktree instances will be permanently deleted![/red]\n")
-
-    for inst_name in instances:
-        console.print(f"  \u2022 {inst_name}")
-    console.print()
-
-    if not yes:
-        if not Confirm.ask(f"[bold red]Permanently remove session '{session}'?[/bold red]", default=False):
-            console.print("[yellow]Cancelled.[/yellow]")
-            return
-
-    # Deactivate and remove each instance
-    removed_count = 0
-    for inst_name, inst in instances.items():
-        tmux_window_id = inst.tmux_window_id
-        is_wt = inst.is_worktree
-        inst_path = Path(inst.instance_path)
-        repo_path = Path(inst.repo_path)
-
-        # Kill tmux window if active (in inner session)
-        if is_instance_window_active(session, tmux_window_id):
-            try:
-                subprocess.run(
-                    ["tmux", "kill-window", "-t", tmux_window_id],
-                    check=True, capture_output=True,
-                )
-                console.print(f"  [green]\u2713[/green] Deactivated '{inst_name}'")
-            except subprocess.CalledProcessError:
-                pass
-
-        # Remove git worktree if applicable
-        if is_wt and worktree_exists(inst_path):
-            try:
-                subprocess.run(
-                    ["git", "-C", str(repo_path), "worktree", "remove", "--force", str(inst_path)],
-                    check=True,
-                )
-                console.print(f"  [green]\u2713[/green] Removed git worktree '{inst_name}'")
-            except subprocess.CalledProcessError as e:
-                console.print(f"  [yellow]\u26a0[/yellow] Git worktree removal failed: {e}")
-        elif not is_wt:
-            console.print(f"  [dim]Main repository '{inst_name}' - no worktree to remove[/dim]")
-
-        removed_count += 1
-
-    # Kill all tmux sessions (outer, inner, bash)
-    _uninstall_inner_hook(session)
-    inner = _inner_session_name(session)
-    bash = _bash_session_name(session)
-    outer = _outer_session_name(session)
-    if tmux_session_exists(outer):
-        try:
-            subprocess.run(
-                ["tmux", "kill-session", "-t", f"={outer}"],
-                check=True, capture_output=True,
-            )
-            console.print(f"\n  [green]\u2713[/green] Killed outer tmux session '{outer}'")
-        except subprocess.CalledProcessError:
-            console.print(f"\n  [yellow]\u26a0[/yellow] Could not kill outer tmux session '{outer}'")
-    if tmux_session_exists(inner):
-        try:
-            subprocess.run(
-                ["tmux", "kill-session", "-t", f"={inner}"],
-                check=True, capture_output=True,
-            )
-            console.print(f"  [green]\u2713[/green] Killed inner tmux session '{inner}'")
-        except subprocess.CalledProcessError:
-            console.print(f"  [yellow]\u26a0[/yellow] Could not kill inner tmux session '{inner}'")
-    if tmux_session_exists(bash):
-        try:
-            subprocess.run(
-                ["tmux", "kill-session", "-t", f"={bash}"],
-                check=True, capture_output=True,
-            )
-            console.print(f"  [green]\u2713[/green] Killed bash tmux session '{bash}'")
-        except subprocess.CalledProcessError:
-            console.print(f"  [yellow]\u26a0[/yellow] Could not kill bash tmux session '{bash}'")
-
-    # Remove session from state
-    state.remove_session(session)
-
-    console.print(f"\n[bold green]Success![/bold green] Removed session '{session}' ({removed_count} instance(s)).")
-
-
-@session_app.command(name="attach")
-def session_attach(*, common: CommonConfig) -> None:
-    """Attach to a tmux session.
-
-    Args:
-        common: Common parameters (session, etc.)
-    """
-    session = common.session
-
-    session_obj = state.get_session(session)
-    if session_obj is None:
-        console.print(f"[red]Error:[/red] ccmux session '{session}' not found.", style="bold")
-        console.print(f"\nCreate an instance with: [cyan]ccmux new --session {session}[/cyan]")
-        sys.exit(1)
-
-    inner = _inner_session_name(session)
-    if not tmux_session_exists(inner):
-        console.print(f"[red]Error:[/red] Tmux session no longer exists.", style="bold")
-        console.print(f"\nThe tmux session was closed. Activate instances with: [cyan]ccmux activate --session {session}[/cyan]")
-        sys.exit(1)
-
-    _ensure_outer_session(session)
-    _notify_sidebars(session)
-    os.execvp("tmux", ["tmux", "attach", "-t", f"={_outer_session_name(session)}"])
-
-
-# --- Instance Sub-App Commands ---
+# --- Instance Commands ---
 
 @app.default
-def instance_info(*, common: CommonConfig) -> None:
+def instance_info() -> None:
     """Show current instance info, or help if none active."""
-    detected = detect_current_ccmux_instance()
+    detected = detect_current_ccmux_instance_any()
     if not detected:
         console.print("[yellow]Not currently in a ccmux instance.[/yellow]\n")
         app.help_print([])
@@ -1448,7 +1046,7 @@ def instance_info(*, common: CommonConfig) -> None:
 @app.command(name="which")
 def instance_which() -> None:
     """Print the current instance name (useful for scripting)."""
-    detected = detect_current_ccmux_instance()
+    detected = detect_current_ccmux_instance_any()
     if detected is None:
         sys.exit(1)
     print(detected[1])
@@ -1460,7 +1058,6 @@ def instance_new(
     *,
     worktree: Annotated[bool, Parameter(name=["-w", "--worktree"])] = False,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
-    common: CommonConfig,
 ) -> None:
     """Create a new Claude Code instance in main repo or as a git worktree.
 
@@ -1468,9 +1065,8 @@ def instance_new(
         name: Name for the instance (generates random animal name if not provided)
         worktree: Create instance as a git worktree instead of using main repo
         yes: Skip confirmation prompts (auto-create as worktree if main exists)
-        common: Common parameters (session, etc.)
     """
-    session = common.session
+    session = DEFAULT_SESSION
 
     # Validate we're in a git repo
     repo_root = get_repo_root()
@@ -1510,7 +1106,7 @@ def instance_new(
                     name = candidate
                     break
             else:
-                if not state.get_instance(session, candidate):
+                if not state.get_instance(candidate, session):
                     name = candidate
                     break
 
@@ -1565,6 +1161,7 @@ def instance_new(
     # Create or attach to tmux session
     instance_type = "worktree" if create_as_worktree else "main repo"
     launch_cmd = (
+        f"export CCMUX_INSTANCE={name}; "
         f"echo 'Launching Claude Code in {instance_path} ({instance_type} instance: {name})'; "
         f"unset CLAUDECODE; "
         f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
@@ -1667,6 +1264,7 @@ def instance_new(
                 inst_type = inst.instance_type + " repo" if not inst.is_worktree else "worktree"
 
                 reactivate_cmd = (
+                    f"export CCMUX_INSTANCE={inst_name}; "
                     f"echo 'Reactivating Claude Code in {inst_path} ({inst_type} instance: {inst_name})'; "
                     f"unset CLAUDECODE; "
                     f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
@@ -1692,7 +1290,7 @@ def instance_new(
                             ["tmux", "display-message", "-t", inner, "-p", "#{session_id}"],
                             capture_output=True, text=True, check=True,
                         ).stdout.strip()
-                        state.update_tmux_ids(session, inst_name, new_session_id, new_window_id)
+                        state.update_tmux_ids(inst_name, session, new_session_id, new_window_id)
                     except subprocess.CalledProcessError:
                         pass
 
@@ -1720,67 +1318,44 @@ def instance_new(
 
 
 @app.command(name="list")
-def instance_list(
-    *,
-    common: CommonConfig,
-    all_sessions: Annotated[bool, Parameter(negative="", alias="-a")] = False,
-) -> None:
-    """List all instances and their tmux session status.
+def instance_list() -> None:
+    """List all instances and their tmux session status."""
+    session = DEFAULT_SESSION
+    instances = state.get_all_instances(session)
 
-    Args:
-        common: Common parameters (session, etc.)
-        all_sessions: List instances for all sessions
-    """
-    if all_sessions:
-        sessions = state.get_all_sessions()
+    if not instances:
+        console.print("\n[yellow]No instances found.[/yellow]")
+        console.print(f"Create one with: [cyan]ccmux new[/cyan]")
+        return
 
-        if not sessions:
-            console.print("\n[yellow]No sessions found.[/yellow]")
-            console.print(f"Create one with: [cyan]ccmux new[/cyan]")
-            return
-
-        for sess in sessions:
-            _display_session_table(sess.name)
-    else:
-        session = common.session
-        instances = state.get_all_instances(session)
-
-        if not instances:
-            console.print("\n[yellow]No instances found.[/yellow]")
-            console.print(f"Create one with: [cyan]ccmux new[/cyan]")
-            return
-
-        _display_session_table(session)
+    _display_session_table(session)
 
 
 @app.command(name="rename")
 def instance_rename(
     old: Optional[str] = None,
     new: Optional[str] = None,
-    *,
-    common: CommonConfig,
 ) -> None:
     """Rename a ccmux instance.
 
     Args:
         old: Current instance name (or new name if only 1 arg given)
         new: New instance name
-        common: Common parameters (session, etc.)
     """
-    session = common.session
+    session = DEFAULT_SESSION
 
     if old is not None and new is not None:
-        # Explicit: ccmux instance rename <old> <new>
+        # Explicit: ccmux rename <old> <new>
         old_name = old
         new_name = sanitize_name(new)
-        instance_data = state.get_instance(session, old_name)
+        instance_data = state.get_instance(old_name, session)
         if not instance_data:
-            console.print(f"[red]Error:[/red] Instance '{old_name}' not found in session '{session}'.", style="bold")
+            console.print(f"[red]Error:[/red] Instance '{old_name}' not found.", style="bold")
             sys.exit(1)
     elif old is not None and new is None:
         # 1 arg: rename current instance to <new-name>
         new_name = sanitize_name(old)
-        detected = detect_current_ccmux_instance()
+        detected = detect_current_ccmux_instance_any()
         if not detected:
             console.print("[red]Error:[/red] Not in a ccmux instance.", style="bold")
             sys.exit(1)
@@ -1791,10 +1366,10 @@ def instance_rename(
         # Interactive mode
         instances = state.get_all_instances(session)
         if not instances:
-            console.print(f"[yellow]No instances found in session '{session}'.[/yellow]")
+            console.print(f"[yellow]No instances found.[/yellow]")
             return
 
-        console.print(f"\n[bold]Instances in session '{session}':[/bold]")
+        console.print(f"\n[bold]Instances:[/bold]")
         for i, inst in enumerate(instances):
             console.print(f"  {i + 1}. {inst.name}")
 
@@ -1803,7 +1378,7 @@ def instance_rename(
             choices=[str(i + 1) for i in range(len(instances))],
         )
         old_name = instances[int(choice) - 1].name
-        instance_data = state.get_instance(session, old_name)
+        instance_data = state.get_instance(old_name, session)
         raw_new = Prompt.ask("New name")
         new_name = sanitize_name(raw_new)
     else:
@@ -1833,8 +1408,8 @@ def instance_rename(
                 sys.exit(1)
 
     # Rename in state
-    if not state.rename_instance(session, old_name, new_name):
-        if not state.get_instance(session, old_name):
+    if not state.rename_instance(old_name, new_name, session):
+        if not state.get_instance(old_name, session):
             console.print(f"[red]Error:[/red] Instance '{old_name}' not found.", style="bold")
         else:
             console.print(f"[red]Error:[/red] Instance '{new_name}' already exists.", style="bold")
@@ -1842,7 +1417,7 @@ def instance_rename(
 
     # Update instance_path in state if worktree was moved
     if is_wt:
-        state.update_instance(session, new_name, instance_path=str(new_path))
+        state.update_instance(new_name, session, instance_path=str(new_path))
 
     # Rename tmux window if active (in inner session)
     tmux_window_id = instance_data.tmux_window_id
@@ -1860,23 +1435,43 @@ def instance_rename(
     console.print(f"\n[bold green]Success![/bold green] Instance renamed: '{old_name}' -> '{new_name}'")
 
 
+@app.command(name="attach")
+def attach() -> None:
+    """Attach to the ccmux tmux session."""
+    session = DEFAULT_SESSION
+
+    session_obj = state.get_session(session)
+    if session_obj is None:
+        console.print(f"[red]Error:[/red] No ccmux session found.", style="bold")
+        console.print(f"\nCreate an instance with: [cyan]ccmux new[/cyan]")
+        sys.exit(1)
+
+    inner = _inner_session_name(session)
+    if not tmux_session_exists(inner):
+        console.print(f"[red]Error:[/red] Tmux session no longer exists.", style="bold")
+        console.print(f"\nThe tmux session was closed. Activate instances with: [cyan]ccmux activate[/cyan]")
+        sys.exit(1)
+
+    _ensure_outer_session(session)
+    _notify_sidebars(session)
+    os.execvp("tmux", ["tmux", "attach", "-t", f"={_outer_session_name(session)}"])
+
+
 @app.command(name="activate")
 def instance_activate(
     name: Optional[str] = None,
     *,
-    common: CommonConfig,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
     """Activate Claude Code in an instance (useful if tmux window was closed).
 
-    If no name is provided, activates all inactive instances in the session.
+    If no name is provided, activates all inactive instances.
 
     Args:
         name: Instance name to activate (omit to activate all)
-        common: Common parameters (session, etc.)
         yes: Skip confirmation prompt (default: False)
     """
-    session = common.session
+    session = DEFAULT_SESSION
     if name is None:
         _activate_all_in_session(session, yes)
     else:
@@ -1887,24 +1482,22 @@ def instance_activate(
 def instance_deactivate(
     name: Optional[str] = None,
     *,
-    common: CommonConfig,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
     """Deactivate Claude Code instance(s) by killing tmux window (keeps instance).
 
-    If no name is provided, deactivates all active instances in the session.
+    If no name is provided, deactivates all active instances.
 
     Args:
         name: Instance name to deactivate (omit to deactivate all)
-        common: Common parameters (session, etc.)
         yes: Skip confirmation prompt (default: False)
     """
-    session = common.session
+    session = DEFAULT_SESSION
 
     instances = state.get_all_instances(session)
 
     if not instances:
-        console.print(f"[yellow]No instances found in session '{session}'.[/yellow]")
+        console.print(f"[yellow]No instances found.[/yellow]")
         sys.exit(0)
 
     # Check which instances are active (checks inner session)
@@ -1915,10 +1508,10 @@ def instance_deactivate(
 
     if name is None:
         if not active_instances:
-            console.print(f"\n[yellow]No active instances to deactivate in session '{session}'.[/yellow]")
+            console.print(f"\n[yellow]No active instances to deactivate.[/yellow]")
             return
 
-        console.print(f"\n[bold yellow]Deactivating {len(active_instances)} active instance(s) in session '{session}':[/bold yellow]")
+        console.print(f"\n[bold yellow]Deactivating {len(active_instances)} active instance(s):[/bold yellow]")
         for inst in active_instances:
             console.print(f"  \u2022 {inst.name}")
         console.print()
@@ -1955,14 +1548,14 @@ def instance_deactivate(
             break
 
     if instance is None:
-        console.print(f"[red]Error:[/red] Instance '{name}' not found in session '{session}'.", style="bold")
+        console.print(f"[red]Error:[/red] Instance '{name}' not found.", style="bold")
         sys.exit(1)
 
     if instance not in active_instances:
         console.print(f"[yellow]Instance '{name}' is already inactive.[/yellow]")
         return
 
-    console.print(f"\n[bold yellow]Deactivating instance '{name}' in session '{session}'[/bold yellow]")
+    console.print(f"\n[bold yellow]Deactivating instance '{name}'[/bold yellow]")
 
     tmux_wid = instance.tmux_window_id
     if tmux_wid:
@@ -1983,22 +1576,20 @@ def instance_deactivate(
 def instance_remove(
     name: Optional[str] = None,
     *,
-    common: CommonConfig,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
     all_instances: Annotated[bool, Parameter(name=["--all"], negative="")] = False,
 ) -> None:
     """Remove instance(s) permanently (deactivates and deletes worktree).
 
     If no name is provided, auto-detects the current instance.
-    Use --all to remove all instances in the session.
+    Use --all to remove all instances.
 
     Args:
         name: Instance name to remove (auto-detects if omitted)
-        common: Common parameters (session, etc.)
         yes: Skip confirmation prompt (default: False)
-        all_instances: Remove all instances in the session
+        all_instances: Remove all instances
     """
-    session = common.session
+    session = DEFAULT_SESSION
 
     # Auto-detect instance when no name given and --all not set
     if name is None and not all_instances:
@@ -2016,7 +1607,7 @@ def instance_remove(
     worktrees = state.get_all_instances(session)
 
     if not worktrees:
-        console.print(f"[yellow]No instances found in session '{session}'.[/yellow]")
+        console.print(f"[yellow]No instances found.[/yellow]")
         sys.exit(0)
 
     # Check which are active (checks inner session)
@@ -2029,7 +1620,7 @@ def instance_remove(
             inactive_worktrees.append(wt)
 
     if name is None:
-        console.print(f"\n[bold red]WARNING: This will permanently delete {len(worktrees)} instance(s) in session '{session}'[/bold red]")
+        console.print(f"\n[bold red]WARNING: This will permanently delete {len(worktrees)} instance(s)[/bold red]")
         console.print("[red]Any uncommitted changes will be lost![/red]\n")
 
         if active_worktrees:
@@ -2094,7 +1685,7 @@ def instance_remove(
             else:
                 console.print(f"{prefix}[yellow]\u26a0[/yellow] Worktree not found on filesystem")
 
-            state.remove_instance(session, wt_name)
+            state.remove_instance(wt_name, session)
             console.print(f"{prefix}[green]\u2713[/green] Removed '{wt_name}' from tracking")
             removed_count += 1
 
@@ -2141,8 +1732,8 @@ def instance_remove(
             break
 
     if worktree is None:
-        console.print(f"[red]Error:[/red] Instance '{name}' not found in session '{session}'.", style="bold")
-        console.print(f"List instances with: [cyan]ccmux list --session {session}[/cyan]")
+        console.print(f"[red]Error:[/red] Instance '{name}' not found.", style="bold")
+        console.print(f"List instances with: [cyan]ccmux list[/cyan]")
         sys.exit(1)
 
     wt_path = Path(worktree.instance_path)
@@ -2153,7 +1744,7 @@ def instance_remove(
         console.print(f"\n[bold red]WARNING: Removing main repository '{name}' from tracking[/bold red]")
         console.print("[yellow]This will only remove it from ccmux tracking, not delete the repository itself.[/yellow]")
     else:
-        console.print(f"\n[bold red]WARNING: Removing instance '{name}' from session '{session}'[/bold red]")
+        console.print(f"\n[bold red]WARNING: Removing instance '{name}'[/bold red]")
         console.print("[red]This will permanently delete the worktree and any uncommitted changes![/red]")
 
     console.print(f"  Path: {wt_path}")
@@ -2203,7 +1794,7 @@ def instance_remove(
     else:
         console.print(f"  [yellow]\u26a0[/yellow] Worktree not found on filesystem")
 
-    state.remove_instance(session, name)
+    state.remove_instance(name, session)
     _notify_sidebars(session)
     console.print(f"  [green]\u2713[/green] Removed '{name}' from tracking")
 
@@ -2261,53 +1852,17 @@ def export_tmux_config(
 
 
 @app.command(name="refresh")
-def refresh(
-    *,
-    common: CommonConfig,
-) -> None:
-    """Reload the sidebar by killing and restarting the outer session.
-
-    Args:
-        common: Common parameters (session, etc.)
-    """
-    session = common.session
+def refresh() -> None:
+    """Reload the sidebar by killing and restarting the outer session."""
+    session = DEFAULT_SESSION
     _reload_session_sidebar(session)
     console.print("[green]\u2713[/green] Sidebar refreshed.")
-
-
-# --- Meta (parameter injection + alias rewriting) ---
-
-@app.meta.default
-def meta(
-    *tokens: Annotated[str, Parameter(show=False, allow_leading_hyphen=True)],
-    session: Annotated[str, Parameter(negative="", alias="-s")] = DEFAULT_SESSION,
-):
-    """Meta command to inject common parameters into subcommands.
-
-    Args:
-        tokens: Command tokens to parse
-        session: ccmux session name
-    """
-    common = Common(session=session)
-
-    # Rewrite top-level aliases to sub-app paths
-    if tokens and tokens[0] in TOP_LEVEL_ALIASES:
-        tokens = tuple(TOP_LEVEL_ALIASES[tokens[0]]) + tokens[1:]
-
-    command, bound, _ = app.parse_args(tokens)
-
-    # Check if the command accepts the common parameter
-    sig = inspect.signature(command)
-    if "common" in sig.parameters:
-        return command(*bound.args, **bound.kwargs, common=common)
-    else:
-        return command(*bound.args, **bound.kwargs)
 
 
 def main():
     """Main entry point for the CLI."""
     try:
-        app.meta()
+        app()
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")
         sys.exit(130)
