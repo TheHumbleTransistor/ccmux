@@ -330,3 +330,74 @@ def test_find_main_repo_instance(temp_state_dir):
     assert result.is_worktree is False
 
     assert state.find_main_repo_instance("/other-repo") is None
+
+
+# --- find_instance_by_path tests ---
+
+def test_find_instance_by_path_exact(temp_state_dir):
+    """Test exact path match returns the instance."""
+    state.add_instance(
+        instance_name="fox",
+        repo_path="/repo",
+        instance_path="/repo/.worktrees/fox",
+        is_worktree=True,
+    )
+    result = state.find_instance_by_path("/repo/.worktrees/fox")
+    assert result is not None
+    assert result[0] == "fox"
+
+
+def test_find_instance_by_path_subdirectory(temp_state_dir):
+    """Test subdirectory of instance_path matches."""
+    state.add_instance(
+        instance_name="fox",
+        repo_path="/repo",
+        instance_path="/repo/.worktrees/fox",
+        is_worktree=True,
+    )
+    result = state.find_instance_by_path("/repo/.worktrees/fox/src/main.py")
+    assert result is not None
+    assert result[0] == "fox"
+
+
+def test_find_instance_by_path_longest_prefix(temp_state_dir):
+    """Test longest-prefix disambiguation: worktree wins over main repo."""
+    state.add_instance(
+        instance_name="main-inst",
+        repo_path="/repo",
+        instance_path="/repo",
+        is_worktree=False,
+    )
+    state.add_instance(
+        instance_name="fox",
+        repo_path="/repo",
+        instance_path="/repo/.worktrees/fox",
+        is_worktree=True,
+    )
+    result = state.find_instance_by_path("/repo/.worktrees/fox/src")
+    assert result is not None
+    assert result[0] == "fox"
+
+
+def test_find_instance_by_path_no_match(temp_state_dir):
+    """Test no match returns None."""
+    state.add_instance(
+        instance_name="fox",
+        repo_path="/repo",
+        instance_path="/repo/.worktrees/fox",
+        is_worktree=True,
+    )
+    result = state.find_instance_by_path("/other/path")
+    assert result is None
+
+
+def test_find_instance_by_path_no_false_prefix(temp_state_dir):
+    """Test /repo doesn't false-match /repo2."""
+    state.add_instance(
+        instance_name="main-inst",
+        repo_path="/repo",
+        instance_path="/repo",
+        is_worktree=False,
+    )
+    result = state.find_instance_by_path("/repo2/somefile")
+    assert result is None

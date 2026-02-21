@@ -229,3 +229,19 @@ def find_main_repo_instance(repo_path: str, session_name: str = DEFAULT_SESSION)
         if instance.repo_path == repo_path and not instance.is_worktree:
             return instance
     return None
+
+
+def find_instance_by_path(path: str, session_name: str = DEFAULT_SESSION) -> Optional[tuple[str, Instance]]:
+    """Find instance whose instance_path is a prefix of the given path.
+    Returns the most specific (longest) match: (instance_name, Instance) or None.
+    """
+    instances = get_all_instances(session_name)
+    best: Optional[tuple[str, Instance]] = None
+    best_len = -1
+    for inst in instances:
+        ip = inst.instance_path.rstrip("/")
+        if path == ip or path.startswith(ip + "/"):
+            if len(ip) > best_len:
+                best_len = len(ip)
+                best = (inst.name, inst)
+    return best

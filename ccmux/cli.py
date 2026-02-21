@@ -528,53 +528,6 @@ def _kill_outer_session(session: str) -> bool:
         return False
 
 
-def _reload_session_sidebar(session: str) -> None:
-    """Respawn the sidebar pane in the outer session without killing the session.
-
-    Finds pane 0 (the sidebar), kills it, then splits a new sidebar pane
-    on the left. The nested tmux client pane is left untouched.
-    """
-    outer = _outer_session_name(session)
-    if not tmux_session_exists(outer):
-        return
-
-    python_exe = sys.executable or "python3"
-    sidebar_cmd = (
-        f"TERM=tmux-256color COLORTERM=truecolor {python_exe} -m ccmux.ui.sidebar {session} ; "
-        f"echo 'Sidebar exited. Press enter to close.' ; read"
-    )
-
-    try:
-        # Kill the existing sidebar pane (pane 0, leftmost)
-        subprocess.run(
-            ["tmux", "kill-pane", "-t", f"{outer}:0.0"],
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError:
-        pass
-
-    try:
-        # Split a new sidebar pane on the left (fixed character width)
-        subprocess.run(
-            [
-                "tmux", "split-window",
-                "-t", f"{outer}:0.0",  # explicitly target pane 0
-                "-hb",
-                "-l", str(SIDEBAR_WIDTH),
-                sidebar_cmd,
-            ],
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        print(
-            f"ccmux: failed to respawn sidebar for '{outer}': {exc}\n"
-            f"  stderr: {exc.stderr.decode() if exc.stderr else '(none)'}",
-            file=sys.stderr,
-        )
-
-
 def _install_inner_hook(session: str) -> None:
     """Install hooks on the inner session for sidebar refresh, bell tracking, and bash sync.
 
@@ -696,18 +649,24 @@ def detect_current_ccmux_instance_any() -> Optional[tuple[str, str, "state.Insta
     if result:
         return result
 
+    # Try bash-session detection
     tmux_session = get_current_tmux_session()
-    if not tmux_session or not tmux_session.endswith("-bash"):
-        return None
+    if tmux_session and tmux_session.endswith("-bash"):
+        ccmux_session = _ccmux_session_from_tmux(tmux_session)
+        window_name = get_current_tmux_window()
+        if window_name:
+            instance_data = state.get_instance(window_name, ccmux_session)
+            if instance_data:
+                return (ccmux_session, window_name, instance_data)
 
-    ccmux_session = _ccmux_session_from_tmux(tmux_session)
-    window_name = get_current_tmux_window()
-    if not window_name:
+    # Final fallback: match cwd against known instance paths
+    try:
+        cwd = str(Path.cwd().resolve())
+    except OSError:
         return None
-
-    instance_data = state.get_instance(window_name, ccmux_session)
-    if instance_data:
-        return (ccmux_session, window_name, instance_data)
+    result = state.find_instance_by_path(cwd, DEFAULT_SESSION)
+    if result:
+        return (DEFAULT_SESSION, result[0], result[1])
     return None
 
 
@@ -1867,12 +1826,22 @@ def export_tmux_config(
         console.print(content)
 
 
-@app.command(name="refresh")
-def refresh() -> None:
-    """Reload the sidebar by killing and restarting the outer session."""
+@app.command(name="detach")
+def detach() -> None:
+    """Detach the ccmux tmux session."""
     session = DEFAULT_SESSION
-    _reload_session_sidebar(session)
-    console.print("[green]\u2713[/green] Sidebar refreshed.")
+    outer = _outer_session_name(session)
+    if not tmux_session_exists(outer):
+        console.print(f"[red]Error:[/red] No active ccmux session.", style="bold")
+        sys.exit(1)
+    try:
+        subprocess.run(
+            ["tmux", "detach-client", "-s", outer],
+            check=True, capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Error detaching:[/red] {e}", style="bold")
+        sys.exit(1)
 
 
 def main():
