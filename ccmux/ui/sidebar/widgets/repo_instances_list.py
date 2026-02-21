@@ -24,5 +24,9 @@ class RepoInstancesList(Vertical):
 
     def compose(self) -> ComposeResult:
         yield RepoHeader(f"\u25cf {self.repo_name}/")
-        for _, name, type_, active, current, alert in self.instances:
-            yield InstanceRow(name, type_, active, current, self.session_name, alert, id=f"inst-{name}")
+        last_idx = len(self.instances) - 1
+        for i, (_, name, type_, active, current, alert) in enumerate(self.instances):
+            yield InstanceRow(
+                name, type_, active, current, self.session_name, alert,
+                is_last=(i == last_idx), id=f"inst-{name}",
+            )
