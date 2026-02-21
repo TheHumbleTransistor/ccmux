@@ -555,7 +555,13 @@ class TestSidebarRendering:
     @pytest.fixture
     def demo_app(self):
         """Create a demo SidebarApp for headless testing."""
-        return SidebarApp(session="test-demo", demo=True)
+        from tests.demo_sidebar import make_demo_provider
+
+        return SidebarApp(
+            session="test-demo",
+            snapshot_fn=make_demo_provider(),
+            poll_interval=1.0,
+        )
 
     @pytest.mark.asyncio
     async def test_widgets_present_after_instance_click(self, demo_app):

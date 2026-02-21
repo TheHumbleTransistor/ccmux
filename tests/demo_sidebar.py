@@ -1,5 +1,7 @@
 """Demo snapshot builder for sidebar testing."""
 
+from collections.abc import Awaitable, Callable
+
 
 def build_demo_snapshot(tick: int) -> list[tuple]:
     """Build varying snapshot data to exercise refresh/rebuild paths."""
@@ -22,3 +24,16 @@ def build_demo_snapshot(tick: int) -> list[tuple]:
         base.append(("other-repo", "hotfix", "worktree", True, False, "bell"))
 
     return base
+
+
+def make_demo_provider() -> Callable[[], Awaitable[list[tuple]]]:
+    """Return an async closure that auto-increments the demo tick."""
+    tick = 0
+
+    async def _provider() -> list[tuple]:
+        nonlocal tick
+        snapshot = build_demo_snapshot(tick)
+        tick += 1
+        return snapshot
+
+    return _provider

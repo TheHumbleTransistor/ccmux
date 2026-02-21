@@ -1,17 +1,15 @@
-"""Sidebar application controller — Textual app, polling, signals, entry point."""
+"""Sidebar application controller — Textual app, polling, signals."""
 
 import asyncio
-import atexit
 import logging
 import signal
-import sys
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 
 from ccmux.ui.sidebar import model, view
-from ccmux.ui.sidebar.process_id import remove_pid_file, write_pid_file
 from ccmux.ui.sidebar.widgets import NonInteractiveStatic
 
 POLL_INTERVAL = 5.0
@@ -41,11 +39,16 @@ class SidebarApp(App):
     CSS_PATH = "sidebar.tcss"
     ALLOW_SELECT = False
 
-    def __init__(self, session: str, demo: bool = False) -> None:
+    def __init__(
+        self,
+        session: str,
+        snapshot_fn: Callable[[], Awaitable[list[tuple]]] | None = None,
+        poll_interval: float = POLL_INTERVAL,
+    ) -> None:
         super().__init__()
         self.session_name = session
-        self._demo = demo
-        self._demo_tick = 0
+        self._snapshot_fn = snapshot_fn
+        self._poll_interval = poll_interval
         self._last_snapshot: list[tuple] = []
         self._refresh_lock = asyncio.Lock()
 
@@ -57,8 +60,7 @@ class SidebarApp(App):
 
     async def on_mount(self) -> None:
         await self._refresh_instances(caller="mount")
-        interval = DEMO_POLL_INTERVAL if self._demo else POLL_INTERVAL
-        self.set_interval(interval, self._poll_refresh)
+        self.set_interval(self._poll_interval, self._poll_refresh)
         self._register_signal_handler()
 
     async def _refresh_instances(self, caller: str = "unknown") -> None:
@@ -66,11 +68,10 @@ class SidebarApp(App):
         async with self._refresh_lock:
             log.debug("refresh START caller=%s", caller)
 
-            snapshot = await model.build_snapshot(
-                self.session_name, demo=self._demo, demo_tick=self._demo_tick
-            )
-            if self._demo:
-                self._demo_tick += 1
+            if self._snapshot_fn is not None:
+                snapshot = await self._snapshot_fn()
+            else:
+                snapshot = await model.build_snapshot(self.session_name)
 
             log.debug("refresh REBUILD caller=%s", caller)
             container = self.query_one("#instance-list", Vertical)
@@ -96,29 +97,3 @@ class SidebarApp(App):
         self.run_worker(
             self._refresh_instances(caller="signal"), group="refresh",
         )
-
-
-def main() -> None:
-    """Entry point: python -m ccmux.ui.sidebar <session>"""
-    if "--demo" in sys.argv:
-        app = SidebarApp(session="demo", demo=True)
-        app.run()
-        return
-
-    if len(sys.argv) < 2:
-        print("Usage: python -m ccmux.ui.sidebar <session>", file=sys.stderr)
-        print("       python -m ccmux.ui.sidebar --demo", file=sys.stderr)
-        sys.exit(1)
-
-    session = sys.argv[1]
-
-    # PID tracking
-    write_pid_file(session)
-    atexit.register(remove_pid_file, session)
-
-    app = SidebarApp(session=session)
-    app.run()
-
-
-if __name__ == "__main__":
-    main()

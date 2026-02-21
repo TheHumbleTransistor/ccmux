@@ -16,7 +16,7 @@ echo "=== Sidebar tmux integration test ==="
 
 # 1. Start demo sidebar inside a new tmux session
 tmux new-session -d -s "$SESSION" -x 40 -y 24 \
-    "python -m ccmux.sidebar --demo"
+    "python -m ccmux.ui.sidebar --demo"
 sleep 3  # Wait for Textual to render
 
 # 2. Capture initial pane content

@@ -5,7 +5,6 @@ import subprocess
 from pathlib import Path
 
 from ccmux import state
-from ccmux.ui.sidebar.demo import build_demo_snapshot
 
 
 def group_by_repo(snapshot: list[tuple]) -> dict[str, list[tuple]]:
@@ -89,13 +88,8 @@ async def get_tmux_window_flags(session_name: str) -> dict[str, dict[str, bool]]
         return {}
 
 
-async def build_snapshot(
-    session_name: str, demo: bool = False, demo_tick: int = 0
-) -> list[tuple]:
+async def build_snapshot(session_name: str) -> list[tuple]:
     """Build a comparable snapshot of the current instance state."""
-    if demo:
-        return build_demo_snapshot(demo_tick)
-
     instances = state.get_all_worktrees(session_name)
     if not instances:
         return []
