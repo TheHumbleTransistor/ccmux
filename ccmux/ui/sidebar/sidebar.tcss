@@ -4,7 +4,7 @@ Screen {
 }
 
 #title {
-    height: 1;
+    height: 6;
     padding: 0 1;
     color: #d7af5f;
     background: #1e1e1e;

@@ -55,7 +55,15 @@ class SidebarApp(App):
         self._instance_list:Vertical | None = None
 
     def compose(self) -> ComposeResult:
-        yield NonInteractiveStatic("CCMUX", id="title")
+        yield NonInteractiveStatic(
+            "                                     \n"
+            "                                     \n"
+            "▄█████ ▄█████ ██▄  ▄██ ██  ██ ██  ██ \n"
+            "██     ██     ██ ▀▀ ██ ██  ██  ████  \n"
+            "▀█████ ▀█████ ██    ██ ▀████▀ ██  ██ \n"
+            "                                     ",
+            id="title",
+        )
         yield NonInteractiveStatic(f"Session: {self.session_name}", id="header")
         yield NonInteractiveStatic("", id="spacer")
         self._instance_list = Vertical(id="instance-list")
