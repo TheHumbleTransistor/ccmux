@@ -69,12 +69,19 @@ InstanceRow.activity {
     background: #1e3520;
 }
 
+/* Red phase of flash (default when current+bell) */
 InstanceRow.current.bell {
     background: #4a2828;
 }
 
+/* Alternate phase of flash (matches normal current background) */
+InstanceRow.current.bell.bell-flash {
+    background: #3a3a3a;
+}
+
+/* Activity on current instance: suppress, show neutral gray */
 InstanceRow.current.activity {
-    background: #284a28;
+    background: #3a3a3a;
 }
 
 /* RepoHeader */

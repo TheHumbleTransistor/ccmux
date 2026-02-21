@@ -36,9 +36,11 @@ class InstanceRow(Vertical):
         self.session = session
         self.alert_state = alert_state
         self.is_last = is_last
+        self._flash_timer = None
         if is_current:
             self.add_class("current")
         self._apply_alert_class(alert_state)
+        self._update_flash()
 
     def _tree_chars(self) -> tuple[str, str, str]:
         """Return (top, branch, tail) tree characters."""
@@ -54,6 +56,20 @@ class InstanceRow(Vertical):
             yield Static(f"{branch}{indicator} {self.instance_name}", classes="name")
             yield Static(self.instance_type, classes="type")
         yield Static(tail, classes="line3")
+
+    def _toggle_flash(self) -> None:
+        """Toggle the bell-flash CSS class for the flash animation."""
+        self.toggle_class("bell-flash")
+
+    def _update_flash(self) -> None:
+        """Start or stop the flash timer based on current + bell state."""
+        should_flash = self.is_current and self.alert_state == "bell"
+        if should_flash and self._flash_timer is None:
+            self._flash_timer = self.set_interval(0.5, self._toggle_flash)
+        elif not should_flash and self._flash_timer is not None:
+            self._flash_timer.stop()
+            self._flash_timer = None
+            self.remove_class("bell-flash")
 
     def _apply_alert_class(self, alert_state: str | None) -> None:
         """Add/remove bell and activity CSS classes based on alert state."""
@@ -85,6 +101,7 @@ class InstanceRow(Vertical):
         if alert_state != self.alert_state:
             self.alert_state = alert_state
             self._apply_alert_class(alert_state)
+        self._update_flash()
 
     async def on_click(self) -> None:
         """Signal that this instance row was clicked."""
