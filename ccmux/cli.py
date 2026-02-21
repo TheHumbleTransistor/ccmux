@@ -23,6 +23,10 @@ from ccmux.ui.tmux import apply_outer_session_config, apply_tmux_config
 # Default session name
 DEFAULT_SESSION = "default"
 
+# Outer session pane dimensions
+SIDEBAR_WIDTH = 41   # 4 chars wider than 37-char CCMUX ASCII art title
+BASH_PANE_HEIGHT = 4
+
 
 console = Console()
 app = cyclopts.App(
@@ -388,9 +392,9 @@ def _create_outer_session(session: str) -> None:
     """Create the outer tmux session with sidebar, inner client, and bash pane.
 
     The outer session has three panes:
-    - Top-left (20%): sidebar TUI
-    - Top-right (80%): nested tmux client attached to the inner session
-    - Bottom (full width, 20% height): nested tmux client attached to bash session
+    - Top-left (44 chars): sidebar TUI
+    - Top-right (remainder): nested tmux client attached to the inner session
+    - Bottom (full width, 4 rows): nested tmux client attached to bash session
 
     Skips if outer already exists or inner doesn't exist.
     """
@@ -422,13 +426,13 @@ def _create_outer_session(session: str) -> None:
             capture_output=True,
         )
 
-        # 2. Split full-width bottom pane for bash (20% height)
+        # 2. Split full-width bottom pane for bash
         if tmux_session_exists(bash):
             subprocess.run(
                 [
                     "tmux", "split-window",
                     "-t", f"{outer}:0.0",
-                    "-v", "-l", "20%",
+                    "-v", "-l", str(BASH_PANE_HEIGHT),
                     f"TMUX= tmux attach -t ={bash}",
                 ],
                 check=True,
@@ -436,22 +440,30 @@ def _create_outer_session(session: str) -> None:
             )
         # Now: pane 0 = sidebar (top), pane 1 = bash (bottom)
 
-        # 3. Split top pane horizontally for inner client (80% of top area)
+        # 3. Split top pane horizontally for inner client
         subprocess.run(
             [
                 "tmux", "split-window",
                 "-t", f"{outer}:0.0",
-                "-h",
-                "-l", "80%",
+                "-h", "-l", "50%",
                 f"TMUX= tmux attach -t ={inner}",
             ],
             check=True,
             capture_output=True,
         )
-        # Now: pane 0 = sidebar (top-left 20%), pane 1 = inner (top-right 80%), pane 2 = bash (bottom full width)
+        # Now: pane 0 = sidebar (top-left), pane 1 = inner (top-right), pane 2 = bash (bottom full width)
 
         # Apply outer session config (no status bar, C-Space prefix, etc.)
         apply_outer_session_config(outer)
+
+        # Install client-resized hook to enforce fixed pane sizes on attach/resize
+        resize_cmd = f"resize-pane -t {outer}:0.0 -x {SIDEBAR_WIDTH}"
+        if tmux_session_exists(bash):
+            resize_cmd += f" ; resize-pane -t {outer}:0.2 -y {BASH_PANE_HEIGHT}"
+        subprocess.run(
+            ["tmux", "set-hook", "-t", outer, "client-resized", resize_cmd],
+            check=True, capture_output=True,
+        )
 
         # Install hook on inner session for sidebar refresh + bash sync
         _install_inner_hook(session)
@@ -539,13 +551,13 @@ def _reload_session_sidebar(session: str) -> None:
         pass
 
     try:
-        # Split a new sidebar pane on the left (20% width)
+        # Split a new sidebar pane on the left (fixed character width)
         subprocess.run(
             [
                 "tmux", "split-window",
                 "-t", f"{outer}:0.0",  # explicitly target pane 0
                 "-hb",
-                "-l", "20%",
+                "-l", str(SIDEBAR_WIDTH),
                 sidebar_cmd,
             ],
             check=True,

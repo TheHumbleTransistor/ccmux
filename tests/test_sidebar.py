@@ -261,8 +261,8 @@ class TestCreateOuterSession:
 
         _create_outer_session("my-session")
 
-        # Should have called new-session, split-window (bash), split-window (inner)
-        assert mock_run.call_count == 3
+        # Should have called new-session, split-window (bash), split-window (inner), set-hook
+        assert mock_run.call_count == 4
 
         # Verify new-session creates the sidebar under outer name
         new_session_call = mock_run.call_args_list[0][0][0]
@@ -271,11 +271,10 @@ class TestCreateOuterSession:
         sidebar_cmd = new_session_call[-1]
         assert "ccmux.ui.sidebar" in sidebar_cmd
 
-        # Verify first split-window creates the bash pane (vertical, bottom)
+        # Verify first split-window creates the bash pane (vertical, bottom, fixed rows)
         bash_split_call = mock_run.call_args_list[1][0][0]
         assert "split-window" in bash_split_call
         assert "-v" in bash_split_call
-        assert "20%" in bash_split_call
         bash_cmd = bash_split_call[-1]
         assert "tmux attach -t =my-session-bash" in bash_cmd
 
@@ -283,9 +282,18 @@ class TestCreateOuterSession:
         inner_split_call = mock_run.call_args_list[2][0][0]
         assert "split-window" in inner_split_call
         assert "-h" in inner_split_call
-        assert "80%" in inner_split_call
         inner_cmd = inner_split_call[-1]
         assert "tmux attach -t =my-session-inner" in inner_cmd
+
+        # Verify set-hook installs client-resized with resize-pane commands
+        hook_call = mock_run.call_args_list[3][0][0]
+        assert "set-hook" in hook_call
+        assert "client-resized" in hook_call
+        hook_cmd = hook_call[-1]
+        assert "resize-pane" in hook_cmd
+        assert f"-x {41}" in hook_cmd
+        # With bash session, should also resize bash pane height
+        assert f"-y {4}" in hook_cmd
 
         mock_outer_config.assert_called_once_with("ccmux-my-session")
         mock_hook.assert_called_once_with("my-session")
@@ -305,8 +313,8 @@ class TestCreateOuterSession:
 
         _create_outer_session("my-session")
 
-        # Should have called new-session and split-window (inner only, no bash)
-        assert mock_run.call_count == 2
+        # Should have called new-session, split-window (inner), set-hook
+        assert mock_run.call_count == 3
 
         # Verify new-session creates the sidebar
         new_session_call = mock_run.call_args_list[0][0][0]
@@ -315,9 +323,18 @@ class TestCreateOuterSession:
         # Verify split-window creates the inner client
         split_call = mock_run.call_args_list[1][0][0]
         assert "split-window" in split_call
-        assert "80%" in split_call
         inner_cmd = split_call[-1]
         assert "tmux attach -t =my-session-inner" in inner_cmd
+
+        # Verify set-hook installs client-resized with sidebar resize only
+        hook_call = mock_run.call_args_list[2][0][0]
+        assert "set-hook" in hook_call
+        assert "client-resized" in hook_call
+        hook_cmd = hook_call[-1]
+        assert "resize-pane" in hook_cmd
+        assert f"-x {41}" in hook_cmd
+        # Without bash session, should NOT have bash pane resize
+        assert "-y" not in hook_cmd
 
         mock_outer_config.assert_called_once_with("ccmux-my-session")
         mock_hook.assert_called_once_with("my-session")
