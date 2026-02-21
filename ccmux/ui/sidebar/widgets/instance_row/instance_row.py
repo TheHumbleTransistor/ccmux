@@ -1,10 +1,8 @@
 """InstanceRow — horizontal container with indicator, name, and type labels."""
 
-import asyncio
-import subprocess
-
 from textual.app import ComposeResult
 from textual.containers import Horizontal
+from textual.message import Message
 from textual.widgets import Static
 
 
@@ -12,6 +10,14 @@ class InstanceRow(Horizontal):
     """A clickable row showing instance status, name, and type."""
 
     CSS_PATH = "instance_row.tcss"
+
+    class Selected(Message):
+        """Posted when the user clicks an instance row."""
+
+        def __init__(self, instance_name: str, session: str) -> None:
+            super().__init__()
+            self.instance_name = instance_name
+            self.session = session
 
     def __init__(
         self,
@@ -53,13 +59,5 @@ class InstanceRow(Horizontal):
             self.remove_class("activity")
 
     async def on_click(self) -> None:
-        """Switch to this instance's tmux window."""
-        try:
-            await asyncio.to_thread(
-                subprocess.run,
-                ["tmux", "select-window", "-t", f"{self.session}-inner:{self.instance_name}"],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError:
-            pass
+        """Signal that this instance row was clicked."""
+        self.post_message(self.Selected(self.instance_name, self.session))

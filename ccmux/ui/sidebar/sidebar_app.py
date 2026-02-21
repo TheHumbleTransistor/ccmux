@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import signal
+import subprocess
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Vertical
 
 from ccmux.ui.sidebar import snapshot
-from ccmux.ui.sidebar.widgets import NonInteractiveStatic, RepoInstancesList
+from ccmux.ui.sidebar.widgets import InstanceRow, NonInteractiveStatic, RepoInstancesList
 
 POLL_INTERVAL = 5.0
 DEMO_POLL_INTERVAL = 1.0
@@ -113,3 +114,15 @@ class SidebarApp(App):
             group="refresh",
             exit_on_error=False,
         )
+
+    async def on_instance_row_selected(self, message: InstanceRow.Selected) -> None:
+        """Switch to the clicked instance's tmux window."""
+        try:
+            await asyncio.to_thread(
+                subprocess.run,
+                ["tmux", "select-window", "-t", f"{message.session}-inner:{message.instance_name}"],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
