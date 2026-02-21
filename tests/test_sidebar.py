@@ -256,7 +256,7 @@ class TestCreateOuterSession:
         """_create_outer_session creates outer session with sidebar, inner client, and bash pane."""
         from ccmux.cli import _create_outer_session
 
-        # outer doesn't exist, inner and bash do exist
+        # outer (ccmux-my-session) doesn't exist, inner and bash do exist
         mock_exists.side_effect = lambda s: s in ("my-session-inner", "my-session-bash")
 
         _create_outer_session("my-session")
@@ -264,10 +264,10 @@ class TestCreateOuterSession:
         # Should have called new-session, split-window (bash), split-window (inner)
         assert mock_run.call_count == 3
 
-        # Verify new-session creates the sidebar
+        # Verify new-session creates the sidebar under outer name
         new_session_call = mock_run.call_args_list[0][0][0]
         assert "new-session" in new_session_call
-        assert "my-session" in new_session_call
+        assert "ccmux-my-session" in new_session_call
         sidebar_cmd = new_session_call[-1]
         assert "ccmux.ui.sidebar" in sidebar_cmd
 
@@ -287,7 +287,7 @@ class TestCreateOuterSession:
         inner_cmd = inner_split_call[-1]
         assert "tmux attach -t =my-session-inner" in inner_cmd
 
-        mock_outer_config.assert_called_once_with("my-session")
+        mock_outer_config.assert_called_once_with("ccmux-my-session")
         mock_hook.assert_called_once_with("my-session")
 
     @mock.patch("ccmux.cli._install_inner_hook")
@@ -319,7 +319,7 @@ class TestCreateOuterSession:
         inner_cmd = split_call[-1]
         assert "tmux attach -t =my-session-inner" in inner_cmd
 
-        mock_outer_config.assert_called_once_with("my-session")
+        mock_outer_config.assert_called_once_with("ccmux-my-session")
         mock_hook.assert_called_once_with("my-session")
 
     @mock.patch("ccmux.cli.subprocess.run")
@@ -360,7 +360,7 @@ class TestKillOuterSession:
 
         kill_call = mock_run.call_args[0][0]
         assert "kill-session" in kill_call
-        assert "=my-session" in kill_call
+        assert "=ccmux-my-session" in kill_call
 
     @mock.patch("ccmux.cli.tmux_session_exists", return_value=False)
     def test_returns_false_when_no_session(self, mock_exists):
@@ -436,7 +436,7 @@ class TestReloadSessionSidebar:
 
         _reload_session_sidebar("my-session")
 
-        mock_exists.assert_called_once_with("my-session")
+        mock_exists.assert_called_once_with("ccmux-my-session")
         assert mock_run.call_count == 2
         # First call: kill-pane
         kill_args = mock_run.call_args_list[0]
@@ -451,7 +451,7 @@ class TestReloadSessionSidebar:
         from ccmux.cli import _reload_session_sidebar
 
         _reload_session_sidebar("my-session")
-        mock_exists.assert_called_once_with("my-session")
+        mock_exists.assert_called_once_with("ccmux-my-session")
 
 
 class TestInstallInnerHook:
