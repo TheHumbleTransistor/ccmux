@@ -55,6 +55,8 @@ class InstanceRow(Vertical):
         with Horizontal(classes="line2"):
             yield Static(f"{branch}{indicator} {self.instance_name}", classes="name")
             yield Static(self.instance_type, classes="type")
+        # TODO: add the name of the active git branch on the instance row
+        # TODO: add a git diff stat (green +lines / red -lines) for uncommitted changes
         yield Static(tail, classes="line3")
 
     def _toggle_flash(self) -> None:
