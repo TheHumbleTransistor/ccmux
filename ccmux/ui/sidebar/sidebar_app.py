@@ -50,7 +50,7 @@ class SidebarApp(App):
         self.session_name = session
         self._snapshot_fn = snapshot_fn
         self._poll_interval = poll_interval
-        self._last_snapshot: list[tuple] = []
+        self._last_snapshot: list[tuple] | None = None
         self._refresh_lock = asyncio.Lock()
         self._instance_list:Vertical | None = None
 
@@ -67,7 +67,7 @@ class SidebarApp(App):
         self._register_signal_handler()
 
     async def _refresh_instances(self, caller: str = "unknown") -> None:
-        """Refresh the instance list with a full rebuild every time."""
+        """Refresh the instance list, using incremental updates when possible."""
         if self._instance_list is None:
             return
         if self._refresh_lock.locked():
@@ -81,6 +81,17 @@ class SidebarApp(App):
             else:
                 snap = await snapshot.build_snapshot(self.session_name)
 
+            if snap == self._last_snapshot:
+                log.debug("refresh SKIP (no change) caller=%s", caller)
+                return
+
+            old_snap = self._last_snapshot
+            self._last_snapshot = snap
+
+            if self._try_incremental_update(old_snap, snap):
+                log.debug("refresh INCREMENTAL caller=%s", caller)
+                return
+
             log.debug("refresh REBUILD caller=%s", caller)
             container = self._instance_list
             if not snap:
@@ -93,6 +104,19 @@ class SidebarApp(App):
                 ]
             await container.remove_children()
             await container.mount(*new_widgets)
+
+    def _try_incremental_update(self, old_snap: list[tuple] | None, new_snap: list[tuple]) -> bool:
+        """Update instance rows in place if structure is unchanged. Return True on success."""
+        if not old_snap or not new_snap:
+            return False
+        # Structure check: same (repo, name) pairs in same order
+        if [(e[0], e[1]) for e in old_snap] != [(e[0], e[1]) for e in new_snap]:
+            return False
+        for old_entry, new_entry in zip(old_snap, new_snap):
+            if old_entry != new_entry:
+                row = self.query_one(f"#inst-{new_entry[1]}", InstanceRow)
+                row.update_state(new_entry[3], new_entry[4], new_entry[5])
+        return True
 
     async def _poll_refresh(self) -> None:
         """Periodic refresh via polling."""

@@ -56,6 +56,21 @@ class InstanceRow(Horizontal):
             self.remove_class("bell")
             self.remove_class("activity")
 
+    def update_state(self, is_active: bool, is_current: bool, alert_state: str | None) -> None:
+        """Update mutable display state without rebuilding the widget."""
+        if is_active != self.is_active:
+            self.is_active = is_active
+            self.query_one(".indicator", Static).update("●" if is_active else "○")
+        if is_current != self.is_current:
+            self.is_current = is_current
+            if is_current:
+                self.add_class("current")
+            else:
+                self.remove_class("current")
+        if alert_state != self.alert_state:
+            self.alert_state = alert_state
+            self._apply_alert_class(alert_state)
+
     async def on_click(self) -> None:
         """Signal that this instance row was clicked."""
         self.post_message(self.Selected(self.instance_name, self.session))
