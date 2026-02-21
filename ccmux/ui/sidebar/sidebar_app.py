@@ -158,6 +158,16 @@ class SidebarApp(App):
             )
         except subprocess.CalledProcessError:
             pass
+        # Focus the Claude Code pane in the outer session
+        try:
+            await asyncio.to_thread(
+                subprocess.run,
+                ["tmux", "select-pane", "-t", ":0.1"],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
         # Clear bell flag on the tmux window (needed when re-selecting the current window)
         try:
             await asyncio.to_thread(
