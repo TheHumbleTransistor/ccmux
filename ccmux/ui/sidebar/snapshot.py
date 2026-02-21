@@ -12,6 +12,8 @@ def group_by_repo(snapshot: list[tuple]) -> dict[str, list[tuple]]:
     repos: dict[str, list[tuple]] = {}
     for entry in snapshot:
         repos.setdefault(entry[0], []).append(entry)
+    for entries in repos.values():
+        entries.sort(key=lambda e: (e[2] != "main", e[1]))
     return repos
 
 
