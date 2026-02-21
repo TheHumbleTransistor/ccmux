@@ -48,5 +48,5 @@ Repository = "https://github.com/raykamp-tht/claude-code-worktrees"
 include = ["ccmux*"]
 
 [tool.setuptools.package-data]
-ccmux = ["tmux.conf"]
-"ccmux.ui" = ["sidebar.tcss"]
+"ccmux.ui.tmux" = ["tmux.conf"]
+"ccmux.ui.sidebar" = ["sidebar.tcss"]

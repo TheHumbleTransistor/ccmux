@@ -20,7 +20,7 @@ from rich.table import Table
 
 from ccmux import state
 from ccmux.config import run_post_create
-from ccmux.tmux_config import apply_outer_session_config, apply_tmux_config
+from ccmux.ui.tmux import apply_outer_session_config, apply_tmux_config
 
 # Default session name
 DEFAULT_SESSION = "default"
@@ -320,7 +320,7 @@ def is_instance_window_active(session: str, tmux_window_id: Optional[str]) -> bo
 
 # --- Sidebar Helpers ---
 
-from ccmux.ui.pid import SIDEBAR_PIDS_DIR  # noqa: E402
+from ccmux.ui.sidebar.process_id import SIDEBAR_PIDS_DIR  # noqa: E402
 HOOKS_DIR = Path.home() / ".ccmux" / "hooks"
 
 
@@ -423,7 +423,7 @@ def _create_outer_session(session: str) -> None:
 
     python_exe = sys.executable or "python3"
     sidebar_cmd = (
-        f"TERM=tmux-256color COLORTERM=truecolor {python_exe} -m ccmux.sidebar {session} ; "
+        f"TERM=tmux-256color COLORTERM=truecolor {python_exe} -m ccmux.ui.sidebar {session} ; "
         f"echo 'Sidebar exited. Press enter to close.' ; read"
     )
 
@@ -542,7 +542,7 @@ def _reload_session_sidebar(session: str) -> None:
 
     python_exe = sys.executable or "python3"
     sidebar_cmd = (
-        f"TERM=tmux-256color COLORTERM=truecolor {python_exe} -m ccmux.sidebar {session} ; "
+        f"TERM=tmux-256color COLORTERM=truecolor {python_exe} -m ccmux.ui.sidebar {session} ; "
         f"echo 'Sidebar exited. Press enter to close.' ; read"
     )
 
@@ -2247,7 +2247,7 @@ def export_tmux_config(
     Args:
         output: Output file path. If not specified, prints to stdout.
     """
-    from ccmux.tmux_config import get_tmux_config_content
+    from ccmux.ui.tmux import get_tmux_config_content
 
     content = get_tmux_config_content()
 

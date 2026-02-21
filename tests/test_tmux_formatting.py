@@ -15,7 +15,7 @@ class TestTmuxFormatting:
     def setup_class(cls):
         """Set up test tmux session."""
         cls.session_name = "test-formatting"
-        cls.config_path = Path(__file__).parent.parent / "ccmux" / "tmux.conf"
+        cls.config_path = Path(__file__).parent.parent / "ccmux" / "ui" / "tmux" / "tmux.conf"
 
         # Kill any existing test session
         subprocess.run(["tmux", "kill-session", "-t", cls.session_name],

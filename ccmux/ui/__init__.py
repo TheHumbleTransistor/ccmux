@@ -1,5 +1,18 @@
-"""ccmux UI subpackage — sidebar TUI components."""
+"""ccmux UI subpackage — sidebar TUI and tmux configuration."""
 
-from ccmux.ui.app import SidebarApp
-from ccmux.ui.widgets import NonInteractiveStatic, InstanceRow, RepoHeader
-from ccmux.ui.pid import SIDEBAR_PIDS_DIR, write_pid_file, remove_pid_file
+from ccmux.ui.sidebar import (  # noqa: F401
+    SIDEBAR_PIDS_DIR,
+    InstanceRow,
+    NonInteractiveStatic,
+    RepoHeader,
+    SidebarApp,
+    remove_pid_file,
+    write_pid_file,
+)
+from ccmux.ui.tmux import (  # noqa: F401
+    apply_outer_session_config,
+    apply_tmux_config,
+    export_tmux_config,
+    get_tmux_config_content,
+    get_tmux_config_path,
+)

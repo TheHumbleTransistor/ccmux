@@ -37,7 +37,7 @@ def temp_pid_dir(monkeypatch):
     """Create a temporary PID directory for testing."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
-        import ccmux.ui.pid as pid_mod
+        import ccmux.ui.sidebar.process_id as pid_mod
         import ccmux.cli as cli_mod
         monkeypatch.setattr(pid_mod, "SIDEBAR_PIDS_DIR", tmpdir_path)
         monkeypatch.setattr(cli_mod, "SIDEBAR_PIDS_DIR", tmpdir_path)
@@ -269,7 +269,7 @@ class TestCreateOuterSession:
         assert "new-session" in new_session_call
         assert "my-session" in new_session_call
         sidebar_cmd = new_session_call[-1]
-        assert "ccmux.sidebar" in sidebar_cmd
+        assert "ccmux.ui.sidebar" in sidebar_cmd
 
         # Verify first split-window creates the bash pane (vertical, bottom)
         bash_split_call = mock_run.call_args_list[1][0][0]
