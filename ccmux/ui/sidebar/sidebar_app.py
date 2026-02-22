@@ -157,6 +157,26 @@ class SidebarApp(App):
 
     async def on_instance_row_selected(self, message: InstanceRow.Selected) -> None:
         """Switch to the clicked instance's tmux window and clear bell alert."""
+        # Auto-reactivate deactivated instances on click
+        try:
+            row = self.query_one(f"#inst-{message.instance_name}", InstanceRow)
+            if not row.is_active:
+                log.debug("auto-activating inactive instance %s", message.instance_name)
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    ["ccmux", "activate", "-y", message.instance_name],
+                    capture_output=True,
+                )
+                if result.returncode != 0:
+                    log.error(
+                        "auto-activate failed for %s: %s",
+                        message.instance_name,
+                        result.stderr.decode(errors="replace").strip(),
+                    )
+                    return
+        except Exception:
+            pass
+
         target = f"{message.session}-inner:{message.instance_name}"
         try:
             await asyncio.to_thread(

@@ -1473,10 +1473,11 @@ def instance_deactivate(
 ) -> None:
     """Deactivate Claude Code instance(s) by killing tmux window (keeps instance).
 
-    If no name is provided, deactivates all active instances.
+    If no name is provided, auto-detects the current instance when run from
+    within one. Falls back to deactivating all active instances otherwise.
 
     Args:
-        name: Instance name to deactivate (omit to deactivate all)
+        name: Instance name to deactivate (omit to auto-detect or deactivate all)
         yes: Skip confirmation prompt (default: False)
     """
     session = DEFAULT_SESSION
@@ -1494,6 +1495,13 @@ def instance_deactivate(
             active_instances.append(inst)
 
     if name is None:
+        # Auto-detect current instance if running inside one
+        detected = detect_current_ccmux_instance_any()
+        if detected:
+            _session, inst_name, _inst = detected
+            name = inst_name
+
+    if name is None:
         if not active_instances:
             console.print(f"\n[yellow]No active instances to deactivate.[/yellow]")
             return
@@ -1509,6 +1517,7 @@ def instance_deactivate(
                 return
 
         deactivated_count = 0
+        bash = _bash_session_name(session)
         for inst in active_instances:
             inst_name = inst.name
             tmux_window_id = inst.tmux_window_id
@@ -1522,6 +1531,15 @@ def instance_deactivate(
                     deactivated_count += 1
                 except subprocess.CalledProcessError:
                     console.print(f"  [yellow]Window '{inst_name}' not found or already closed[/yellow]")
+
+            # Also kill the corresponding bash window
+            try:
+                subprocess.run(
+                    ["tmux", "kill-window", "-t", f"{bash}:{inst_name}"],
+                    check=True, capture_output=True,
+                )
+            except subprocess.CalledProcessError:
+                pass
 
         _notify_sidebars(session)
         console.print(f"\n[bold green]Success![/bold green] Deactivated {deactivated_count} instance(s).")
@@ -1554,6 +1572,16 @@ def instance_deactivate(
             console.print(f"  [green]\u2713[/green] Deactivated '{name}'")
         except subprocess.CalledProcessError:
             console.print(f"  [yellow]Window '{name}' not found or already closed[/yellow]")
+
+    # Also kill the corresponding bash window
+    bash = _bash_session_name(session)
+    try:
+        subprocess.run(
+            ["tmux", "kill-window", "-t", f"{bash}:{name}"],
+            check=True, capture_output=True,
+        )
+    except subprocess.CalledProcessError:
+        pass
 
     _notify_sidebars(session)
     console.print(f"\n[bold green]Success![/bold green] Instance '{name}' deactivated.")
