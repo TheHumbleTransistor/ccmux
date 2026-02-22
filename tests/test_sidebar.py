@@ -442,34 +442,6 @@ class TestNotifySidebars:
         _notify_sidebars("non-existent-session")
 
 
-class TestReloadSessionSidebar:
-    """Tests for _reload_session_sidebar CLI helper."""
-
-    @mock.patch("ccmux.cli.subprocess.run")
-    @mock.patch("ccmux.cli.tmux_session_exists", return_value=True)
-    def test_kills_pane_and_splits_new(self, mock_exists, mock_run):
-        """_reload_session_sidebar kills sidebar pane and splits a new one."""
-        from ccmux.cli import _reload_session_sidebar
-
-        _reload_session_sidebar("my-session")
-
-        mock_exists.assert_called_once_with("ccmux-my-session")
-        assert mock_run.call_count == 2
-        # First call: kill-pane
-        kill_args = mock_run.call_args_list[0]
-        assert "kill-pane" in kill_args[0][0]
-        # Second call: split-window
-        split_args = mock_run.call_args_list[1]
-        assert "split-window" in split_args[0][0]
-
-    @mock.patch("ccmux.cli.tmux_session_exists", return_value=False)
-    def test_noop_when_no_session(self, mock_exists):
-        """_reload_session_sidebar does nothing if outer session doesn't exist."""
-        from ccmux.cli import _reload_session_sidebar
-
-        _reload_session_sidebar("my-session")
-        mock_exists.assert_called_once_with("ccmux-my-session")
-
 
 class TestInstallInnerHook:
     """Tests for _install_inner_hook and _uninstall_inner_hook."""
