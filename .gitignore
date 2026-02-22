@@ -26,6 +26,9 @@ htmlcov/
 *.swo
 *~
 
+# Runtime worktrees
+.worktrees/
+
 # OS
 .DS_Store
 Thumbs.db
