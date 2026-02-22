@@ -356,7 +356,10 @@ def _create_bash_window(session: str, instance_name: str, working_dir: str) -> N
     Skips if window already exists.
     """
     bash = _bash_session_name(session)
-    bash_cmd = f"export CCMUX_INSTANCE={instance_name}; exec $SHELL"
+    bash_cmd = (
+        f"export CCMUX_INSTANCE={instance_name}; "
+        f"while true; do $SHELL; done"
+    )
     try:
         if not tmux_session_exists(bash):
             subprocess.run(
@@ -543,10 +546,19 @@ def _install_inner_hook(session: str) -> None:
 
     script_content = f"""\
 #!/bin/sh
-# Get current inner window name and switch bash session to match
 WIN=$(tmux display-message -t "{inner}" -p '#{{window_name}}' 2>/dev/null)
-[ -n "$WIN" ] && tmux select-window -t "{bash}:$WIN" 2>/dev/null
-# Notify sidebar processes that the active window changed
+if [ -n "$WIN" ]; then
+    if ! tmux select-window -t "{bash}:$WIN" 2>/dev/null; then
+        # Bash window missing — recreate it
+        DIR=$(tmux display-message -t "{inner}" -p '#{{pane_current_path}}' 2>/dev/null)
+        [ -z "$DIR" ] && DIR="$HOME"
+        tmux new-window -t "{bash}" -n "$WIN" -c "$DIR" \
+            "export CCMUX_INSTANCE=$WIN; while true; do \\$SHELL; done" 2>/dev/null
+        tmux set-option -w -t "{bash}:$WIN" window-style 'bg=#1e1e1e' 2>/dev/null
+        tmux select-window -t "{bash}:$WIN" 2>/dev/null
+    fi
+fi
+# Notify sidebar processes
 for f in "$HOME/.ccmux/sidebar_pids/{session}"/*.pid; do
     [ -f "$f" ] && kill -USR1 "$(cat "$f")" 2>/dev/null
 done
@@ -821,7 +833,7 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
             f"export CCMUX_INSTANCE={wt_name}; "
             f"echo 'Activating Claude Code in {wt_path}'; "
             f"unset CLAUDECODE; "
-            f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
+            f"claude; while true; do $SHELL; done"
         )
 
         try:
@@ -928,7 +940,7 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
         f"export CCMUX_INSTANCE={name}; "
         f"echo 'Activating Claude Code in {wt_path}'; "
         f"unset CLAUDECODE; "
-        f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
+        f"claude; while true; do $SHELL; done"
     )
 
     try:
@@ -1139,7 +1151,7 @@ def instance_new(
         f"export CCMUX_INSTANCE={name}; "
         f"echo 'Launching Claude Code in {instance_path} ({instance_type} instance: {name})'; "
         f"unset CLAUDECODE; "
-        f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
+        f"claude; while true; do $SHELL; done"
     )
 
     tmux_window_id = None
@@ -1242,7 +1254,7 @@ def instance_new(
                     f"export CCMUX_INSTANCE={inst_name}; "
                     f"echo 'Reactivating Claude Code in {inst_path} ({inst_type} instance: {inst_name})'; "
                     f"unset CLAUDECODE; "
-                    f"claude || {{ echo 'Claude Code failed to start. Press enter to close.'; read; }}"
+                    f"claude; while true; do $SHELL; done"
                 )
 
                 try:
