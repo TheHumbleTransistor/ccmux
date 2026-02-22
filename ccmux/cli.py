@@ -1025,15 +1025,67 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
 
 @app.default
 def instance_info() -> None:
-    """Show current instance info, or help if none active."""
-    detected = detect_current_ccmux_instance_any()
+    """Show current instance info, or auto-attach/create if in a git repo."""
+    # 1. Inside a ccmux tmux pane → show info
+    #    Use detect_current_ccmux_instance() (env var + tmux ID matching)
+    #    plus bash-session detection, but NOT the cwd fallback from _any(),
+    #    since cwd matching is handled below for auto-attach.
+    detected = detect_current_ccmux_instance()
     if not detected:
-        console.print("[yellow]Not currently in a ccmux instance.[/yellow]\n")
+        # Try bash-session detection
+        tmux_session = get_current_tmux_session()
+        if tmux_session and tmux_session.endswith("-bash"):
+            ccmux_session = _ccmux_session_from_tmux(tmux_session)
+            window_name = get_current_tmux_window()
+            if window_name:
+                instance_data = state.get_instance(window_name, ccmux_session)
+                if instance_data:
+                    detected = (ccmux_session, window_name, instance_data)
+
+    if detected:
+        session_name, instance_name, instance_data = detected
+        _show_instance_info(session_name, instance_name, instance_data)
+        return
+
+    session = DEFAULT_SESSION
+
+    # 2. Check if cwd matches an existing instance
+    cwd = str(Path.cwd())
+    found = state.find_instance_by_path(cwd, session)
+    if found:
+        instance_name, instance_data = found
+        inner = _inner_session_name(session)
+        is_active = (
+            instance_data.tmux_window_id
+            and tmux_session_exists(inner)
+            and is_instance_window_active(session, instance_data.tmux_window_id)
+        )
+
+        if not is_active:
+            # Activate and attach (yes=True → auto-attach without prompting)
+            console.print(f"Found instance [cyan]'{instance_name}'[/cyan]. Activating...")
+            _activate_single_instance(session, instance_name, yes=True)
+            return
+
+        # Already active → attach directly
+        console.print(f"Instance [cyan]'{instance_name}'[/cyan] is active. Attaching...")
+        _ensure_outer_session(session)
+        _notify_sidebars(session)
+        if "TMUX" not in os.environ:
+            os.execvp("tmux", ["tmux", "attach", "-t", f"={_outer_session_name(session)}"])
+        else:
+            console.print(f"Already in tmux. Run: [cyan]tmux attach -t ={_outer_session_name(session)}[/cyan]")
+        return
+
+    # 3. Not in a git repo → show help
+    repo_root = get_repo_root()
+    if repo_root is None:
+        console.print("[yellow]Not in a ccmux instance or git repository.[/yellow]\n")
         app.help_print([])
         return
 
-    session_name, instance_name, instance_data = detected
-    _show_instance_info(session_name, instance_name, instance_data)
+    # 4. In a git repo with no instance → create one
+    instance_new(yes=True)
 
 
 @app.command(name="which")
@@ -1311,7 +1363,7 @@ def instance_new(
     # Auto-attach if not already in tmux
     if "TMUX" not in os.environ:
         console.print()
-        if Confirm.ask("Attach to tmux session now?", default=True):
+        if yes or Confirm.ask("Attach to tmux session now?", default=True):
             os.execvp("tmux", ["tmux", "attach", "-t", f"={_outer_session_name(session)}"])
 
 
