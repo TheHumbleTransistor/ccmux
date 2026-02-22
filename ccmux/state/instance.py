@@ -11,6 +11,7 @@ class Instance:
     repo_path: str
     instance_path: str
     tmux_window_id: Optional[str] = None
+    claude_session_id: Optional[str] = None
 
     @property
     def is_worktree(self) -> bool:
@@ -21,12 +22,15 @@ class Instance:
         raise NotImplementedError
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "repo_path": self.repo_path,
             "instance_path": self.instance_path,
             "is_worktree": self.is_worktree,
             "tmux_window_id": self.tmux_window_id,
         }
+        if self.claude_session_id:
+            d["claude_session_id"] = self.claude_session_id
+        return d
 
     @classmethod
     def from_dict(cls, name: str, data: dict) -> "Instance":
@@ -36,6 +40,7 @@ class Instance:
             repo_path=data["repo_path"],
             instance_path=data["instance_path"],
             tmux_window_id=data.get("tmux_window_id"),
+            claude_session_id=data.get("claude_session_id"),
         )
         if data.get("is_worktree", True):
             return WorktreeInstance(**kwargs)

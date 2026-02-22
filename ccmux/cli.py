@@ -4,9 +4,11 @@
 import os
 import random
 import re
+import shutil
 import signal
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -829,11 +831,12 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
         wt_name = wt.name
         wt_path = wt.instance_path
 
+        claude_session_id = str(uuid.uuid4())
         launch_cmd = (
             f"export CCMUX_INSTANCE={wt_name}; "
             f"echo 'Activating Claude Code in {wt_path}'; "
             f"unset CLAUDECODE; "
-            f"claude; while true; do $SHELL; done"
+            f"claude --session-id {claude_session_id}; while true; do $SHELL; done"
         )
 
         try:
@@ -882,7 +885,7 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
                 _create_bash_window(session, wt_name, wt_path)
                 console.print(f"  [green]\u2713[/green] Activated '{wt_name}'")
 
-            # Update tmux IDs in state
+            # Update tmux IDs and claude_session_id in state
             try:
                 new_tmux_session_id = subprocess.run(
                     ["tmux", "display-message", "-t", inner, "-p", "#{session_id}"],
@@ -891,6 +894,7 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
                 state.update_tmux_ids(wt_name, session, new_tmux_session_id, new_tmux_window_id)
             except subprocess.CalledProcessError:
                 pass
+            state.update_instance(wt_name, session, claude_session_id=claude_session_id)
 
             activated_count += 1
         except subprocess.CalledProcessError as e:
@@ -936,11 +940,12 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
     inner = _inner_session_name(session)
     inner_exists_flag = tmux_session_exists(inner)
 
+    claude_session_id = str(uuid.uuid4())
     launch_cmd = (
         f"export CCMUX_INSTANCE={name}; "
         f"echo 'Activating Claude Code in {wt_path}'; "
         f"unset CLAUDECODE; "
-        f"claude; while true; do $SHELL; done"
+        f"claude --session-id {claude_session_id}; while true; do $SHELL; done"
     )
 
     try:
@@ -989,7 +994,7 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
             )
             console.print(f"  [green]\u2713[/green] Activated '{name}'")
 
-        # Update tmux IDs in state
+        # Update tmux IDs and claude_session_id in state
         try:
             tmux_session_id = subprocess.run(
                 ["tmux", "display-message", "-t", inner, "-p", "#{session_id}"],
@@ -998,6 +1003,7 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
             state.update_tmux_ids(name, session, tmux_session_id, tmux_window_id)
         except subprocess.CalledProcessError:
             pass
+        state.update_instance(name, session, claude_session_id=claude_session_id)
 
         _ensure_outer_session(session)
         _notify_sidebars(session)
@@ -1147,11 +1153,12 @@ def instance_new(
 
     # Create or attach to tmux session
     instance_type = "worktree" if create_as_worktree else "main repo"
+    claude_session_id = str(uuid.uuid4())
     launch_cmd = (
         f"export CCMUX_INSTANCE={name}; "
         f"echo 'Launching Claude Code in {instance_path} ({instance_type} instance: {name})'; "
         f"unset CLAUDECODE; "
-        f"claude; while true; do $SHELL; done"
+        f"claude --session-id {claude_session_id}; while true; do $SHELL; done"
     )
 
     tmux_window_id = None
@@ -1221,7 +1228,8 @@ def instance_new(
             instance_path=str(instance_path),
             tmux_session_id=tmux_session_id,
             tmux_window_id=tmux_window_id,
-            is_worktree=create_as_worktree
+            is_worktree=create_as_worktree,
+            claude_session_id=claude_session_id,
         )
     except subprocess.CalledProcessError:
         state.add_instance(
@@ -1229,7 +1237,8 @@ def instance_new(
             instance_name=name,
             repo_path=str(repo_root),
             instance_path=str(instance_path),
-            is_worktree=create_as_worktree
+            is_worktree=create_as_worktree,
+            claude_session_id=claude_session_id,
         )
 
     console.print(f"  [green]\u2713[/green] Launched Claude Code in tmux window '{name}'")
@@ -1250,11 +1259,12 @@ def instance_new(
                 inst_path = inst.instance_path
                 inst_type = inst.instance_type + " repo" if not inst.is_worktree else "worktree"
 
+                orphan_claude_session_id = str(uuid.uuid4())
                 reactivate_cmd = (
                     f"export CCMUX_INSTANCE={inst_name}; "
                     f"echo 'Reactivating Claude Code in {inst_path} ({inst_type} instance: {inst_name})'; "
                     f"unset CLAUDECODE; "
-                    f"claude; while true; do $SHELL; done"
+                    f"claude --session-id {orphan_claude_session_id}; while true; do $SHELL; done"
                 )
 
                 try:
@@ -1280,6 +1290,7 @@ def instance_new(
                         state.update_tmux_ids(inst_name, session, new_session_id, new_window_id)
                     except subprocess.CalledProcessError:
                         pass
+                    state.update_instance(inst_name, session, claude_session_id=orphan_claude_session_id)
 
                     console.print(f"  [green]\u2713[/green] Reactivated '{inst_name}'")
                 except subprocess.CalledProcessError as e:
@@ -1316,6 +1327,49 @@ def instance_list() -> None:
         return
 
     _display_session_table(session)
+
+
+def _claude_project_dir(instance_path: str) -> Path:
+    """Compute the Claude Code project directory for a given instance path.
+
+    Claude Code stores session data under ~/.claude/projects/<encoded-path>/
+    where the encoding replaces all non-alphanumeric characters with '-'.
+    """
+    encoded = re.sub(r'[^a-zA-Z0-9]', '-', instance_path)
+    return Path.home() / ".claude" / "projects" / encoded
+
+
+def _migrate_claude_session(old_path: str, new_path: str, session_id: str) -> bool:
+    """Copy Claude Code session data from old project dir to new.
+
+    Copies <session_id>.jsonl and <session_id>/ subdir if they exist.
+    Returns True if anything was copied.
+    """
+    old_dir = _claude_project_dir(old_path)
+    new_dir = _claude_project_dir(new_path)
+
+    if not old_dir.exists():
+        return False
+
+    copied = False
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy session transcript file
+    jsonl_file = old_dir / f"{session_id}.jsonl"
+    if jsonl_file.exists():
+        shutil.copy2(str(jsonl_file), str(new_dir / f"{session_id}.jsonl"))
+        copied = True
+
+    # Copy session subdirectory (tool outputs, etc.)
+    session_subdir = old_dir / session_id
+    if session_subdir.is_dir():
+        dest_subdir = new_dir / session_id
+        if dest_subdir.exists():
+            shutil.rmtree(str(dest_subdir))
+        shutil.copytree(str(session_subdir), str(dest_subdir))
+        copied = True
+
+    return copied
 
 
 @app.command(name="rename")
@@ -1376,47 +1430,200 @@ def instance_rename(
         console.print(f"[yellow]Instance is already named '{old_name}'.[/yellow]")
         return
 
-    # If it's a worktree, move the directory first (most likely to fail)
     is_wt = instance_data.is_worktree
+    tmux_window_id = instance_data.tmux_window_id
+    is_active = tmux_window_id and is_instance_window_active(session, tmux_window_id)
+    inner = _inner_session_name(session)
+    bash = _bash_session_name(session)
+
     if is_wt:
         old_path = Path(instance_data.instance_path)
         repo_path = Path(instance_data.repo_path)
         new_path = old_path.parent / new_name
 
-        if old_path.exists():
+        if is_active:
+            # Active worktree: prompt user, restart Claude Code in new directory
+            console.print(f"\n[bold yellow]Instance '{old_name}' is active.[/bold yellow]")
+            console.print("Renaming will restart Claude Code with its conversation resumed in the new directory.")
+            if not Confirm.ask("Continue?", default=True):
+                console.print("[yellow]Cancelled.[/yellow]")
+                return
+
+            # 1. git worktree move (most failure-prone, done first)
+            if old_path.exists():
+                try:
+                    subprocess.run(
+                        ["git", "-C", str(repo_path), "worktree", "move", str(old_path), str(new_path)],
+                        check=True, capture_output=True, text=True,
+                    )
+                    console.print(f"  [green]\u2713[/green] Moved worktree directory: {old_path.name} -> {new_path.name}")
+                except subprocess.CalledProcessError as e:
+                    console.print(f"[red]Error moving worktree:[/red] {e}", style="bold")
+                    sys.exit(1)
+
+            # 2. Migrate Claude session data
+            old_session_id = instance_data.claude_session_id
+            migrated = False
+            if old_session_id:
+                migrated = _migrate_claude_session(str(old_path), str(new_path), old_session_id)
+                if migrated:
+                    console.print(f"  [green]\u2713[/green] Migrated Claude session data")
+
+            # 3. Rename in state + update instance_path (before kills, so state is safe)
+            if not state.rename_instance(old_name, new_name, session):
+                if not state.get_instance(old_name, session):
+                    console.print(f"[red]Error:[/red] Instance '{old_name}' not found.", style="bold")
+                else:
+                    console.print(f"[red]Error:[/red] Instance '{new_name}' already exists.", style="bold")
+                sys.exit(1)
+            state.update_instance(new_name, session, instance_path=str(new_path))
+
+            # 4. Create new Claude Code window with --resume or fresh --session-id
+            new_claude_session_id = old_session_id if migrated else str(uuid.uuid4())
+            if migrated and old_session_id:
+                claude_arg = f"claude --resume {old_session_id}"
+            else:
+                claude_arg = f"claude --session-id {new_claude_session_id}"
+
+            launch_cmd = (
+                f"export CCMUX_INSTANCE={new_name}; "
+                f"echo 'Launching Claude Code in {new_path}'; "
+                f"unset CLAUDECODE; "
+                f"{claude_arg}; while true; do $SHELL; done"
+            )
+
+            try:
+                result = subprocess.run(
+                    [
+                        "tmux", "new-window",
+                        "-t", inner,
+                        "-n", new_name,
+                        "-c", str(new_path),
+                        "-P", "-F", "#{window_id}",
+                        launch_cmd,
+                    ],
+                    capture_output=True, text=True, check=True,
+                )
+                new_tmux_window_id = result.stdout.strip()
+                console.print(f"  [green]\u2713[/green] Created new Claude Code window '{new_name}'")
+            except subprocess.CalledProcessError as e:
+                console.print(f"  [red]\u2717[/red] Could not create new Claude Code window: {e}")
+                console.print(f"  [yellow]Run `ccmux activate {new_name}` to start it manually.[/yellow]")
+                new_tmux_window_id = None
+
+            # 5. Create new bash window
+            _create_bash_window(session, new_name, str(new_path))
+
+            # 6. Update state with new tmux IDs + claude_session_id
+            if new_tmux_window_id:
+                try:
+                    new_tmux_session_id = subprocess.run(
+                        ["tmux", "display-message", "-t", inner, "-p", "#{session_id}"],
+                        capture_output=True, text=True, check=True,
+                    ).stdout.strip()
+                    state.update_tmux_ids(new_name, session, new_tmux_session_id, new_tmux_window_id)
+                except subprocess.CalledProcessError:
+                    pass
+                state.update_instance(new_name, session, claude_session_id=new_claude_session_id)
+
+            # 7. Kill old Claude Code window (create placeholder if only window)
+            placeholder_created = False
+            windows = get_tmux_windows(inner)
+            if len(windows) <= 1:
+                try:
+                    subprocess.run(
+                        ["tmux", "new-window", "-t", inner, "-n", "_ccmux_placeholder", "sleep 60"],
+                        check=True, capture_output=True,
+                    )
+                    placeholder_created = True
+                except subprocess.CalledProcessError:
+                    pass
+
             try:
                 subprocess.run(
-                    ["git", "-C", str(repo_path), "worktree", "move", str(old_path), str(new_path)],
-                    check=True, capture_output=True, text=True,
+                    ["tmux", "kill-window", "-t", tmux_window_id],
+                    check=True, capture_output=True,
                 )
-                console.print(f"  [green]\u2713[/green] Moved worktree directory: {old_path.name} -> {new_path.name}")
-            except subprocess.CalledProcessError as e:
-                console.print(f"[red]Error moving worktree:[/red] {e}", style="bold")
-                sys.exit(1)
+                console.print(f"  [green]\u2713[/green] Killed old Claude Code window")
+            except subprocess.CalledProcessError:
+                console.print(f"  [yellow]\u26a0[/yellow] Old Claude Code window already gone")
 
-    # Rename in state
-    if not state.rename_instance(old_name, new_name, session):
-        if not state.get_instance(old_name, session):
-            console.print(f"[red]Error:[/red] Instance '{old_name}' not found.", style="bold")
+            # 8. Kill old bash window (even if this kills us, state is already correct)
+            try:
+                subprocess.run(
+                    ["tmux", "kill-window", "-t", f"{bash}:{old_name}"],
+                    check=True, capture_output=True,
+                )
+            except subprocess.CalledProcessError:
+                pass
+
+            # 9. Clean up placeholder and select new window
+            if placeholder_created:
+                try:
+                    subprocess.run(
+                        ["tmux", "kill-window", "-t", f"{inner}:_ccmux_placeholder"],
+                        check=True, capture_output=True,
+                    )
+                except subprocess.CalledProcessError:
+                    pass
+
+            if new_tmux_window_id:
+                try:
+                    subprocess.run(
+                        ["tmux", "select-window", "-t", f"{inner}:{new_name}"],
+                        check=True, capture_output=True,
+                    )
+                except subprocess.CalledProcessError:
+                    pass
+
         else:
-            console.print(f"[red]Error:[/red] Instance '{new_name}' already exists.", style="bold")
-        sys.exit(1)
+            # Inactive worktree: move directory, rename in state
+            if old_path.exists():
+                try:
+                    subprocess.run(
+                        ["git", "-C", str(repo_path), "worktree", "move", str(old_path), str(new_path)],
+                        check=True, capture_output=True, text=True,
+                    )
+                    console.print(f"  [green]\u2713[/green] Moved worktree directory: {old_path.name} -> {new_path.name}")
+                except subprocess.CalledProcessError as e:
+                    console.print(f"[red]Error moving worktree:[/red] {e}", style="bold")
+                    sys.exit(1)
 
-    # Update instance_path in state if worktree was moved
-    if is_wt:
-        state.update_instance(new_name, session, instance_path=str(new_path))
+            if not state.rename_instance(old_name, new_name, session):
+                if not state.get_instance(old_name, session):
+                    console.print(f"[red]Error:[/red] Instance '{old_name}' not found.", style="bold")
+                else:
+                    console.print(f"[red]Error:[/red] Instance '{new_name}' already exists.", style="bold")
+                sys.exit(1)
+            state.update_instance(new_name, session, instance_path=str(new_path))
 
-    # Rename tmux window if active (in inner session)
-    tmux_window_id = instance_data.tmux_window_id
-    if tmux_window_id and is_instance_window_active(session, tmux_window_id):
-        try:
-            subprocess.run(
-                ["tmux", "rename-window", "-t", tmux_window_id, new_name],
-                check=True, capture_output=True,
-            )
-            console.print(f"  [green]\u2713[/green] Renamed tmux window")
-        except subprocess.CalledProcessError:
-            console.print(f"  [yellow]\u26a0[/yellow] Could not rename tmux window")
+    else:
+        # Non-worktree instance: only the display name changes
+        if not state.rename_instance(old_name, new_name, session):
+            if not state.get_instance(old_name, session):
+                console.print(f"[red]Error:[/red] Instance '{old_name}' not found.", style="bold")
+            else:
+                console.print(f"[red]Error:[/red] Instance '{new_name}' already exists.", style="bold")
+            sys.exit(1)
+
+        if is_active:
+            # Rename both inner and bash tmux windows
+            try:
+                subprocess.run(
+                    ["tmux", "rename-window", "-t", tmux_window_id, new_name],
+                    check=True, capture_output=True,
+                )
+                console.print(f"  [green]\u2713[/green] Renamed tmux window")
+            except subprocess.CalledProcessError:
+                console.print(f"  [yellow]\u26a0[/yellow] Could not rename tmux window")
+
+            try:
+                subprocess.run(
+                    ["tmux", "rename-window", "-t", f"{bash}:{old_name}", new_name],
+                    check=True, capture_output=True,
+                )
+            except subprocess.CalledProcessError:
+                pass
 
     _notify_sidebars(session)
     console.print(f"\n[bold green]Success![/bold green] Instance renamed: '{old_name}' -> '{new_name}'")

@@ -64,7 +64,8 @@ def add_instance(
     session_name: str = DEFAULT_SESSION,
     tmux_session_id: Optional[str] = None,
     tmux_window_id: Optional[str] = None,
-    is_worktree: bool = True
+    is_worktree: bool = True,
+    claude_session_id: Optional[str] = None,
 ):
     """Add an instance to the state (can be main repo or worktree)."""
     state = _load_raw()
@@ -78,12 +79,16 @@ def add_instance(
     if tmux_session_id:
         state["sessions"][session_name]["tmux_session_id"] = tmux_session_id
 
-    state["sessions"][session_name]["instances"][instance_name] = {
+    inst_data = {
         "repo_path": repo_path,
         "instance_path": instance_path,
         "is_worktree": is_worktree,
-        "tmux_window_id": tmux_window_id
+        "tmux_window_id": tmux_window_id,
     }
+    if claude_session_id:
+        inst_data["claude_session_id"] = claude_session_id
+
+    state["sessions"][session_name]["instances"][instance_name] = inst_data
 
     _save_raw(state)
 

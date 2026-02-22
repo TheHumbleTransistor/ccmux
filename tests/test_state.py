@@ -401,3 +401,109 @@ def test_find_instance_by_path_no_false_prefix(temp_state_dir):
     )
     result = state.find_instance_by_path("/repo2/somefile")
     assert result is None
+
+
+# --- claude_session_id tests ---
+
+def test_add_instance_with_claude_session_id(temp_state_dir):
+    """Test adding an instance with claude_session_id."""
+    state.add_instance(
+        instance_name="feature-x",
+        repo_path="/repo",
+        instance_path="/repo/.worktrees/feature-x",
+        claude_session_id="abc-123",
+    )
+
+    loaded = state_store._load_raw()
+    inst = loaded["sessions"]["default"]["instances"]["feature-x"]
+    assert inst["claude_session_id"] == "abc-123"
+
+
+def test_add_instance_without_claude_session_id(temp_state_dir):
+    """Test adding an instance without claude_session_id omits the field."""
+    state.add_instance(
+        instance_name="feature-x",
+        repo_path="/repo",
+        instance_path="/repo/.worktrees/feature-x",
+    )
+
+    loaded = state_store._load_raw()
+    inst = loaded["sessions"]["default"]["instances"]["feature-x"]
+    assert "claude_session_id" not in inst
+
+
+def test_claude_session_id_from_dict_present(temp_state_dir):
+    """Test Instance.from_dict picks up claude_session_id when present."""
+    inst = state.Instance.from_dict("test", {
+        "repo_path": "/repo",
+        "instance_path": "/repo/.worktrees/test",
+        "is_worktree": True,
+        "claude_session_id": "sess-456",
+    })
+    assert inst.claude_session_id == "sess-456"
+
+
+def test_claude_session_id_from_dict_missing(temp_state_dir):
+    """Test Instance.from_dict defaults claude_session_id to None for legacy data."""
+    inst = state.Instance.from_dict("test", {
+        "repo_path": "/repo",
+        "instance_path": "/repo/.worktrees/test",
+        "is_worktree": True,
+    })
+    assert inst.claude_session_id is None
+
+
+def test_claude_session_id_to_dict(temp_state_dir):
+    """Test Instance.to_dict includes claude_session_id when set."""
+    inst = state.WorktreeInstance(
+        name="test",
+        repo_path="/repo",
+        instance_path="/repo/.worktrees/test",
+        claude_session_id="sess-789",
+    )
+    d = inst.to_dict()
+    assert d["claude_session_id"] == "sess-789"
+
+
+def test_claude_session_id_to_dict_none(temp_state_dir):
+    """Test Instance.to_dict omits claude_session_id when None."""
+    inst = state.WorktreeInstance(
+        name="test",
+        repo_path="/repo",
+        instance_path="/repo/.worktrees/test",
+    )
+    d = inst.to_dict()
+    assert "claude_session_id" not in d
+
+
+def test_update_instance_claude_session_id(temp_state_dir):
+    """Test updating claude_session_id via update_instance."""
+    state.add_instance(
+        instance_name="feature-x",
+        repo_path="/repo",
+        instance_path="/repo/.worktrees/feature-x",
+    )
+
+    state.update_instance("feature-x", claude_session_id="new-sess-id")
+
+    loaded = state_store._load_raw()
+    inst = loaded["sessions"]["default"]["instances"]["feature-x"]
+    assert inst["claude_session_id"] == "new-sess-id"
+
+
+def test_rename_preserves_claude_session_id(temp_state_dir):
+    """Test that renaming an instance preserves claude_session_id."""
+    state.add_instance(
+        instance_name="old-name",
+        repo_path="/repo",
+        instance_path="/repo/.worktrees/old-name",
+        claude_session_id="preserved-id",
+    )
+
+    assert state.rename_instance("old-name", "new-name")
+
+    loaded = state_store._load_raw()
+    instances = loaded["sessions"]["default"]["instances"]
+    assert "old-name" not in instances
+    assert "new-name" in instances
+    assert instances["new-name"]["claude_session_id"] == "preserved-id"
