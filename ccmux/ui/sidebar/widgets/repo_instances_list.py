@@ -1,8 +1,11 @@
 """RepoInstancesList — compound widget replacing view.py loop + spacer widgets."""
 
+from __future__ import annotations
+
 from textual.app import ComposeResult
 from textual.containers import Vertical
 
+from ccmux.ui.sidebar.snapshot import InstanceSnapshot
 from ccmux.ui.sidebar.widgets.repo_header import RepoHeader
 from ccmux.ui.sidebar.widgets.instance_row import InstanceRow
 
@@ -13,7 +16,7 @@ class RepoInstancesList(Vertical):
     def __init__(
         self,
         repo_name: str,
-        instances: list[tuple],
+        instances: list[InstanceSnapshot],
         session_name: str,
         **kwargs,
     ) -> None:
@@ -25,8 +28,15 @@ class RepoInstancesList(Vertical):
     def compose(self) -> ComposeResult:
         yield RepoHeader(f"\u25cf {self.repo_name}/")
         last_idx = len(self.instances) - 1
-        for i, (_, name, type_, active, current, alert) in enumerate(self.instances):
+        for i, entry in enumerate(self.instances):
             yield InstanceRow(
-                name, type_, active, current, self.session_name, alert,
-                is_last=(i == last_idx), id=f"inst-{name}",
+                entry.instance_name, entry.instance_type,
+                entry.is_active, entry.is_current,
+                self.session_name, entry.alert_state,
+                is_last=(i == last_idx),
+                branch=entry.branch,
+                short_sha=entry.short_sha,
+                lines_added=entry.lines_added,
+                lines_removed=entry.lines_removed,
+                id=f"inst-{entry.instance_name}",
             )

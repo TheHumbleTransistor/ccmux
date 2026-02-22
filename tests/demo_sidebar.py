@@ -2,8 +2,10 @@
 
 from collections.abc import Awaitable, Callable
 
+from ccmux.ui.sidebar.snapshot import InstanceSnapshot
 
-def build_demo_snapshot(tick: int) -> list[tuple]:
+
+def build_demo_snapshot(tick: int) -> list[InstanceSnapshot]:
     """Build varying snapshot data to exercise refresh/rebuild paths."""
     # Cycle current instance among three instances
     current_idx = tick % 3
@@ -12,25 +14,31 @@ def build_demo_snapshot(tick: int) -> list[tuple]:
     alert_for = lambda offset: alert_cycle[(tick + offset) % len(alert_cycle)]
 
     base = [
-        ("my-project", "main", "main", True, current_idx == 0, alert_for(0)),
-        ("my-project", "feat-auth", "worktree", True, current_idx == 1, alert_for(1)),
-        ("my-project", "fix-bug", "worktree", False, current_idx == 2, alert_for(2)),
-        ("other-repo", "default", "main", True, False, alert_for(3)),
-        ("other-repo", "refactor", "worktree", False, False, None),
+        InstanceSnapshot("my-project", "main", "main", True, current_idx == 0, alert_for(0),
+                         branch="main", short_sha="a1b2c3d"),
+        InstanceSnapshot("my-project", "feat-auth", "worktree", True, current_idx == 1, alert_for(1),
+                         branch="feat/auth-system", short_sha="e4f5a6b", lines_added=47, lines_removed=12),
+        InstanceSnapshot("my-project", "fix-bug", "worktree", False, current_idx == 2, alert_for(2),
+                         branch=None, short_sha="7c8d9e0", lines_added=3, lines_removed=1),
+        InstanceSnapshot("other-repo", "default", "main", True, False, alert_for(3),
+                         branch="main", short_sha="f1a2b3c"),
+        InstanceSnapshot("other-repo", "refactor", "worktree", False, False, None,
+                         branch="refactor/cleanup", short_sha="d4e5f6a", lines_added=128, lines_removed=89),
     ]
 
     # Every 8th tick, add an extra instance (tests full rebuild path)
     if (tick // 4) % 2 == 1:
-        base.append(("other-repo", "hotfix", "worktree", True, False, "bell"))
+        base.append(InstanceSnapshot("other-repo", "hotfix", "worktree", True, False, "bell",
+                                     branch="hotfix/urgent", short_sha="b7c8d9e", lines_added=5, lines_removed=2))
 
     return base
 
 
-def make_demo_provider() -> Callable[[], Awaitable[list[tuple]]]:
+def make_demo_provider() -> Callable[[], Awaitable[list[InstanceSnapshot]]]:
     """Return an async closure that auto-increments the demo tick."""
     tick = 0
 
-    async def _provider() -> list[tuple]:
+    async def _provider() -> list[InstanceSnapshot]:
         nonlocal tick
         snapshot = build_demo_snapshot(tick)
         tick += 1

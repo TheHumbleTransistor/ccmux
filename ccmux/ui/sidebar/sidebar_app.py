@@ -11,6 +11,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Vertical
 
 from ccmux.ui.sidebar import snapshot
+from ccmux.ui.sidebar.snapshot import InstanceSnapshot
 from ccmux.ui.sidebar.widgets import InstanceRow, NonInteractiveStatic, RepoInstancesList
 
 POLL_INTERVAL = 5.0
@@ -43,14 +44,14 @@ class SidebarApp(App):
     def __init__(
         self,
         session: str,
-        snapshot_fn: Callable[[], Awaitable[list[tuple]]] | None = None,
+        snapshot_fn: Callable[[], Awaitable[list[InstanceSnapshot]]] | None = None,
         poll_interval: float = POLL_INTERVAL,
     ) -> None:
         super().__init__()
         self.session_name = session
         self._snapshot_fn = snapshot_fn
         self._poll_interval = poll_interval
-        self._last_snapshot: list[tuple] | None = None
+        self._last_snapshot: list[InstanceSnapshot] | None = None
         self._refresh_lock = asyncio.Lock()
         self._instance_list:Vertical | None = None
 
@@ -112,17 +113,25 @@ class SidebarApp(App):
             await container.remove_children()
             await container.mount(*new_widgets)
 
-    def _try_incremental_update(self, old_snap: list[tuple] | None, new_snap: list[tuple]) -> bool:
+    def _try_incremental_update(
+        self, old_snap: list[InstanceSnapshot] | None, new_snap: list[InstanceSnapshot],
+    ) -> bool:
         """Update instance rows in place if structure is unchanged. Return True on success."""
         if not old_snap or not new_snap:
             return False
         # Structure check: same (repo, name) pairs in same order
-        if [(e[0], e[1]) for e in old_snap] != [(e[0], e[1]) for e in new_snap]:
+        if [(e.repo_name, e.instance_name) for e in old_snap] != [
+            (e.repo_name, e.instance_name) for e in new_snap
+        ]:
             return False
         for old_entry, new_entry in zip(old_snap, new_snap):
             if old_entry != new_entry:
-                row = self.query_one(f"#inst-{new_entry[1]}", InstanceRow)
-                row.update_state(new_entry[3], new_entry[4], new_entry[5])
+                row = self.query_one(f"#inst-{new_entry.instance_name}", InstanceRow)
+                row.update_state(
+                    new_entry.is_active, new_entry.is_current, new_entry.alert_state,
+                    new_entry.branch, new_entry.short_sha,
+                    new_entry.lines_added, new_entry.lines_removed,
+                )
         return True
 
     async def _poll_refresh(self) -> None:
@@ -182,6 +191,10 @@ class SidebarApp(App):
         try:
             row = self.query_one(f"#inst-{message.instance_name}", InstanceRow)
             if row.alert_state == "bell":
-                row.update_state(row.is_active, row.is_current, None)
+                row.update_state(
+                    row.is_active, row.is_current, None,
+                    row.branch, row.short_sha,
+                    row.lines_added, row.lines_removed,
+                )
         except Exception:
             pass

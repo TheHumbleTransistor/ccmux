@@ -1839,18 +1839,31 @@ def export_tmux_config(
 
 
 @app.command(name="detach")
-def detach() -> None:
-    """Detach the ccmux tmux session."""
+def detach(
+    *,
+    all_clients: Annotated[bool, Parameter(name=["-a", "--all"], negative="")] = False,
+) -> None:
+    """Detach the ccmux tmux session.
+
+    By default, detaches only the most recently active client.
+    Use --all / -a to detach all clients attached to the session.
+    """
     session = DEFAULT_SESSION
     outer = _outer_session_name(session)
     if not tmux_session_exists(outer):
         console.print(f"[red]Error:[/red] No active ccmux session.", style="bold")
         sys.exit(1)
     try:
-        subprocess.run(
-            ["tmux", "detach-client", "-s", outer],
-            check=True, capture_output=True,
-        )
+        if all_clients:
+            subprocess.run(
+                ["tmux", "detach-client", "-s", outer],
+                check=True, capture_output=True,
+            )
+        else:
+            subprocess.run(
+                ["tmux", "detach-client", "-t", outer],
+                check=True, capture_output=True,
+            )
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Error detaching:[/red] {e}", style="bold")
         sys.exit(1)
