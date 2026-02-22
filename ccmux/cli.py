@@ -1846,6 +1846,79 @@ def instance_deactivate(
     console.print(f"\n[bold green]Success![/bold green] Instance '{name}' deactivated.")
 
 
+@app.command(name="kill")
+def session_kill(
+    *,
+    yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
+) -> None:
+    """Kill the entire ccmux session — deactivate all instances and close tmux sessions.
+
+    Args:
+        yes: Skip confirmation prompt
+    """
+    session = DEFAULT_SESSION
+    instances = state.get_all_instances(session)
+    inner = _inner_session_name(session)
+
+    # Check which instances are active
+    active_instances = [
+        inst for inst in instances
+        if is_instance_window_active(session, inst.tmux_window_id)
+    ]
+
+    if not active_instances and not tmux_session_exists(_outer_session_name(session)):
+        console.print("[yellow]No active ccmux session to kill.[/yellow]")
+        return
+
+    # Show what will be killed
+    if active_instances:
+        console.print(f"\n[bold red]Killing ccmux session with {len(active_instances)} active instance(s):[/bold red]")
+        for inst in active_instances:
+            console.print(f"  • {inst.name}")
+    else:
+        console.print("\n[bold red]Killing ccmux session (no active instances)[/bold red]")
+
+    if not yes:
+        if not Confirm.ask("Kill the entire ccmux session?", default=False):
+            console.print("[yellow]Cancelled.[/yellow]")
+            return
+
+    # Kill sessions in safe order: outer (display) first, inner second,
+    # bash last. Killing a session destroys all its windows.
+    # Bash must be last because if the user is running this command
+    # from the bash pane, killing bash will SIGHUP our process.
+    outer = _outer_session_name(session)
+    if tmux_session_exists(outer):
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", f"={outer}"],
+                check=True, capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
+
+    if tmux_session_exists(inner):
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", f"={inner}"],
+                check=True, capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
+
+    bash = _bash_session_name(session)
+    if tmux_session_exists(bash):
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", f"={bash}"],
+                check=True, capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
+
+    console.print("\n[bold green]Killed ccmux session.[/bold green]")
+
+
 @app.command(name="remove")
 def instance_remove(
     name: Optional[str] = None,
@@ -1930,16 +2003,6 @@ def instance_remove(
                         console.print(f"  [green]\u2713[/green] Deactivated '{wt_name}'")
                     except subprocess.CalledProcessError:
                         console.print(f"  [yellow]Window '{wt_name}' already closed[/yellow]")
-
-                # Also kill the corresponding bash window
-                bash = _bash_session_name(session)
-                try:
-                    subprocess.run(
-                        ["tmux", "kill-window", "-t", f"{bash}:{wt_name}"],
-                        check=True, capture_output=True,
-                    )
-                except subprocess.CalledProcessError:
-                    pass
 
             prefix = "    " if is_active else "  "
 
