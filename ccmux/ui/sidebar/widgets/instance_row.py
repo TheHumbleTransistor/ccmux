@@ -1,4 +1,4 @@
-"""InstanceRow — three-line widget with tree characters, indicator, name, and type."""
+"""InstanceRow — four-line widget with tree characters, indicator, name, and git info."""
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -7,7 +7,7 @@ from textual.widgets import Static
 
 
 class InstanceRow(Vertical):
-    """A clickable 3-line row showing tree hierarchy, instance status, name, and type."""
+    """A clickable 4-line row showing tree hierarchy, instance status, name, and git info."""
 
     class Selected(Message):
         """Posted when the user clicks an instance row."""
@@ -56,47 +56,52 @@ class InstanceRow(Vertical):
             return ("│", "└── ", "")
         return ("│", "├── ", "│")
 
-    def _format_git_line(self) -> str:
-        """Build the line3 content with tree prefix, branch/sha, and diff stats."""
+    def _format_name_text(self) -> str:
+        """Build the name text, appending (worktree) suffix for worktree instances."""
+        indicator = "\u25cf" if self.is_active else "\u25cb"
+        branch_char = self._tree_chars()[1]
+        name_text = f"{branch_char}{indicator} {self.instance_name}"
+        if self.instance_type == "worktree":
+            name_text += " [#666666](worktree)[/#666666]"
+        return name_text
+
+    def _format_branch_text(self) -> str:
+        """Build the branch/ref portion of line3 with tree prefix."""
         prefix = "│     " if not self.is_last else "      "
 
-        # Determine what to display: branch name, or (sha) if detached
         if self.branch is not None:
             ref_text = self.branch
         elif self.short_sha:
-            ref_text = f"({self.short_sha})"
+            ref_text = f"HEAD: {self.short_sha}"
         else:
             return prefix.rstrip()
 
-        stats = ""
-        if self.lines_added or self.lines_removed:
-            parts = []
-            if self.lines_added:
-                parts.append(f"[green]+{self.lines_added}[/green]")
-            if self.lines_removed:
-                parts.append(f"[red]-{self.lines_removed}[/red]")
-            stats = " " + " ".join(parts)
-
-        # Truncate ref to fit: sidebar is ~39 usable chars, prefix is 6, stats need space
-        stats_plain_len = 0
-        if self.lines_added:
-            stats_plain_len += len(f"+{self.lines_added}") + 1
-        if self.lines_removed:
-            stats_plain_len += len(f"-{self.lines_removed}") + 1
-        max_ref = 39 - len(prefix) - stats_plain_len
+        # Truncate ref to fit: sidebar is ~39 usable chars, prefix is 6
+        max_ref = 39 - len(prefix)
         ref_display = ref_text[:max_ref] if max_ref > 0 else ""
 
-        return f"{prefix}{ref_display}{stats}"
+        return f"{prefix}[#666666]{ref_display}[/#666666]"
+
+    def _format_stats_text(self) -> str:
+        """Build the diff stats text with dimmed colors."""
+        if not self.lines_added and not self.lines_removed:
+            return ""
+        parts = []
+        if self.lines_added:
+            parts.append(f"[#5f875f]+{self.lines_added}[/#5f875f]")
+        if self.lines_removed:
+            parts.append(f"[#875f5f]-{self.lines_removed}[/#875f5f]")
+        return " ".join(parts)
 
     def compose(self) -> ComposeResult:
-        indicator = "\u25cf" if self.is_active else "\u25cb"
-        top, branch, tail = self._tree_chars()
+        top, branch_char, tail = self._tree_chars()
         yield Static(top, classes="line1")
         with Horizontal(classes="line2"):
-            yield Static(f"{branch}{indicator} {self.instance_name}", classes="name")
-            yield Static(self.instance_type, classes="type")
-        git_line = self._format_git_line()
-        yield Static(git_line, classes="line3", markup=True)
+            yield Static(self._format_name_text(), classes="name", markup=True)
+        with Horizontal(classes="line3"):
+            yield Static(self._format_branch_text(), classes="branch", markup=True)
+            yield Static(self._format_stats_text(), classes="stats", markup=True)
+        yield Static(tail, classes="line4")
 
     def _toggle_flash(self) -> None:
         """Toggle the bell-flash CSS class for the flash animation."""
@@ -132,11 +137,7 @@ class InstanceRow(Vertical):
         """Update mutable display state without rebuilding the widget."""
         if is_active != self.is_active:
             self.is_active = is_active
-            indicator = "●" if is_active else "○"
-            tree_branch = self._tree_chars()[1]
-            self.query_one(".name", Static).update(
-                f"{tree_branch}{indicator} {self.instance_name}"
-            )
+            self.query_one(".name", Static).update(self._format_name_text())
         if is_current != self.is_current:
             self.is_current = is_current
             if is_current:
@@ -152,7 +153,8 @@ class InstanceRow(Vertical):
             self.short_sha = short_sha
             self.lines_added = lines_added
             self.lines_removed = lines_removed
-            self.query_one(".line3", Static).update(self._format_git_line())
+            self.query_one(".branch", Static).update(self._format_branch_text())
+            self.query_one(".stats", Static).update(self._format_stats_text())
         self._update_flash()
 
     async def on_click(self) -> None:

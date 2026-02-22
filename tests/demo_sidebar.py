@@ -15,13 +15,13 @@ def build_demo_snapshot(tick: int) -> list[InstanceSnapshot]:
 
     base = [
         InstanceSnapshot("my-project", "main", "main", True, current_idx == 0, alert_for(0),
-                         branch="main", short_sha="a1b2c3d"),
+                         branch="main", short_sha="a1b2c3d", lines_added=15, lines_removed=3),
         InstanceSnapshot("my-project", "feat-auth", "worktree", True, current_idx == 1, alert_for(1),
                          branch="feat/auth-system", short_sha="e4f5a6b", lines_added=47, lines_removed=12),
         InstanceSnapshot("my-project", "fix-bug", "worktree", False, current_idx == 2, alert_for(2),
                          branch=None, short_sha="7c8d9e0", lines_added=3, lines_removed=1),
         InstanceSnapshot("other-repo", "default", "main", True, False, alert_for(3),
-                         branch="main", short_sha="f1a2b3c"),
+                         branch="main", short_sha="f1a2b3c", lines_added=8, lines_removed=0),
         InstanceSnapshot("other-repo", "refactor", "worktree", False, False, None,
                          branch="refactor/cleanup", short_sha="d4e5f6a", lines_added=128, lines_removed=89),
     ]

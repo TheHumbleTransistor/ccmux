@@ -1860,8 +1860,18 @@ def detach(
                 check=True, capture_output=True,
             )
         else:
+            # -t expects a client tty, not a session name.
+            # Find the most recently active client attached to the session.
+            result = subprocess.run(
+                ["tmux", "list-clients", "-t", outer, "-F", "#{client_tty}"],
+                capture_output=True, text=True, check=True,
+            )
+            clients = [c for c in result.stdout.strip().split("\n") if c]
+            if not clients:
+                console.print("[red]Error:[/red] No clients attached to ccmux session.", style="bold")
+                sys.exit(1)
             subprocess.run(
-                ["tmux", "detach-client", "-t", outer],
+                ["tmux", "detach-client", "-t", clients[0]],
                 check=True, capture_output=True,
             )
     except subprocess.CalledProcessError as e:

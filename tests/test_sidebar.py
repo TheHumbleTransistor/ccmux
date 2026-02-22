@@ -594,7 +594,7 @@ class TestSidebarRendering:
     @pytest.mark.asyncio
     async def test_screen_content_after_multiple_clicks(self, demo_app):
         """Rapid-fire clicks on all rows, verify content intact."""
-        async with demo_app.run_test() as pilot:
+        async with demo_app.run_test(size=(80, 40)) as pilot:
             app = pilot.app
 
             # Click title, then each InstanceRow
