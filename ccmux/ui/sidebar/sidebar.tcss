@@ -5,11 +5,11 @@ Screen {
 
 #title {
     height: 6;
-    padding: 0 1;
+    padding: 0 1 0 2;
     color: #d7af5f;
     background: #1e1e1e;
     text-style: bold;
-    text-align: center;
+    text-align: left;
 }
 
 #spacer {
