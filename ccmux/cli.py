@@ -360,6 +360,8 @@ def _create_bash_window(session: str, instance_name: str, working_dir: str) -> N
     bash = _bash_session_name(session)
     bash_cmd = (
         f"export CCMUX_INSTANCE={instance_name}; "
+        f"export TERM=tmux-256color; "
+        f"export COLORTERM=truecolor; "
         f"while true; do $SHELL; done"
     )
     try:
@@ -555,7 +557,7 @@ if [ -n "$WIN" ]; then
         DIR=$(tmux display-message -t "{inner}" -p '#{{pane_current_path}}' 2>/dev/null)
         [ -z "$DIR" ] && DIR="$HOME"
         tmux new-window -t "{bash}" -n "$WIN" -c "$DIR" \
-            "export CCMUX_INSTANCE=$WIN; while true; do \\$SHELL; done" 2>/dev/null
+            "export CCMUX_INSTANCE=$WIN; export TERM=tmux-256color; export COLORTERM=truecolor; while true; do \\$SHELL; done" 2>/dev/null
         tmux set-option -w -t "{bash}:$WIN" window-style 'bg=#1e1e1e' 2>/dev/null
         tmux select-window -t "{bash}:$WIN" 2>/dev/null
     fi
