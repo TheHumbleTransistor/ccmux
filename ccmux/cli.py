@@ -2231,6 +2231,105 @@ def detach(
         sys.exit(1)
 
 
+@app.command(name="debug")
+def debug_sidebar() -> None:
+    """Launch a debug session to isolate sidebar rendering issues.
+
+    Creates a single tmux session (ccmux-debug) with 3 panes:
+      - Top-left (41 chars): sidebar TUI in --demo mode
+      - Top-right: plain bash shell
+      - Bottom (4 rows): plain bash shell
+
+    No nested tmux sessions are used. If the sidebar title still
+    glitches, the bug is in the Textual rendering; if it's stable,
+    nested tmux is the cause.
+    """
+    session_name = "ccmux-debug"
+    python_exe = sys.executable or "python3"
+
+    # Kill any existing debug session (disposable)
+    if tmux_session_exists(session_name):
+        subprocess.run(
+            ["tmux", "kill-session", "-t", session_name],
+            capture_output=True,
+        )
+
+    sidebar_cmd = (
+        f"TERM=tmux-256color COLORTERM=truecolor "
+        f"{python_exe} -m ccmux.ui.sidebar --demo ; "
+        f"echo 'Sidebar exited. Press enter to close.' ; read"
+    )
+
+    try:
+        # 1. Create session with sidebar as the initial pane (full screen)
+        subprocess.run(
+            [
+                "tmux", "new-session",
+                "-d",
+                "-s", session_name,
+                sidebar_cmd,
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        # 2. Split full-width bottom pane for bash (same order as _create_outer_session)
+        subprocess.run(
+            [
+                "tmux", "split-window",
+                "-t", f"{session_name}:0.0",
+                "-v", "-l", str(BASH_PANE_HEIGHT),
+                "bash",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        # Now: pane 0 = sidebar (top), pane 1 = bash (bottom)
+
+        # 3. Split top pane horizontally for bash (right side)
+        subprocess.run(
+            [
+                "tmux", "split-window",
+                "-t", f"{session_name}:0.0",
+                "-h", "-l", "50%",
+                "bash",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        # Now: pane 0 = sidebar (top-left), pane 1 = bash (top-right), pane 2 = bash (bottom)
+
+        # Apply outer session config (no status bar, mouse on, gold borders, etc.)
+        apply_outer_session_config(session_name)
+
+        # Install client-resized hook to enforce fixed pane sizes
+        resize_cmd = (
+            f"resize-pane -t {session_name}:0.0 -x {SIDEBAR_WIDTH} ; "
+            f"resize-pane -t {session_name}:0.2 -y {BASH_PANE_HEIGHT}"
+        )
+        subprocess.run(
+            ["tmux", "set-hook", "-t", session_name, "client-resized", resize_cmd],
+            check=True, capture_output=True,
+        )
+
+        # Focus the top-right bash pane
+        subprocess.run(
+            ["tmux", "select-pane", "-t", f"{session_name}:0.1"],
+            capture_output=True,
+        )
+
+    except subprocess.CalledProcessError as exc:
+        console.print(
+            f"[red]Error:[/red] Failed to create debug session: {exc}\n"
+            f"  stderr: {exc.stderr.decode() if exc.stderr else '(none)'}",
+            style="bold",
+        )
+        sys.exit(1)
+
+    # Attach to the debug session (replaces current process)
+    os.execvp("tmux", ["tmux", "attach", "-t", f"={session_name}"])
+
+
 def main():
     """Main entry point for the CLI."""
     try:
