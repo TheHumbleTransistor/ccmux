@@ -20,7 +20,7 @@ from rich.table import Table
 
 from ccmux import state
 from ccmux.config import run_post_create
-from ccmux.ui.tmux import apply_claude_inner_session_config, apply_outer_session_config
+from ccmux.ui.tmux import apply_claude_inner_session_config, apply_outer_session_config, apply_server_global_config
 
 # Default session name
 DEFAULT_SESSION = "default"
@@ -463,6 +463,9 @@ def _create_outer_session(session: str) -> None:
             capture_output=True,
         )
         # Now: pane 0 = sidebar (top-left), pane 1 = inner (top-right), pane 2 = bash (bottom full width)
+
+        # Apply server-global config (true-color support)
+        apply_server_global_config()
 
         # Apply outer session config (no status bar, C-Space prefix, etc.)
         apply_outer_session_config(outer)
@@ -2200,7 +2203,7 @@ def detach(
         sys.exit(1)
 
 
-# TODO: remove debug/test features like this (keep the sidebar UI's demo though!)
+# TODO: Eventually when we vanquish the glitchy issue with the sidebar, remove debug/test features like this (keep the sidebar UI's demo though!)
 @app.command(name="debug")
 def debug_sidebar() -> None:
     """Launch a debug session to isolate sidebar rendering issues.

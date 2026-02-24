@@ -249,10 +249,11 @@ class TestCreateOuterSession:
 
     @mock.patch("ccmux.cli._install_inner_hook")
     @mock.patch("ccmux.cli.apply_outer_session_config")
+    @mock.patch("ccmux.cli.apply_server_global_config")
     @mock.patch("ccmux.cli.subprocess.run")
     @mock.patch("ccmux.cli.tmux_session_exists")
     def test_creates_outer_with_sidebar_inner_and_bash(
-        self, mock_exists, mock_run, mock_outer_config, mock_hook
+        self, mock_exists, mock_run, mock_server_config, mock_outer_config, mock_hook
     ):
         """_create_outer_session creates outer session with sidebar, inner client, and bash pane."""
         from ccmux.cli import _create_outer_session
@@ -301,10 +302,11 @@ class TestCreateOuterSession:
 
     @mock.patch("ccmux.cli._install_inner_hook")
     @mock.patch("ccmux.cli.apply_outer_session_config")
+    @mock.patch("ccmux.cli.apply_server_global_config")
     @mock.patch("ccmux.cli.subprocess.run")
     @mock.patch("ccmux.cli.tmux_session_exists")
     def test_creates_outer_without_bash_session(
-        self, mock_exists, mock_run, mock_outer_config, mock_hook
+        self, mock_exists, mock_run, mock_server_config, mock_outer_config, mock_hook
     ):
         """_create_outer_session creates 2-pane layout when bash session doesn't exist."""
         from ccmux.cli import _create_outer_session

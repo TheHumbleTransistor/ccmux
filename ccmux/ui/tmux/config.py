@@ -29,6 +29,20 @@ def apply_claude_inner_session_config(session_name: str) -> bool:
         return False
 
 
+def apply_server_global_config() -> bool:
+    """Apply server-global tmux options for true-color support."""
+    commands = [
+        ["tmux", "set-option", "-g", "default-terminal", "tmux-256color"],
+        ["tmux", "set-option", "-as", "terminal-features", ",tmux-256color:RGB"],
+    ]
+    try:
+        for cmd in commands:
+            subprocess.run(cmd, check=True, capture_output=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
 def apply_outer_session_config(session_name: str) -> bool:
     """Apply minimal outer config via per-session set-option.
 
