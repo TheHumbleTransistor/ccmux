@@ -20,7 +20,7 @@ from rich.table import Table
 
 from ccmux import state
 from ccmux.config import run_post_create
-from ccmux.ui.tmux import apply_outer_session_config, apply_tmux_config
+from ccmux.ui.tmux import apply_inner_session_config, apply_outer_session_config
 
 # Default session name
 DEFAULT_SESSION = "default"
@@ -864,7 +864,7 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
                 inner_exists_flag = True
                 console.print(f"  [green]\u2713[/green] Created tmux session and activated '{wt_name}'")
 
-                if apply_tmux_config(inner):
+                if apply_inner_session_config(inner):
                     console.print(f"    [green]\u2713[/green] Applied ccmux tmux configuration")
                 else:
                     console.print(f"    [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
@@ -970,7 +970,7 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
             _create_bash_window(session, name, wt_path)
             console.print(f"  [green]\u2713[/green] Created tmux session and activated '{name}'")
 
-            if apply_tmux_config(inner):
+            if apply_inner_session_config(inner):
                 console.print(f"  [green]\u2713[/green] Applied ccmux tmux configuration")
             else:
                 console.print(f"  [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
@@ -1235,7 +1235,7 @@ def instance_new(
             _create_bash_window(session, name, str(instance_path))
             console.print(f"  [green]\u2713[/green] Created tmux session '{inner}' with window '{name}'")
 
-            if apply_tmux_config(inner):
+            if apply_inner_session_config(inner):
                 console.print(f"  [green]\u2713[/green] Applied ccmux tmux configuration")
             else:
                 console.print(f"  [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")

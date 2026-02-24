@@ -1,8 +1,6 @@
 """Tmux configuration management for ccmux."""
 
-import os
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 from typing import Optional
@@ -17,36 +15,28 @@ def get_tmux_config_path() -> Path:
     return Path(__file__).parent / "tmux.conf"
 
 
-def apply_tmux_config(session_name: str) -> bool:
-    """Apply tmux configuration to a specific session by sourcing the config file.
+def apply_inner_session_config(session_name: str) -> bool:
+    """Apply tmux configuration to the inner session via per-session options.
 
-    Args:
-        session_name: Name of the tmux session to configure
-
-    Returns:
-        True if configuration was applied successfully, False otherwise
+    Does NOT set server-global options (default-terminal, terminal-features)
+    to avoid corrupting other tmux sessions on the same server.
     """
-    # Small delay to ensure tmux session is ready
     time.sleep(0.1)
 
-    config_path = get_tmux_config_path()
-
-    if not config_path.exists():
-        # Config file not found, but session still works
-        return False
-
+    options = [
+        ("mouse", "on"),
+        ("status", "off"),
+        ("set-titles", "on"),
+        ("set-titles-string", "tmux:#S · #W"),
+    ]
     try:
-        # Source the config file in the tmux session
-        # Using source-file command to load the configuration
-        subprocess.run(
-            ["tmux", "source-file", str(config_path)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        for key, val in options:
+            subprocess.run(
+                ["tmux", "set-option", "-t", session_name, key, val],
+                check=True, capture_output=True,
+            )
         return True
     except subprocess.CalledProcessError:
-        # Fail silently - the session still works without custom config
         return False
 
 
