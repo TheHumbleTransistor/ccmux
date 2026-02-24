@@ -1,102 +1,79 @@
-# Claude Code Multiplexer (ccmux)
+# ccmux
 
-A Python CLI for managing multiple Claude Code instances using git repositories and tmux.
+<!-- TODO: add demo GIF -->
+<!-- <img src="docs/demo.gif" alt="ccmux demo" width="800"> -->
+
+A streamlined terminal-UI for juggling concurrent Claude Code sessions.
 
 ## Features
 
-- Create Claude Code instances in main repository or isolated worktrees
-- Track instances across sessions with persistent state
-- Manage multiple repositories and instances simultaneously
-- Rich terminal interface with status indicators
+- **Visual sidebar** — see all sessions at a glance; red highlights tell you instantly when Claude needs your attention
+- **CLI session management** — create, list, activate, remove sessions from the terminal
+- **Git worktree isolation** — spin up duplicate sessions on isolated branches; use  `ccmux.toml` files to add additional steps when spinning up worktrees, such as setting up untracked build dependencies 
 
 ## Installation
 
 ```bash
-pip install -e .
+git clone git@github.com:TheHumbleTransistor/ccmux.git
+pip install ./ccmux
 ```
 
 ## Quick Start
 
 ```bash
-# Create an instance in main repo with a random name
-ccmux new
-
-# Create a worktree instance with a specific name
-ccmux new feature-name -w
-
-# List all instances
-ccmux list
-
-# Show current instance info
-ccmux which
-
-# Attach to tmux session
-ccmux attach
-
-# Remove an instance
-ccmux remove feature-name
+ccmux             # auto-creates a session for the current directory or attaches to an existing one
+ccmux new         # create a new session from the current directory's repo
 ```
 
 ## Commands
 
-### `ccmux new [NAME]`
-Create a new Claude Code instance in the main repo or as a git worktree.
+| Command | Description |
+|---------|-------------|
+| *(default)* | Auto-attach to existing session or create one |
+| `new [NAME]` | Create a new session (add `-w` for worktree) |
+| `list` | List all sessions with status and branch info |
+| `attach` | Attach to the ccmux tmux session |
+| `activate [NAME]` | Reopen Claude Code in a session's tmux window |
+| `deactivate [NAME]` | Close tmux window (keeps session) |
+| `remove [NAME]` | Permanently delete a session |
+| `rename OLD NEW` | Rename a session |
+| `kill` | Kill entire ccmux session |
+| `which` | Print current session name (useful for scripting) |
+| `detach` | Detach from tmux |
+| `export-tmux-config` | Export tmux config to a file |
 
-Options:
-- `--session` - Tmux session name (default: `ccmux`)
-- `-w, --worktree` - Create instance as a git worktree
+## Worktree Configuration
 
-### `ccmux list`
-List all instances with status, type, branch, and tmux window information.
+Drop a `ccmux.toml` in your repo root to run commands after worktree creation:
 
-### `ccmux which`
-Show which instance the current tmux window is associated with.
+```toml
+[worktree]
+post_create = [
+    "ln -s $CCMUX_REPO_ROOT/node_modules $CCMUX_INSTANCE_PATH/node_modules",
+    "cp $CCMUX_REPO_ROOT/.env $CCMUX_INSTANCE_PATH/.env",
+]
+```
 
-### `ccmux attach`
-Attach to a tmux session.
+Commands run inside the new worktree with these environment variables:
 
-Options:
-- `--session` - ccmux session name (default: `ccmux`)
+| Variable | Description |
+|----------|-------------|
+| `CCMUX_REPO_ROOT` | Absolute path to the main repository |
+| `CCMUX_INSTANCE_PATH` | Absolute path to the new worktree |
+| `CCMUX_INSTANCE_NAME` | Name of the new instance |
+| `CCMUX_SESSION` | ccmux tmux session name |
 
-### `ccmux activate [NAME]`
-Reopen Claude Code in an instance's tmux window. Omit NAME to activate all inactive instances.
-
-Options:
-- `--session` - ccmux session name (default: `ccmux`)
-- `--no-confirm` - Skip confirmation prompt
-
-### `ccmux deactivate [NAME]`
-Close tmux window without removing the instance. Omit NAME to deactivate all active instances.
-
-Options:
-- `--session` - ccmux session name (default: `ccmux`)
-- `--no-confirm` - Skip confirmation prompt
-
-### `ccmux remove [NAME]`
-Permanently delete an instance. Omit NAME to remove all instances.
-
-Options:
-- `--session` - ccmux session name (default: `ccmux`)
-- `--no-confirm` - Skip confirmation prompt
-
-## How It Works
-
-- Instances can use the main repository or isolated worktrees
-- Worktree instances are created in `.worktrees/<name>` in detached HEAD state
-- State is tracked in `~/.ccmux/state.json`
-- Tmux session/window IDs are used for rename-resilient tracking
-- Each instance gets its own tmux window in the specified session
-
-## Development
+## Contributing
 
 ```bash
-# Install with dev dependencies
+git clone git@github.com:TheHumbleTransistor/ccmux.git
+cd ccmux
 pip install -e ".[dev]"
-
-# Run tests
 pytest tests/ -v
 ```
 
+PRs welcome — open an issue first for large changes.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE)

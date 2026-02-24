@@ -41,8 +41,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/raykamp-tht/claude-code-worktrees"
-Repository = "https://github.com/raykamp-tht/claude-code-worktrees"
+Homepage = "https://github.com/TheHumbleTransistor/ccmux"
+Repository = "https://github.com/TheHumbleTransistor/ccmux"
 
 [tool.setuptools.packages.find]
 include = ["ccmux*"]
