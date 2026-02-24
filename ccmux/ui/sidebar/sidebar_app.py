@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import signal
 import subprocess
 from collections.abc import Awaitable, Callable
@@ -10,6 +11,7 @@ from pathlib import Path
 from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
+from textual.geometry import Size
 from textual.widgets import Static
 
 from ccmux.naming import INNER_SESSION
@@ -20,7 +22,7 @@ from ccmux.ui.sidebar.widgets import SessionRow, RepoSessionsList
 POLL_INTERVAL = 5.0
 DEMO_POLL_INTERVAL = 1.0
 
-# --- Diagnostic logging ---
+# --- Logging ---
 _LOG_DIR = Path.home() / ".ccmux"
 _LOG_FILE = _LOG_DIR / "sidebar_debug.log"
 
@@ -69,13 +71,75 @@ class SidebarApp(App):
         self._session_list = Vertical(id="instance-list")
         yield self._session_list
 
-    async def on_resize(self, event: events.Resize) -> None:
-        log.debug("on_resize size=%dx%d", event.size.width, event.size.height)
-
     async def on_mount(self) -> None:
+        self._fix_nested_tmux_resize()
         await self._refresh_sessions(caller="mount")
         self.set_interval(self._poll_interval, self._poll_refresh)
         self._register_signal_handler()
+
+    def _fix_nested_tmux_resize(self) -> None:
+        """Work around Textual resize being broken inside nested tmux.
+
+        Root cause: Textual negotiates "in-band window resize" (xterm mode
+        2048) at startup.  When active, Textual's SIGWINCH handler becomes a
+        no-op — it expects the terminal to deliver resize dimensions via
+        escape sequences (``\\x1b[48;H;W;PH;PWt``) instead.
+
+        tmux 3.4+ advertises mode 2048 support, so Textual enables it.  But
+        in ccmux's nested-tmux topology (sidebar pane → outer session →
+        inner/bash sessions via ``TMUX= tmux attach``), the in-band resize
+        escape sequences are either not forwarded or contain stale dimensions.
+        The result: SIGWINCH arrives and the pty has the correct new size, but
+        Textual never learns about it.
+
+        Fix: fully disable mode 2048 and replace Textual's SIGWINCH handler
+        with one that reads ``os.get_terminal_size()`` directly and posts the
+        Resize event to Textual's event loop — the same thing Textual's own
+        handler does, minus the broken in-band guard.
+        """
+        from textual.messages import InBandWindowResize
+
+        driver = getattr(self, "_driver", None)
+        if driver is not None:
+            # Disable in-band resize now.
+            driver._in_band_window_resize = False
+            try:
+                driver.write("\x1b[?2048l")
+            except Exception:
+                pass
+
+            # Textual queries mode 2048 during start_application_mode() and
+            # the DECRPM response arrives asynchronously.  When it does,
+            # process_message() re-enables in-band resize — undoing our fix.
+            # Intercept process_message to suppress InBandWindowResize so the
+            # flag stays False permanently.
+            _orig_process = driver.process_message
+
+            def _process_no_ibwr(message):
+                if isinstance(message, InBandWindowResize):
+                    return
+                _orig_process(message)
+
+            driver.process_message = _process_no_ibwr
+
+        # Replace Textual's SIGWINCH handler with one that always reads the
+        # real pty size.  We capture the app and event loop references here
+        # because the handler runs in a signal context (not async).
+        _app = self
+        _loop = asyncio.get_running_loop()
+
+        def _on_sigwinch(signum, frame):
+            try:
+                pty = os.get_terminal_size()
+                size = Size(pty.columns, pty.lines)
+                asyncio.run_coroutine_threadsafe(
+                    _app._post_message(events.Resize(size, size)),
+                    loop=_loop,
+                )
+            except (OSError, RuntimeError):
+                pass
+
+        signal.signal(signal.SIGWINCH, _on_sigwinch)
 
     async def _refresh_sessions(self, caller: str = "unknown") -> None:
         """Refresh the session list, using incremental updates when possible."""

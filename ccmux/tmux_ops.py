@@ -1,8 +1,18 @@
 """Tmux subprocess wrappers for ccmux."""
 
 import os
+import shutil
 import subprocess
 from typing import Optional
+
+
+def _terminal_size_flags() -> list[str]:
+    """Return [-x, cols, -y, rows] for the current terminal, or [] on failure."""
+    try:
+        sz = shutil.get_terminal_size()
+        return ["-x", str(sz.columns), "-y", str(sz.lines)]
+    except OSError:
+        return []
 
 
 def tmux_session_exists(session_name: str) -> bool:
@@ -116,6 +126,7 @@ def create_tmux_session(session: str, window: str, cwd: str, cmd: str) -> Option
             [
                 "tmux", "new-session",
                 "-d",
+                *_terminal_size_flags(),
                 "-s", session,
                 "-n", window,
                 "-c", cwd,
@@ -225,7 +236,7 @@ def create_session_simple(name: str, cmd: str) -> bool:
     """Create a detached tmux session (no window name, cwd, or print). Returns True on success."""
     try:
         subprocess.run(
-            ["tmux", "new-session", "-d", "-s", name, cmd],
+            ["tmux", "new-session", "-d", *_terminal_size_flags(), "-s", name, cmd],
             check=True, capture_output=True,
         )
         return True
