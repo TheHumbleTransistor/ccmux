@@ -40,7 +40,6 @@ ccmux new         # create a new session from the current directory's repo
 | `kill` | Kill entire ccmux session |
 | `which` | Print current session name (useful for scripting) |
 | `detach` | Detach from tmux |
-| `export-tmux-config` | Export tmux config to a file |
 
 ## Worktree Configuration
 
