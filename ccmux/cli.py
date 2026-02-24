@@ -2200,6 +2200,7 @@ def detach(
         sys.exit(1)
 
 
+# TODO: remove debug/test features like this (keep the sidebar UI's demo though!)
 @app.command(name="debug")
 def debug_sidebar() -> None:
     """Launch a debug session to isolate sidebar rendering issues.

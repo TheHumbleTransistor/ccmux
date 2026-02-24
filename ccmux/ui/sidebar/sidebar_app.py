@@ -56,7 +56,6 @@ class SidebarApp(App):
         self._last_snapshot: list[InstanceSnapshot] | None = None
         self._refresh_lock = asyncio.Lock()
         self._instance_list:Vertical | None = None
-        self._resize_count: int = 0
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -71,22 +70,8 @@ class SidebarApp(App):
         self._instance_list = Vertical(id="instance-list")
         yield self._instance_list
 
-    async def _on_resize(self, event: events.Resize) -> None:
-        self._resize_count += 1
-        log.debug("on_resize #%d size=%dx%d", self._resize_count, event.size.width, event.size.height)
-        try:
-            title = self.query_one("#title", Static)
-            title.update(
-                "                                     \n"
-                "                                     \n"
-                "▄█████ ▄█████ ██▄  ▄██ ██  ██ ██  ██ \n"
-                "██     ██     ██ ▀▀ ██ ██  ██  ████  \n"
-                "▀█████ ▀█████ ██    ██ ▀████▀ ██  ██ \n"
-                f" resize #{self._resize_count} {event.size.width}x{event.size.height}"
-            )
-        except Exception:
-            log.exception("_on_resize title update FAILED")
-        await super()._on_resize(event)
+    async def on_resize(self, event: events.Resize) -> None:
+        log.debug("on_resize size=%dx%d", event.size.width, event.size.height)
 
     async def on_mount(self) -> None:
         await self._refresh_instances(caller="mount")
