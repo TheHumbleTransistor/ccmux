@@ -16,7 +16,7 @@ from textual.widgets import Static
 
 from ccmux.ui import (
     SidebarApp,
-    InstanceRow,
+    SessionRow,
     RepoHeader,
     write_pid_file,
     remove_pid_file,
@@ -49,71 +49,65 @@ def temp_pid_dir(monkeypatch):
 class TestSidebarDataHelpers:
     """Tests for sidebar data resolution logic."""
 
-    def test_get_current_instance_by_window_id(self, temp_state_dir):
-        """Sidebar identifies current instance by window_id, not name."""
-        state.add_instance(
-            session_name="test",
-            instance_name="fox",
+    def test_get_current_session_by_window_id(self, temp_state_dir):
+        """Sidebar identifies current session by window_id, not name."""
+        state.add_session(
+            session_name="fox",
             repo_path="/home/user/my-project",
-            instance_path="/home/user/my-project/.worktrees/fox",
+            session_path="/home/user/my-project/.worktrees/fox",
             tmux_session_id="$0",
             tmux_window_id="@1",
         )
-        state.add_instance(
-            session_name="test",
-            instance_name="bear",
+        state.add_session(
+            session_name="bear",
             repo_path="/home/user/my-project",
-            instance_path="/home/user/my-project",
+            session_path="/home/user/my-project",
             tmux_session_id="$0",
             tmux_window_id="@2",
             is_worktree=False,
         )
 
-        session_obj = state.get_session("test")
-        instances = session_obj.instances
+        sessions = state.get_all_sessions()
 
-        # Simulate what the sidebar does to find current instance
+        # Simulate what the sidebar does to find current session
         window_id = "@1"
         current_name = None
-        for inst_name, inst in instances.items():
-            if inst.tmux_window_id == window_id:
-                current_name = inst_name
+        for sess in sessions:
+            if sess.tmux_window_id == window_id:
+                current_name = sess.name
                 break
 
         assert current_name == "fox"
 
-    def test_instances_grouped_by_repo(self, temp_state_dir):
-        """Instances should be groupable by repository path."""
-        state.add_instance(
-            session_name="test",
-            instance_name="fox",
+    def test_sessions_grouped_by_repo(self, temp_state_dir):
+        """Sessions should be groupable by repository path."""
+        state.add_session(
+            session_name="fox",
             repo_path="/home/user/project-a",
-            instance_path="/home/user/project-a/.worktrees/fox",
+            session_path="/home/user/project-a/.worktrees/fox",
             tmux_window_id="@1",
         )
-        state.add_instance(
-            session_name="test",
-            instance_name="bear",
+        state.add_session(
+            session_name="bear",
             repo_path="/home/user/project-a",
-            instance_path="/home/user/project-a",
+            session_path="/home/user/project-a",
             tmux_window_id="@2",
             is_worktree=False,
         )
-        state.add_instance(
-            session_name="test",
-            instance_name="hawk",
+        state.add_session(
+            session_name="hawk",
             repo_path="/home/user/project-b",
-            instance_path="/home/user/project-b/.worktrees/hawk",
+            session_path="/home/user/project-b/.worktrees/hawk",
             tmux_window_id="@3",
         )
 
-        instances = state.get_all_instances("test")
+        sessions = state.get_all_sessions()
 
         # Group by repo like the sidebar does
         repos: dict[str, list] = {}
-        for inst in instances:
-            repo_name = Path(inst.repo_path).name
-            repos.setdefault(repo_name, []).append(inst)
+        for sess in sessions:
+            repo_name = Path(sess.repo_path).name
+            repos.setdefault(repo_name, []).append(sess)
 
         assert "project-a" in repos
         assert "project-b" in repos
@@ -122,56 +116,52 @@ class TestSidebarDataHelpers:
 
     def test_active_inactive_detection(self, temp_state_dir):
         """Active/inactive detection based on window ID presence."""
-        state.add_instance(
-            session_name="test",
-            instance_name="fox",
+        state.add_session(
+            session_name="fox",
             repo_path="/repo",
-            instance_path="/repo/.worktrees/fox",
+            session_path="/repo/.worktrees/fox",
             tmux_window_id="@1",
         )
-        state.add_instance(
-            session_name="test",
-            instance_name="bear",
+        state.add_session(
+            session_name="bear",
             repo_path="/repo",
-            instance_path="/repo/.worktrees/bear",
+            session_path="/repo/.worktrees/bear",
             tmux_window_id="@2",
         )
 
-        instances = state.get_all_instances("test")
+        sessions = state.get_all_sessions()
         active_window_ids = {"@1"}  # Simulate: only @1 is in tmux
 
-        for inst in instances:
-            is_active = inst.tmux_window_id in active_window_ids
-            if inst.name == "fox":
+        for sess in sessions:
+            is_active = sess.tmux_window_id in active_window_ids
+            if sess.name == "fox":
                 assert is_active
-            elif inst.name == "bear":
+            elif sess.name == "bear":
                 assert not is_active
 
-    def test_instance_type_detection(self, temp_state_dir):
+    def test_session_type_detection(self, temp_state_dir):
         """Worktree vs main repo type detection."""
-        state.add_instance(
-            session_name="test",
-            instance_name="fox",
+        state.add_session(
+            session_name="fox",
             repo_path="/repo",
-            instance_path="/repo/.worktrees/fox",
+            session_path="/repo/.worktrees/fox",
             tmux_window_id="@1",
             is_worktree=True,
         )
-        state.add_instance(
-            session_name="test",
-            instance_name="bear",
+        state.add_session(
+            session_name="bear",
             repo_path="/repo",
-            instance_path="/repo",
+            session_path="/repo",
             tmux_window_id="@2",
             is_worktree=False,
         )
 
-        instances = state.get_all_instances("test")
-        for inst in instances:
-            if inst.name == "fox":
-                assert inst.instance_type == "worktree"
-            elif inst.name == "bear":
-                assert inst.instance_type == "main"
+        sessions = state.get_all_sessions()
+        for sess in sessions:
+            if sess.name == "fox":
+                assert sess.session_type == "worktree"
+            elif sess.name == "bear":
+                assert sess.session_type == "main"
 
 
 class TestPidTracking:
@@ -179,69 +169,63 @@ class TestPidTracking:
 
     def test_write_and_remove_pid_file(self, temp_pid_dir):
         """PID file is created and cleaned up correctly."""
-        pid_file = write_pid_file("test-session")
+        pid_file = write_pid_file()
 
         assert pid_file.exists()
         assert pid_file.read_text() == str(os.getpid())
-        assert pid_file.parent == temp_pid_dir / "test-session"
+        assert pid_file.parent == temp_pid_dir
 
-        remove_pid_file("test-session")
+        remove_pid_file()
         assert not pid_file.exists()
 
     def test_remove_missing_pid_file(self, temp_pid_dir):
         """Removing a non-existent PID file doesn't raise."""
-        remove_pid_file("non-existent-session")
+        remove_pid_file()
 
 
-class TestInnerSessionName:
-    """Tests for _inner_session_name and _ccmux_session_from_tmux."""
+class TestNamingConstants:
+    """Tests for naming constants."""
 
-    def testinner_session_name(self):
-        """_inner_session_name appends '-inner' suffix."""
-        from ccmux.session_naming import inner_session_name
+    def test_inner_session_constant(self):
+        """INNER_SESSION is ccmux-inner."""
+        from ccmux.naming import INNER_SESSION
+        assert INNER_SESSION == "ccmux-inner"
 
-        assert inner_session_name("default") == "default-inner"
-        assert inner_session_name("my-session") == "my-session-inner"
+    def test_bash_session_constant(self):
+        """BASH_SESSION is ccmux-bash."""
+        from ccmux.naming import BASH_SESSION
+        assert BASH_SESSION == "ccmux-bash"
 
-    def test_ccmux_session_from_tmux_strips_inner(self):
-        """_ccmux_session_from_tmux strips '-inner' suffix."""
-        from ccmux.session_naming import ccmux_session_from_tmux
-
-        assert ccmux_session_from_tmux("default-inner") == "default"
-        assert ccmux_session_from_tmux("my-session-inner") == "my-session"
-
-    def test_ccmux_session_from_tmux_no_suffix(self):
-        """_ccmux_session_from_tmux returns name unchanged if no '-inner' suffix."""
-        from ccmux.session_naming import ccmux_session_from_tmux
-
-        assert ccmux_session_from_tmux("default") == "default"
-        assert ccmux_session_from_tmux("my-session") == "my-session"
+    def test_outer_session_constant(self):
+        """OUTER_SESSION is ccmux."""
+        from ccmux.naming import OUTER_SESSION
+        assert OUTER_SESSION == "ccmux"
 
 
-class TestIsInstanceWindowActive:
-    """Tests for is_instance_window_active wrapper."""
+class TestIsSessionWindowActive:
+    """Tests for is_session_window_active wrapper."""
 
-    @mock.patch("ccmux.session_naming.is_window_active_in_session")
+    @mock.patch("ccmux.naming.is_window_active_in_session")
     def test_delegates_to_inner_session(self, mock_active):
-        """is_instance_window_active checks the inner session."""
-        from ccmux.session_naming import is_instance_window_active
+        """is_session_window_active checks the inner session."""
+        from ccmux.naming import is_session_window_active
 
         mock_active.return_value = True
-        result = is_instance_window_active("my-session", "@5")
+        result = is_session_window_active("@5")
 
         assert result is True
-        mock_active.assert_called_once_with("my-session-inner", "@5")
+        mock_active.assert_called_once_with("ccmux-inner", "@5")
 
-    @mock.patch("ccmux.session_naming.is_window_active_in_session")
+    @mock.patch("ccmux.naming.is_window_active_in_session")
     def test_returns_false_for_none_window(self, mock_active):
-        """is_instance_window_active handles None window ID."""
-        from ccmux.session_naming import is_instance_window_active
+        """is_session_window_active handles None window ID."""
+        from ccmux.naming import is_session_window_active
 
         mock_active.return_value = False
-        result = is_instance_window_active("my-session", None)
+        result = is_session_window_active(None)
 
         assert result is False
-        mock_active.assert_called_once_with("my-session-inner", None)
+        mock_active.assert_called_once_with("ccmux-inner", None)
 
 
 class TestCreateOuterSession:
@@ -259,15 +243,15 @@ class TestCreateOuterSession:
         """create_outer_session creates outer session with sidebar, inner client, and bash pane."""
         from ccmux.session_layout import create_outer_session
 
-        # outer (ccmux-my-session) doesn't exist, inner and bash do exist
-        mock_exists.side_effect = lambda s: s in ("my-session-inner", "my-session-bash")
+        # outer (ccmux) doesn't exist, inner and bash do exist
+        mock_exists.side_effect = lambda s: s in ("ccmux-inner", "ccmux-bash")
 
-        create_outer_session("my-session")
+        create_outer_session()
 
         # Verify create_session_simple creates the sidebar under outer name
         mock_create_simple.assert_called_once()
         args = mock_create_simple.call_args[0]
-        assert args[0] == "ccmux-my-session"
+        assert args[0] == "ccmux"
         assert "ccmux.ui.sidebar" in args[1]
 
         # Should have 2 split-window calls (bash + inner)
@@ -276,15 +260,15 @@ class TestCreateOuterSession:
         # Verify first split creates the bash pane (vertical)
         bash_split = mock_split.call_args_list[0]
         assert bash_split[0][1] == "-v"
-        assert "tmux attach -t =my-session-bash" in bash_split[0][3]
+        assert "tmux attach -t =ccmux-bash" in bash_split[0][3]
 
         # Verify second split creates the inner client (horizontal)
         inner_split = mock_split.call_args_list[1]
         assert inner_split[0][1] == "-h"
-        assert "tmux attach -t =my-session-inner" in inner_split[0][3]
+        assert "tmux attach -t =ccmux-inner" in inner_split[0][3]
 
-        mock_outer_config.assert_called_once_with("ccmux-my-session")
-        mock_hook.assert_called_once_with("my-session")
+        mock_outer_config.assert_called_once_with("ccmux")
+        mock_hook.assert_called_once()
 
     @mock.patch("ccmux.session_layout.install_inner_hook")
     @mock.patch("ccmux.session_layout.apply_outer_session_config")
@@ -299,9 +283,9 @@ class TestCreateOuterSession:
         from ccmux.session_layout import create_outer_session
 
         # outer doesn't exist, inner exists, bash doesn't
-        mock_exists.side_effect = lambda s: s == "my-session-inner"
+        mock_exists.side_effect = lambda s: s == "ccmux-inner"
 
-        create_outer_session("my-session")
+        create_outer_session()
 
         mock_create_simple.assert_called_once()
 
@@ -309,10 +293,10 @@ class TestCreateOuterSession:
         assert mock_split.call_count == 1
         inner_split = mock_split.call_args_list[0]
         assert inner_split[0][1] == "-h"
-        assert "tmux attach -t =my-session-inner" in inner_split[0][3]
+        assert "tmux attach -t =ccmux-inner" in inner_split[0][3]
 
-        mock_outer_config.assert_called_once_with("ccmux-my-session")
-        mock_hook.assert_called_once_with("my-session")
+        mock_outer_config.assert_called_once_with("ccmux")
+        mock_hook.assert_called_once()
 
     @mock.patch("ccmux.session_layout.create_session_simple")
     @mock.patch("ccmux.session_layout.tmux_session_exists")
@@ -323,7 +307,7 @@ class TestCreateOuterSession:
         # Both exist
         mock_exists.return_value = True
 
-        create_outer_session("my-session")
+        create_outer_session()
         mock_create_simple.assert_not_called()
 
     @mock.patch("ccmux.session_layout.create_session_simple")
@@ -335,7 +319,7 @@ class TestCreateOuterSession:
         # Neither exists
         mock_exists.return_value = False
 
-        create_outer_session("my-session")
+        create_outer_session()
         mock_create_simple.assert_not_called()
 
 
@@ -347,25 +331,25 @@ class TestKillOuterSession:
         """kill_outer_session kills the outer and bash tmux sessions."""
         from ccmux.session_layout import kill_outer_session
 
-        assert kill_outer_session("my-session") is True
+        assert kill_outer_session() is True
 
         calls = [c[0][0] for c in mock_kill.call_args_list]
-        assert "my-session-bash" in calls
-        assert "ccmux-my-session" in calls
+        assert "ccmux-bash" in calls
+        assert "ccmux" in calls
 
     @mock.patch("ccmux.session_layout.kill_tmux_session", return_value=False)
     def test_returns_false_when_no_session(self, mock_kill):
         """kill_outer_session returns False when session doesn't exist."""
         from ccmux.session_layout import kill_outer_session
 
-        assert kill_outer_session("my-session") is False
+        assert kill_outer_session() is False
 
     @mock.patch("ccmux.session_layout.kill_tmux_session", return_value=False)
     def test_returns_false_on_kill_failure(self, mock_kill):
         """kill_outer_session returns False if kill-session fails."""
         from ccmux.session_layout import kill_outer_session
 
-        assert kill_outer_session("my-session") is False
+        assert kill_outer_session() is False
 
 
 class TestNotifySidebars:
@@ -373,16 +357,14 @@ class TestNotifySidebars:
 
     @mock.patch("ccmux.session_layout.os.kill")
     def test_sends_sigusr1_to_active_pids(self, mock_kill, temp_pid_dir):
-        """notify_sidebars sends SIGUSR1 to all PIDs in session dir."""
+        """notify_sidebars sends SIGUSR1 to all PIDs in directory."""
         from ccmux.session_layout import notify_sidebars
 
-        # Create PID files
-        pid_dir = temp_pid_dir / "test-session"
-        pid_dir.mkdir(parents=True)
-        (pid_dir / "1234.pid").write_text("1234")
-        (pid_dir / "5678.pid").write_text("5678")
+        # Create PID files directly in the PID dir (no session subdir)
+        (temp_pid_dir / "1234.pid").write_text("1234")
+        (temp_pid_dir / "5678.pid").write_text("5678")
 
-        notify_sidebars("test-session")
+        notify_sidebars()
 
         calls = mock_kill.call_args_list
         pids_signaled = {c[0][0] for c in calls}
@@ -395,24 +377,25 @@ class TestNotifySidebars:
         """notify_sidebars removes PID files for dead processes."""
         from ccmux.session_layout import notify_sidebars
 
-        pid_dir = temp_pid_dir / "test-session"
-        pid_dir.mkdir(parents=True)
-        stale_pid_file = pid_dir / "9999.pid"
+        stale_pid_file = temp_pid_dir / "9999.pid"
         stale_pid_file.write_text("9999")
 
         mock_kill.side_effect = ProcessLookupError
 
-        notify_sidebars("test-session")
+        notify_sidebars()
 
         assert not stale_pid_file.exists()
 
     def test_no_pid_dir(self, temp_pid_dir):
         """notify_sidebars handles missing PID directory gracefully."""
         from ccmux.session_layout import notify_sidebars
+        import ccmux.session_layout as layout_mod
+
+        # Point to a non-existent dir
+        layout_mod.SIDEBAR_PIDS_DIR = temp_pid_dir / "non-existent"
 
         # Should not raise
-        notify_sidebars("non-existent-session")
-
+        notify_sidebars()
 
 
 class TestInstallInnerHook:
@@ -425,17 +408,17 @@ class TestInstallInnerHook:
         monkeypatch.setattr(layout_mod, "HOOKS_DIR", tmp_path)
 
         from ccmux.session_layout import install_inner_hook
-        install_inner_hook("test-session")
+        install_inner_hook()
 
-        script = tmp_path / "notify-sidebar-test-session.sh"
+        script = tmp_path / "notify-sidebar.sh"
         assert script.exists()
         content = script.read_text()
         # Should contain bash window switching
-        assert "test-session-inner" in content
-        assert "test-session-bash" in content
+        assert "ccmux-inner" in content
+        assert "ccmux-bash" in content
         assert "select-window" in content
         # Should contain SIGUSR1 notification
-        assert "sidebar_pids/test-session" in content
+        assert "sidebar_pids" in content
         assert "kill -USR1" in content
         # Should NOT contain join-pane (that was the old approach)
         assert "join-pane" not in content
@@ -444,7 +427,7 @@ class TestInstallInnerHook:
         assert mock_set_hook.call_count == 2
         # Last call should be after-select-window on the inner session
         last_call = mock_set_hook.call_args_list[-1]
-        assert last_call[0][0] == "test-session-inner"
+        assert last_call[0][0] == "ccmux-inner"
         assert last_call[0][1] == "after-select-window"
 
     @mock.patch("ccmux.session_layout.unset_hook")
@@ -454,18 +437,18 @@ class TestInstallInnerHook:
         monkeypatch.setattr(layout_mod, "HOOKS_DIR", tmp_path)
 
         # Create a script to remove
-        script = tmp_path / "notify-sidebar-test-session.sh"
+        script = tmp_path / "notify-sidebar.sh"
         script.write_text("#!/bin/sh\n")
 
         from ccmux.session_layout import uninstall_inner_hook
-        uninstall_inner_hook("test-session")
+        uninstall_inner_hook()
 
         assert not script.exists()
         # Verify unset_hook was called for both hooks on the inner session
         assert mock_unset_hook.call_count == 2
         targets = [c[0][0] for c in mock_unset_hook.call_args_list]
         hooks = [c[0][1] for c in mock_unset_hook.call_args_list]
-        assert all(t == "test-session-inner" for t in targets)
+        assert all(t == "ccmux-inner" for t in targets)
         assert "alert-bell" in hooks
         assert "after-select-window" in hooks
 
@@ -482,9 +465,9 @@ class TestEnsureOuterSession:
         # Both inner and outer exist
         mock_exists.return_value = True
 
-        ensure_outer_session("my-session")
+        ensure_outer_session()
 
-        mock_hook.assert_called_once_with("my-session")
+        mock_hook.assert_called_once()
 
     @mock.patch("ccmux.session_layout.create_outer_session")
     @mock.patch("ccmux.session_layout.tmux_session_exists")
@@ -493,11 +476,11 @@ class TestEnsureOuterSession:
         from ccmux.session_layout import ensure_outer_session
 
         # Inner exists, outer doesn't
-        mock_exists.side_effect = lambda s: s == "my-session-inner"
+        mock_exists.side_effect = lambda s: s == "ccmux-inner"
 
-        ensure_outer_session("my-session")
+        ensure_outer_session()
 
-        mock_create.assert_called_once_with("my-session")
+        mock_create.assert_called_once()
 
     @mock.patch("ccmux.session_layout.create_outer_session")
     @mock.patch("ccmux.session_layout.tmux_session_exists")
@@ -508,7 +491,7 @@ class TestEnsureOuterSession:
         # Neither exists
         mock_exists.return_value = False
 
-        ensure_outer_session("my-session")
+        ensure_outer_session()
 
         mock_create.assert_not_called()
 
@@ -522,29 +505,28 @@ class TestSidebarRendering:
         from tests.demo_sidebar import make_demo_provider
 
         return SidebarApp(
-            session="test-demo",
             snapshot_fn=make_demo_provider(),
             poll_interval=1.0,
         )
 
     @pytest.mark.asyncio
-    async def test_widgets_present_after_instance_click(self, demo_app):
-        """Click InstanceRow, verify title and instances still mounted and displayed."""
+    async def test_widgets_present_after_session_click(self, demo_app):
+        """Click SessionRow, verify title and sessions still mounted and displayed."""
         async with demo_app.run_test() as pilot:
-            # Verify initial state — title and instances are present
+            # Verify initial state — title and sessions are present
             app = pilot.app
             title = app.query_one("#title", Static)
             assert title.display is True
 
-            # Find and click an InstanceRow
-            rows = app.query(InstanceRow)
+            # Find and click a SessionRow
+            rows = app.query(SessionRow)
             assert len(rows) > 0
-            await pilot.click(InstanceRow)
+            await pilot.click(SessionRow)
 
             # After click, all structural widgets must still be mounted and visible
             title = app.query_one("#title", Static)
             assert title.display is True
-            assert len(app.query(InstanceRow)) > 0
+            assert len(app.query(SessionRow)) > 0
 
     @pytest.mark.asyncio
     async def test_widgets_present_after_header_click(self, demo_app):
@@ -564,7 +546,7 @@ class TestSidebarRendering:
                 await pilot.click(RepoHeader)
                 # Verify everything still intact
                 assert app.query_one("#title", Static).display is True
-                assert len(app.query(InstanceRow)) > 0
+                assert len(app.query(SessionRow)) > 0
 
     @pytest.mark.asyncio
     async def test_screen_content_after_multiple_clicks(self, demo_app):
@@ -572,17 +554,17 @@ class TestSidebarRendering:
         async with demo_app.run_test(size=(80, 40)) as pilot:
             app = pilot.app
 
-            # Click title, then each InstanceRow
+            # Click title, then each SessionRow
             await pilot.click("#title")
 
-            rows = app.query(InstanceRow)
+            rows = app.query(SessionRow)
             for row in rows:
                 await pilot.click(f"#{row.id}")
 
             # All structural widgets must survive rapid clicking
             assert app.query_one("#title", Static).display is True
             assert app.query_one("#instance-list") is not None
-            assert len(app.query(InstanceRow)) > 0
+            assert len(app.query(SessionRow)) > 0
 
     @pytest.mark.asyncio
     async def test_allow_select_disabled(self, demo_app):

@@ -1,31 +1,69 @@
-"""Session dataclass for ccmux state management."""
+"""Session dataclasses for ccmux state management."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
-
-from ccmux.state.instance import Instance
 
 
 @dataclass
 class Session:
-    """A ccmux session containing instances."""
+    """Base class for a ccmux session (worktree or main repo)."""
     name: str
-    tmux_session_id: Optional[str] = None
-    instances: dict[str, Instance] = field(default_factory=dict)
+    repo_path: str
+    session_path: str
+    tmux_window_id: Optional[str] = None
+    claude_session_id: Optional[str] = None
+
+    @property
+    def is_worktree(self) -> bool:
+        raise NotImplementedError
+
+    @property
+    def session_type(self) -> str:
+        raise NotImplementedError
 
     def to_dict(self) -> dict:
-        return {
-            "tmux_session_id": self.tmux_session_id,
-            "instances": {n: i.to_dict() for n, i in self.instances.items()},
+        d = {
+            "repo_path": self.repo_path,
+            "session_path": self.session_path,
+            "is_worktree": self.is_worktree,
+            "tmux_window_id": self.tmux_window_id,
         }
+        if self.claude_session_id:
+            d["claude_session_id"] = self.claude_session_id
+        return d
 
     @classmethod
     def from_dict(cls, name: str, data: dict) -> "Session":
-        """Construct a Session from raw state dict."""
-        raw = data.get("instances", {})
-        instances = {n: Instance.from_dict(n, d) for n, d in raw.items()}
-        return cls(
+        """Factory — returns WorktreeSession or MainRepoSession."""
+        kwargs = dict(
             name=name,
-            tmux_session_id=data.get("tmux_session_id"),
-            instances=instances,
+            repo_path=data["repo_path"],
+            session_path=data.get("session_path") or data.get("instance_path"),
+            tmux_window_id=data.get("tmux_window_id"),
+            claude_session_id=data.get("claude_session_id"),
         )
+        if data.get("is_worktree", True):
+            return WorktreeSession(**kwargs)
+        return MainRepoSession(**kwargs)
+
+
+@dataclass
+class WorktreeSession(Session):
+    @property
+    def is_worktree(self) -> bool:
+        return True
+
+    @property
+    def session_type(self) -> str:
+        return "worktree"
+
+
+@dataclass
+class MainRepoSession(Session):
+    @property
+    def is_worktree(self) -> bool:
+        return False
+
+    @property
+    def session_type(self) -> str:
+        return "main"

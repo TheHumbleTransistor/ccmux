@@ -4,13 +4,11 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from ccmux.state.instance import Instance
 from ccmux.state.session import Session
 
 
 STATE_DIR = Path.home() / ".ccmux"
 STATE_FILE = STATE_DIR / "state.json"
-DEFAULT_SESSION = "default"
 
 
 def _ensure_state_dir():
@@ -19,7 +17,11 @@ def _ensure_state_dir():
 
 
 def _load_raw() -> dict:
-    """Load raw state from disk, or return empty state if file doesn't exist."""
+    """Load raw state from disk, or return empty state if file doesn't exist.
+
+    Handles migration from old nested format (sessions.default.instances)
+    to the new flat format (sessions at top level).
+    """
     if not STATE_FILE.exists():
         return {
             "sessions": {},
@@ -27,11 +29,32 @@ def _load_raw() -> dict:
 
     try:
         with open(STATE_FILE, 'r') as f:
-            return json.load(f)
+            data = json.load(f)
     except (json.JSONDecodeError, IOError):
         return {
             "sessions": {},
         }
+
+    # Migrate old nested format: sessions.default.instances -> sessions
+    if "sessions" in data:
+        sessions = data["sessions"]
+        # Detect old format: sessions contain a key with "instances" sub-dict
+        for session_name, session_data in list(sessions.items()):
+            if isinstance(session_data, dict) and "instances" in session_data:
+                # Old format: flatten by lifting instances up
+                old_tmux_id = session_data.get("tmux_session_id")
+                for inst_name, inst_data in session_data["instances"].items():
+                    # Rename instance_path -> session_path if needed
+                    if "instance_path" in inst_data and "session_path" not in inst_data:
+                        inst_data["session_path"] = inst_data.pop("instance_path")
+                    sessions[inst_name] = inst_data
+                del sessions[session_name]
+                # Preserve tmux_session_id at top level
+                if old_tmux_id:
+                    data["tmux_session_id"] = old_tmux_id
+                break  # Only one old session ("default") expected
+
+    return data
 
 
 def _save_raw(state: dict):
@@ -43,8 +66,67 @@ def _save_raw(state: dict):
 
 # --- Session CRUD ---
 
-def get_session(session_name: str = DEFAULT_SESSION) -> Optional[Session]:
-    """Get a session from state.
+def add_session(
+    session_name: str,
+    repo_path: str,
+    session_path: str,
+    tmux_session_id: Optional[str] = None,
+    tmux_window_id: Optional[str] = None,
+    is_worktree: bool = True,
+    claude_session_id: Optional[str] = None,
+):
+    """Add a session to the state (can be main repo or worktree)."""
+    state = _load_raw()
+
+    if tmux_session_id:
+        state["tmux_session_id"] = tmux_session_id
+
+    sess_data = {
+        "repo_path": repo_path,
+        "session_path": session_path,
+        "is_worktree": is_worktree,
+        "tmux_window_id": tmux_window_id,
+    }
+    if claude_session_id:
+        sess_data["claude_session_id"] = claude_session_id
+
+    state["sessions"][session_name] = sess_data
+
+    _save_raw(state)
+
+
+def remove_session(session_name: str):
+    """Remove a session from the state."""
+    state = _load_raw()
+
+    sessions = state.get("sessions", {})
+    if session_name in sessions:
+        del sessions[session_name]
+
+    _save_raw(state)
+
+
+def update_tmux_ids(
+    session_name: str,
+    tmux_session_id: Optional[str] = None,
+    tmux_window_id: Optional[str] = None,
+):
+    """Update tmux IDs for a session."""
+    state = _load_raw()
+
+    if tmux_session_id:
+        state["tmux_session_id"] = tmux_session_id
+
+    sessions = state.get("sessions", {})
+    if session_name in sessions:
+        if tmux_window_id:
+            sessions[session_name]["tmux_window_id"] = tmux_window_id
+
+    _save_raw(state)
+
+
+def get_session(session_name: str) -> Optional[Session]:
+    """Get a specific session from state.
 
     Returns a Session object, or None if not found.
     """
@@ -55,198 +137,100 @@ def get_session(session_name: str = DEFAULT_SESSION) -> Optional[Session]:
     return Session.from_dict(session_name, raw)
 
 
-# --- Instance CRUD ---
+def get_all_sessions() -> list[Session]:
+    """Get all sessions.
 
-def add_instance(
-    instance_name: str,
-    repo_path: str,
-    instance_path: str,
-    session_name: str = DEFAULT_SESSION,
-    tmux_session_id: Optional[str] = None,
-    tmux_window_id: Optional[str] = None,
-    is_worktree: bool = True,
-    claude_session_id: Optional[str] = None,
-):
-    """Add an instance to the state (can be main repo or worktree)."""
-    state = _load_raw()
-
-    if session_name not in state["sessions"]:
-        state["sessions"][session_name] = {
-            "tmux_session_id": tmux_session_id,
-            "instances": {}
-        }
-
-    if tmux_session_id:
-        state["sessions"][session_name]["tmux_session_id"] = tmux_session_id
-
-    inst_data = {
-        "repo_path": repo_path,
-        "instance_path": instance_path,
-        "is_worktree": is_worktree,
-        "tmux_window_id": tmux_window_id,
-    }
-    if claude_session_id:
-        inst_data["claude_session_id"] = claude_session_id
-
-    state["sessions"][session_name]["instances"][instance_name] = inst_data
-
-    _save_raw(state)
-
-
-def remove_instance(instance_name: str, session_name: str = DEFAULT_SESSION):
-    """Remove an instance from the state."""
-    state = _load_raw()
-
-    if session_name in state["sessions"]:
-        instances = state["sessions"][session_name].get("instances", {})
-
-        if instance_name in instances:
-            del instances[instance_name]
-
-        if not instances:
-            del state["sessions"][session_name]
-
-    _save_raw(state)
-
-
-def update_tmux_ids(
-    instance_name: str,
-    session_name: str = DEFAULT_SESSION,
-    tmux_session_id: Optional[str] = None,
-    tmux_window_id: Optional[str] = None
-):
-    """Update tmux IDs for an instance."""
-    state = _load_raw()
-
-    if session_name not in state["sessions"]:
-        return
-
-    if tmux_session_id:
-        state["sessions"][session_name]["tmux_session_id"] = tmux_session_id
-
-    instances = state["sessions"][session_name].get("instances", {})
-
-    if instance_name in instances:
-        if tmux_window_id:
-            instances[instance_name]["tmux_window_id"] = tmux_window_id
-
-    _save_raw(state)
-
-
-def get_instance(instance_name: str, session_name: str = DEFAULT_SESSION) -> Optional[Instance]:
-    """Get a specific instance from state.
-
-    Returns an Instance object, or None if not found.
-    """
-    session = get_session(session_name)
-    if session:
-        return session.instances.get(instance_name)
-    return None
-
-
-def get_all_instances(session_name: str = DEFAULT_SESSION) -> list[Instance]:
-    """Get all instances in the default session.
-
-    Returns list of Instance objects with a 'session' attribute set.
+    Returns list of Session objects.
     """
     state = _load_raw()
-    instances_list = []
+    sessions_list = []
 
-    if session_name not in state["sessions"]:
-        return instances_list
+    for name, data in state.get("sessions", {}).items():
+        sess = Session.from_dict(name, data)
+        sessions_list.append(sess)
 
-    session = Session.from_dict(session_name, state["sessions"][session_name])
-    for inst in session.instances.values():
-        inst.session = session_name
-        instances_list.append(inst)
-
-    return instances_list
+    return sessions_list
 
 
-def find_instance_by_tmux_ids(tmux_session_id: str, tmux_window_id: str) -> Optional[tuple[str, str, Instance]]:
-    """Find an instance by its tmux session and window IDs.
+def find_session_by_tmux_ids(tmux_session_id: str, tmux_window_id: str) -> Optional[tuple[str, Session]]:
+    """Find a session by its tmux session and window IDs.
 
-    Returns: (session_name, instance_name, Instance) or None
+    Returns: (session_name, Session) or None
     """
     state = _load_raw()
 
-    for session_name, session_data in state["sessions"].items():
-        if session_data.get("tmux_session_id") == tmux_session_id:
-            session = Session.from_dict(session_name, session_data)
-            for instance_name, instance in session.instances.items():
-                if instance.tmux_window_id == tmux_window_id:
-                    return (session_name, instance_name, instance)
+    if state.get("tmux_session_id") != tmux_session_id:
+        return None
+
+    for name, data in state.get("sessions", {}).items():
+        sess = Session.from_dict(name, data)
+        if sess.tmux_window_id == tmux_window_id:
+            return (name, sess)
 
     return None
 
 
-def rename_instance(old_name: str, new_name: str, session_name: str = DEFAULT_SESSION) -> bool:
-    """Rename an instance within a session.
+def rename_session(old_name: str, new_name: str) -> bool:
+    """Rename a session.
 
-    Returns True if the rename succeeded, False if the instance was not found
-    or new_name already exists in the session.
+    Returns True if the rename succeeded, False if the session was not found
+    or new_name already exists.
     """
     s = _load_raw()
 
-    if session_name not in s["sessions"]:
+    sessions = s.get("sessions", {})
+
+    if old_name not in sessions:
+        return False
+    if new_name in sessions:
         return False
 
-    instances = s["sessions"][session_name].get("instances", {})
-
-    if old_name not in instances:
-        return False
-    if new_name in instances:
-        return False
-
-    instances[new_name] = instances.pop(old_name)
+    sessions[new_name] = sessions.pop(old_name)
 
     _save_raw(s)
     return True
 
 
-def update_instance(instance_name: str, session_name: str = DEFAULT_SESSION, **fields) -> bool:
-    """Update fields on an instance in state.
+def update_session(session_name: str, **fields) -> bool:
+    """Update fields on a session in state.
 
-    Returns True if the instance was found and updated, False otherwise.
+    Returns True if the session was found and updated, False otherwise.
     """
     s = _load_raw()
 
-    if session_name not in s["sessions"]:
+    sessions = s.get("sessions", {})
+
+    if session_name not in sessions:
         return False
 
-    instances = s["sessions"][session_name].get("instances", {})
-
-    if instance_name not in instances:
-        return False
-
-    instances[instance_name].update(fields)
+    sessions[session_name].update(fields)
     _save_raw(s)
     return True
 
 
-def find_main_repo_instance(repo_path: str, session_name: str = DEFAULT_SESSION) -> Optional[Instance]:
-    """Find if a main repo instance already exists for the given repository.
+def find_main_repo_session(repo_path: str) -> Optional[Session]:
+    """Find if a main repo session already exists for the given repository.
 
-    Returns the Instance if found, None otherwise.
+    Returns the Session if found, None otherwise.
     """
-    instances = get_all_instances(session_name)
-    for instance in instances:
-        if instance.repo_path == repo_path and not instance.is_worktree:
-            return instance
+    sessions = get_all_sessions()
+    for sess in sessions:
+        if sess.repo_path == repo_path and not sess.is_worktree:
+            return sess
     return None
 
 
-def find_instance_by_path(path: str, session_name: str = DEFAULT_SESSION) -> Optional[tuple[str, Instance]]:
-    """Find instance whose instance_path is a prefix of the given path.
-    Returns the most specific (longest) match: (instance_name, Instance) or None.
+def find_session_by_path(path: str) -> Optional[tuple[str, Session]]:
+    """Find session whose session_path is a prefix of the given path.
+    Returns the most specific (longest) match: (session_name, Session) or None.
     """
-    instances = get_all_instances(session_name)
-    best: Optional[tuple[str, Instance]] = None
+    sessions = get_all_sessions()
+    best: Optional[tuple[str, Session]] = None
     best_len = -1
-    for inst in instances:
-        ip = inst.instance_path.rstrip("/")
-        if path == ip or path.startswith(ip + "/"):
-            if len(ip) > best_len:
-                best_len = len(ip)
-                best = (inst.name, inst)
+    for sess in sessions:
+        sp = sess.session_path.rstrip("/")
+        if path == sp or path.startswith(sp + "/"):
+            if len(sp) > best_len:
+                best_len = len(sp)
+                best = (sess.name, sess)
     return best

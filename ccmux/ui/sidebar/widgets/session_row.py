@@ -1,4 +1,4 @@
-"""InstanceRow — four-line widget with tree characters, indicator, name, and git info."""
+"""SessionRow — four-line widget with tree characters, indicator, name, and git info."""
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -6,24 +6,22 @@ from textual.message import Message
 from textual.widgets import Static
 
 
-class InstanceRow(Vertical):
-    """A clickable 4-line row showing tree hierarchy, instance status, name, and git info."""
+class SessionRow(Vertical):
+    """A clickable 4-line row showing tree hierarchy, session status, name, and git info."""
 
     class Selected(Message):
-        """Posted when the user clicks an instance row."""
+        """Posted when the user clicks a session row."""
 
-        def __init__(self, instance_name: str, session: str) -> None:
+        def __init__(self, session_name: str) -> None:
             super().__init__()
-            self.instance_name = instance_name
-            self.session = session
+            self.session_name = session_name
 
     def __init__(
         self,
-        instance_name: str,
-        instance_type: str,
+        session_name: str,
+        session_type: str,
         is_active: bool,
         is_current: bool,
-        session: str,
         alert_state: str | None = None,
         is_last: bool = False,
         branch: str | None = None,
@@ -33,11 +31,10 @@ class InstanceRow(Vertical):
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.instance_name = instance_name
-        self.instance_type = instance_type
+        self.session_name = session_name
+        self.session_type = session_type
         self.is_active = is_active
         self.is_current = is_current
-        self.session = session
         self.alert_state = alert_state
         self.is_last = is_last
         self.branch = branch
@@ -60,7 +57,7 @@ class InstanceRow(Vertical):
         """Build the name text (without worktree suffix — that's a separate widget)."""
         indicator = "\u25cf" if self.is_active else "\u25cb"
         branch_char = self._tree_chars()[1]
-        return f"{branch_char}{indicator} {self.instance_name}"
+        return f"{branch_char}{indicator} {self.session_name}"
 
     def _format_branch_text(self) -> str:
         """Build the branch/ref portion of line3 with tree prefix (plain text, CSS colors)."""
@@ -84,7 +81,7 @@ class InstanceRow(Vertical):
         yield Static(top, classes="line1")
         with Horizontal(classes="line2"):
             yield Static(self._format_name_text(), classes="name")
-            if self.instance_type == "worktree":
+            if self.session_type == "worktree":
                 yield Static(" (worktree)", classes="worktree-suffix")
         with Horizontal(classes="line3"):
             yield Static(self._format_branch_text(), classes="branch")
@@ -168,5 +165,5 @@ class InstanceRow(Vertical):
         self._update_flash()
 
     async def on_click(self) -> None:
-        """Signal that this instance row was clicked."""
-        self.post_message(self.Selected(self.instance_name, self.session))
+        """Signal that this session row was clicked."""
+        self.post_message(self.Selected(self.session_name))

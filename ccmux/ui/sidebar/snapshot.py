@@ -7,13 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ccmux import state
+from ccmux.naming import INNER_SESSION
 
 
 @dataclass(frozen=True, slots=True)
-class InstanceSnapshot:
+class SessionSnapshot:
     repo_name: str
-    instance_name: str
-    instance_type: str
+    session_name: str
+    session_type: str
     is_active: bool
     is_current: bool
     alert_state: str | None
@@ -23,13 +24,13 @@ class InstanceSnapshot:
     lines_removed: int = 0
 
 
-def group_by_repo(snapshot: list[InstanceSnapshot]) -> dict[str, list[InstanceSnapshot]]:
+def group_by_repo(snapshot: list[SessionSnapshot]) -> dict[str, list[SessionSnapshot]]:
     """Group snapshot entries by repo name."""
-    repos: dict[str, list[InstanceSnapshot]] = {}
+    repos: dict[str, list[SessionSnapshot]] = {}
     for entry in snapshot:
         repos.setdefault(entry.repo_name, []).append(entry)
     for entries in repos.values():
-        entries.sort(key=lambda e: (e.instance_type != "main", e.instance_name))
+        entries.sort(key=lambda e: (e.session_type != "main", e.session_name))
     return repos
 
 
@@ -46,13 +47,12 @@ def resolve_alert_state(flags: dict[str, bool] | None) -> str | None:
     return None
 
 
-async def get_current_window_id(session_name: str) -> str | None:
+async def get_current_window_id() -> str | None:
     """Query the inner tmux session for the currently active window ID."""
-    inner = f"{session_name}-inner"
     try:
         result = await asyncio.to_thread(
             subprocess.run,
-            ["tmux", "display-message", "-t", inner, "-p", "#{window_id}"],
+            ["tmux", "display-message", "-t", INNER_SESSION, "-p", "#{window_id}"],
             capture_output=True,
             text=True,
             check=True,
@@ -62,28 +62,25 @@ async def get_current_window_id(session_name: str) -> str | None:
         return None
 
 
-async def get_current_instance_name(session_name: str) -> str | None:
-    """Resolve the current instance name by dynamically finding our window."""
-    window_id = await get_current_window_id(session_name)
+async def get_current_session_name() -> str | None:
+    """Resolve the current session name by dynamically finding our window."""
+    window_id = await get_current_window_id()
     if not window_id:
         return None
-    session_obj = state.get_session(session_name)
-    if not session_obj:
-        return None
-    for inst_name, inst in session_obj.instances.items():
-        if inst.tmux_window_id == window_id:
-            return inst_name
+    sessions = state.get_all_sessions()
+    for sess in sessions:
+        if sess.tmux_window_id == window_id:
+            return sess.name
     return None
 
 
-async def get_tmux_window_flags(session_name: str) -> dict[str, dict[str, bool]]:
+async def get_tmux_window_flags() -> dict[str, dict[str, bool]]:
     """Get window IDs and their bell/activity/silence flags from inner session."""
-    inner = f"{session_name}-inner"
     fmt = "#{window_id}|#{@ccmux_bell}|#{window_activity_flag}|#{window_silence_flag}"
     try:
         result = await asyncio.to_thread(
             subprocess.run,
-            ["tmux", "list-windows", "-t", inner, "-F", fmt],
+            ["tmux", "list-windows", "-t", INNER_SESSION, "-F", fmt],
             capture_output=True,
             text=True,
             check=True,
@@ -105,8 +102,8 @@ async def get_tmux_window_flags(session_name: str) -> dict[str, dict[str, bool]]
         return {}
 
 
-async def get_git_info(instance_path: str) -> tuple[str | None, str, int, int]:
-    """Get git branch, short SHA, and diff stats for an instance path.
+async def get_git_info(session_path: str) -> tuple[str | None, str, int, int]:
+    """Get git branch, short SHA, and diff stats for a session path.
 
     Returns (branch, short_sha, lines_added, lines_removed).
     branch is None when in detached HEAD state.
@@ -117,7 +114,7 @@ async def get_git_info(instance_path: str) -> tuple[str | None, str, int, int]:
         branch_result = await asyncio.wait_for(
             asyncio.to_thread(
                 subprocess.run,
-                ["git", "-C", instance_path, "rev-parse", "--abbrev-ref", "HEAD"],
+                ["git", "-C", session_path, "rev-parse", "--abbrev-ref", "HEAD"],
                 capture_output=True, text=True, check=True,
             ),
             timeout=5,
@@ -131,7 +128,7 @@ async def get_git_info(instance_path: str) -> tuple[str | None, str, int, int]:
         sha_result = await asyncio.wait_for(
             asyncio.to_thread(
                 subprocess.run,
-                ["git", "-C", instance_path, "rev-parse", "--short", "HEAD"],
+                ["git", "-C", session_path, "rev-parse", "--short", "HEAD"],
                 capture_output=True, text=True, check=True,
             ),
             timeout=5,
@@ -145,7 +142,7 @@ async def get_git_info(instance_path: str) -> tuple[str | None, str, int, int]:
         diff_result = await asyncio.wait_for(
             asyncio.to_thread(
                 subprocess.run,
-                ["git", "-C", instance_path, "diff", "HEAD", "--shortstat"],
+                ["git", "-C", session_path, "diff", "HEAD", "--shortstat"],
                 capture_output=True, text=True, check=True,
             ),
             timeout=5,
@@ -163,35 +160,35 @@ async def get_git_info(instance_path: str) -> tuple[str | None, str, int, int]:
     return branch, short_sha, added, removed
 
 
-async def build_snapshot(session_name: str) -> list[InstanceSnapshot]:
-    """Build a comparable snapshot of the current instance state."""
-    instances = state.get_all_instances(session_name)
-    if not instances:
+async def build_snapshot() -> list[SessionSnapshot]:
+    """Build a comparable snapshot of the current session state."""
+    sessions = state.get_all_sessions()
+    if not sessions:
         return []
 
-    window_flags_task = get_tmux_window_flags(session_name)
-    current_instance_task = get_current_instance_name(session_name)
-    git_tasks = [get_git_info(inst.instance_path) for inst in instances]
+    window_flags_task = get_tmux_window_flags()
+    current_session_task = get_current_session_name()
+    git_tasks = [get_git_info(sess.session_path) for sess in sessions]
 
     results = await asyncio.gather(
-        window_flags_task, current_instance_task, *git_tasks,
+        window_flags_task, current_session_task, *git_tasks,
     )
     window_flags = results[0]
-    current_instance = results[1]
+    current_session = results[1]
     git_infos = results[2:]
 
     snapshot = []
-    for inst, (branch, short_sha, added, removed) in zip(instances, git_infos):
-        repo_name = Path(inst.repo_path).name
-        wid = inst.tmux_window_id
+    for sess, (branch, short_sha, added, removed) in zip(sessions, git_infos):
+        repo_name = Path(sess.repo_path).name
+        wid = sess.tmux_window_id
         is_active = wid in window_flags
-        is_current = inst.name == current_instance
-        inst_type = inst.instance_type
+        is_current = sess.name == current_session
+        sess_type = sess.session_type
         alert_state = resolve_alert_state(window_flags.get(wid))
-        snapshot.append(InstanceSnapshot(
+        snapshot.append(SessionSnapshot(
             repo_name=repo_name,
-            instance_name=inst.name,
-            instance_type=inst_type,
+            session_name=sess.name,
+            session_type=sess_type,
             is_active=is_active,
             is_current=is_current,
             alert_state=alert_state,

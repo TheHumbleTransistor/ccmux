@@ -2,9 +2,9 @@
 
 from ccmux.ui.sidebar import (  # noqa: F401
     SIDEBAR_PIDS_DIR,
-    InstanceRow,
+    SessionRow,
     RepoHeader,
-    RepoInstancesList,
+    RepoSessionsList,
     SidebarApp,
     remove_pid_file,
     write_pid_file,

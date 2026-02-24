@@ -32,12 +32,8 @@ def test_load_raw_empty(temp_state_dir):
 def test_save_and_load_raw(temp_state_dir):
     """Test saving and loading raw state."""
     test_state = {
-        "sessions": {
-            "default": {
-                "tmux_session_id": "$0",
-                "instances": {}
-            }
-        },
+        "tmux_session_id": "$0",
+        "sessions": {},
     }
 
     state_store._save_raw(test_state)
@@ -46,216 +42,177 @@ def test_save_and_load_raw(temp_state_dir):
     assert loaded == test_state
 
 
-def test_add_instance(temp_state_dir):
-    """Test adding an instance to state."""
-    state.add_instance(
-        instance_name="feature-x",
+def test_add_session(temp_state_dir):
+    """Test adding a session to state."""
+    state.add_session(
+        session_name="feature-x",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.worktrees/feature-x",
         tmux_session_id="$0",
         tmux_window_id="@1"
     )
 
     loaded = state_store._load_raw()
-    assert "default" in loaded["sessions"]
-    assert "feature-x" in loaded["sessions"]["default"]["instances"]
+    assert "feature-x" in loaded["sessions"]
 
-    wt = loaded["sessions"]["default"]["instances"]["feature-x"]
-    assert wt["repo_path"] == "/repo"
-    assert wt["instance_path"] == "/repo/.worktrees/feature-x"
-    assert wt["tmux_window_id"] == "@1"
-    assert loaded["sessions"]["default"]["tmux_session_id"] == "$0"
+    sess = loaded["sessions"]["feature-x"]
+    assert sess["repo_path"] == "/repo"
+    assert sess["session_path"] == "/repo/.worktrees/feature-x"
+    assert sess["tmux_window_id"] == "@1"
+    assert loaded["tmux_session_id"] == "$0"
 
 
-def test_remove_instance(temp_state_dir):
-    """Test removing an instance from state."""
-    state.add_instance(
-        instance_name="feature-x",
+def test_remove_session(temp_state_dir):
+    """Test removing a session from state."""
+    state.add_session(
+        session_name="feature-x",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/feature-x"
+        session_path="/repo/.worktrees/feature-x"
     )
 
-    state.remove_instance("feature-x")
+    state.remove_session("feature-x")
 
     loaded = state_store._load_raw()
-    assert "default" not in loaded["sessions"]
+    assert "feature-x" not in loaded["sessions"]
 
 
-def test_remove_instance_keeps_session_with_other_instances(temp_state_dir):
-    """Test that removing an instance keeps the session if other instances exist."""
-    state.add_instance(
-        instance_name="feature-x",
+def test_remove_session_keeps_other_sessions(temp_state_dir):
+    """Test that removing a session keeps other sessions."""
+    state.add_session(
+        session_name="feature-x",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/feature-x"
+        session_path="/repo/.worktrees/feature-x"
     )
-    state.add_instance(
-        instance_name="feature-y",
+    state.add_session(
+        session_name="feature-y",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/feature-y"
+        session_path="/repo/.worktrees/feature-y"
     )
 
-    state.remove_instance("feature-x")
+    state.remove_session("feature-x")
 
     loaded = state_store._load_raw()
-    assert "default" in loaded["sessions"]
-    assert "feature-x" not in loaded["sessions"]["default"]["instances"]
-    assert "feature-y" in loaded["sessions"]["default"]["instances"]
+    assert "feature-x" not in loaded["sessions"]
+    assert "feature-y" in loaded["sessions"]
 
 
 def test_update_tmux_ids(temp_state_dir):
-    """Test updating tmux IDs for an instance."""
-    state.add_instance(
-        instance_name="feature-x",
+    """Test updating tmux IDs for a session."""
+    state.add_session(
+        session_name="feature-x",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.worktrees/feature-x",
         tmux_session_id="$0",
         tmux_window_id="@1"
     )
 
     state.update_tmux_ids(
-        instance_name="feature-x",
+        session_name="feature-x",
         tmux_session_id="$1",
         tmux_window_id="@2"
     )
 
     loaded = state_store._load_raw()
-    assert loaded["sessions"]["default"]["tmux_session_id"] == "$1"
-    assert loaded["sessions"]["default"]["instances"]["feature-x"]["tmux_window_id"] == "@2"
+    assert loaded["tmux_session_id"] == "$1"
+    assert loaded["sessions"]["feature-x"]["tmux_window_id"] == "@2"
 
 
 def test_get_session(temp_state_dir):
     """Test getting a session from state."""
-    state.add_instance(
-        instance_name="feature-x",
+    state.add_session(
+        session_name="feature-x",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/feature-x"
+        session_path="/repo/.worktrees/feature-x"
     )
 
-    session = state.get_session()
+    session = state.get_session("feature-x")
     assert session is not None
-    assert "feature-x" in session.instances
-    assert session.instances["feature-x"].repo_path == "/repo"
+    assert session.repo_path == "/repo"
 
     assert state.get_session("non-existent") is None
 
 
-def test_get_instance(temp_state_dir):
-    """Test getting a specific instance from state."""
-    state.add_instance(
-        instance_name="feature-x",
-        repo_path="/repo",
-        instance_path="/repo/.worktrees/feature-x"
-    )
-
-    inst = state.get_instance("feature-x")
-    assert inst is not None
-    assert inst.repo_path == "/repo"
-
-    assert state.get_instance("non-existent") is None
-
-
-def test_find_instance_by_tmux_ids(temp_state_dir):
-    """Test finding an instance by tmux IDs."""
-    state.add_instance(
-        instance_name="feature-x",
-        repo_path="/repo",
-        instance_path="/repo/.worktrees/feature-x",
-        tmux_session_id="$0",
-        tmux_window_id="@1"
-    )
-
-    result = state.find_instance_by_tmux_ids("$0", "@1")
-    assert result is not None
-    session_name, instance_name, instance = result
-    assert session_name == "default"
-    assert instance_name == "feature-x"
-    assert instance.repo_path == "/repo"
-
-    assert state.find_instance_by_tmux_ids("$999", "@999") is None
-
-
-def test_get_all_instances(temp_state_dir):
-    """Test getting all instances from the default session."""
-    state.add_instance(
-        instance_name="feature-x",
+def test_get_all_sessions(temp_state_dir):
+    """Test getting all sessions."""
+    state.add_session(
+        session_name="feature-x",
         repo_path="/repo1",
-        instance_path="/repo1/.worktrees/feature-x",
+        session_path="/repo1/.worktrees/feature-x",
         tmux_window_id="@1"
     )
-    state.add_instance(
-        instance_name="feature-y",
+    state.add_session(
+        session_name="feature-y",
         repo_path="/repo2",
-        instance_path="/repo2/.worktrees/feature-y",
+        session_path="/repo2/.worktrees/feature-y",
         tmux_window_id="@2"
     )
 
-    all_insts = state.get_all_instances()
-    assert len(all_insts) == 2
-    assert any(inst.name == "feature-x" for inst in all_insts)
-    assert any(inst.name == "feature-y" for inst in all_insts)
+    all_sessions = state.get_all_sessions()
+    assert len(all_sessions) == 2
+    assert any(sess.name == "feature-x" for sess in all_sessions)
+    assert any(sess.name == "feature-y" for sess in all_sessions)
 
 
-def test_update_instance(temp_state_dir):
-    """Test updating instance fields."""
-    state.add_instance(
-        instance_name="feature-x",
+def test_update_session(temp_state_dir):
+    """Test updating session fields."""
+    state.add_session(
+        session_name="feature-x",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.worktrees/feature-x",
     )
 
-    assert state.update_instance("feature-x", instance_path="/new/path")
+    assert state.update_session("feature-x", session_path="/new/path")
 
-    inst = state.get_instance("feature-x")
-    assert inst.instance_path == "/new/path"
+    sess = state.get_session("feature-x")
+    assert sess.session_path == "/new/path"
 
-    assert not state.update_instance("nonexistent", instance_path="/x")
+    assert not state.update_session("nonexistent", session_path="/x")
 
 
-def test_rename_instance(temp_state_dir):
-    """Test renaming an instance within a session."""
-    state.add_instance(
-        instance_name="old-name",
+def test_rename_session(temp_state_dir):
+    """Test renaming a session."""
+    state.add_session(
+        session_name="old-name",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/old-name",
+        session_path="/repo/.worktrees/old-name",
         tmux_window_id="@1",
     )
 
-    assert state.rename_instance("old-name", "new-name")
+    assert state.rename_session("old-name", "new-name")
 
     loaded = state_store._load_raw()
-    instances = loaded["sessions"]["default"]["instances"]
-    assert "old-name" not in instances
-    assert "new-name" in instances
-    assert instances["new-name"]["repo_path"] == "/repo"
-    assert instances["new-name"]["tmux_window_id"] == "@1"
+    sessions = loaded["sessions"]
+    assert "old-name" not in sessions
+    assert "new-name" in sessions
+    assert sessions["new-name"]["repo_path"] == "/repo"
+    assert sessions["new-name"]["tmux_window_id"] == "@1"
 
 
-def test_rename_instance_conflict(temp_state_dir):
-    """Test renaming an instance to a name that already exists fails."""
-    state.add_instance(
-        instance_name="inst-a",
+def test_rename_session_conflict(temp_state_dir):
+    """Test renaming a session to a name that already exists fails."""
+    state.add_session(
+        session_name="sess-a",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/a",
+        session_path="/repo/.worktrees/a",
     )
-    state.add_instance(
-        instance_name="inst-b",
+    state.add_session(
+        session_name="sess-b",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/b",
-    )
-
-    assert not state.rename_instance("inst-a", "inst-b")
-
-
-def test_rename_instance_not_found(temp_state_dir):
-    """Test renaming a non-existent instance returns False."""
-    state.add_instance(
-        instance_name="inst-a",
-        repo_path="/repo",
-        instance_path="/repo/.worktrees/a",
+        session_path="/repo/.worktrees/b",
     )
 
-    assert not state.rename_instance("non-existent", "new-name")
-    assert not state.rename_instance("inst-a", "new-name", session_name="non-existent-session")
+    assert not state.rename_session("sess-a", "sess-b")
+
+
+def test_rename_session_not_found(temp_state_dir):
+    """Test renaming a non-existent session returns False."""
+    state.add_session(
+        session_name="sess-a",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/a",
+    )
+
+    assert not state.rename_session("non-existent", "new-name")
 
 
 def test_corrupted_state_file(temp_state_dir):
@@ -269,241 +226,285 @@ def test_corrupted_state_file(temp_state_dir):
     }
 
 
-def test_instance_from_dict_worktree(temp_state_dir):
-    """Test Instance.from_dict creates WorktreeInstance."""
-    inst = state.Instance.from_dict("test", {
+def test_session_from_dict_worktree(temp_state_dir):
+    """Test Session.from_dict creates WorktreeSession."""
+    sess = state.Session.from_dict("test", {
+        "repo_path": "/repo",
+        "session_path": "/repo/.worktrees/test",
+        "is_worktree": True,
+    })
+    assert sess.session_path == "/repo/.worktrees/test"
+    assert sess.is_worktree is True
+    assert isinstance(sess, state.WorktreeSession)
+
+
+def test_session_from_dict_main_repo(temp_state_dir):
+    """Test Session.from_dict creates MainRepoSession when is_worktree=False."""
+    sess = state.Session.from_dict("main", {
+        "repo_path": "/repo",
+        "session_path": "/repo",
+        "is_worktree": False,
+    })
+    assert sess.is_worktree is False
+    assert sess.session_type == "main"
+    assert isinstance(sess, state.MainRepoSession)
+
+
+def test_session_from_dict_compat_instance_path(temp_state_dir):
+    """Test Session.from_dict reads legacy instance_path field."""
+    sess = state.Session.from_dict("test", {
         "repo_path": "/repo",
         "instance_path": "/repo/.worktrees/test",
         "is_worktree": True,
     })
-    assert inst.instance_path == "/repo/.worktrees/test"
-    assert inst.is_worktree is True
-    assert isinstance(inst, state.WorktreeInstance)
+    assert sess.session_path == "/repo/.worktrees/test"
 
 
-def test_instance_from_dict_main_repo(temp_state_dir):
-    """Test Instance.from_dict creates MainRepoInstance when is_worktree=False."""
-    inst = state.Instance.from_dict("main", {
-        "repo_path": "/repo",
-        "instance_path": "/repo",
-        "is_worktree": False,
-    })
-    assert inst.is_worktree is False
-    assert inst.instance_type == "main"
-    assert isinstance(inst, state.MainRepoInstance)
-
-
-def test_session_from_dict(temp_state_dir):
-    """Test Session.from_dict constructs correctly."""
-    session = state.Session.from_dict("test", {
-        "tmux_session_id": "$0",
-        "instances": {
-            "fox": {
-                "repo_path": "/repo",
-                "instance_path": "/repo/.worktrees/fox",
-                "is_worktree": True,
-            }
-        }
-    })
-    assert "fox" in session.instances
-    assert session.instances["fox"].instance_path == "/repo/.worktrees/fox"
-
-
-def test_find_main_repo_instance(temp_state_dir):
-    """Test finding a main repo instance."""
-    state.add_instance(
-        instance_name="main-inst",
+def test_find_main_repo_session(temp_state_dir):
+    """Test finding a main repo session."""
+    state.add_session(
+        session_name="main-sess",
         repo_path="/repo",
-        instance_path="/repo",
+        session_path="/repo",
         is_worktree=False,
     )
-    state.add_instance(
-        instance_name="wt-inst",
+    state.add_session(
+        session_name="wt-sess",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/wt-inst",
+        session_path="/repo/.worktrees/wt-sess",
         is_worktree=True,
     )
 
-    result = state.find_main_repo_instance("/repo")
+    result = state.find_main_repo_session("/repo")
     assert result is not None
-    assert result.name == "main-inst"
+    assert result.name == "main-sess"
     assert result.is_worktree is False
 
-    assert state.find_main_repo_instance("/other-repo") is None
+    assert state.find_main_repo_session("/other-repo") is None
 
 
-# --- find_instance_by_path tests ---
+# --- find_session_by_path tests ---
 
-def test_find_instance_by_path_exact(temp_state_dir):
-    """Test exact path match returns the instance."""
-    state.add_instance(
-        instance_name="fox",
+def test_find_session_by_path_exact(temp_state_dir):
+    """Test exact path match returns the session."""
+    state.add_session(
+        session_name="fox",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/fox",
+        session_path="/repo/.worktrees/fox",
         is_worktree=True,
     )
-    result = state.find_instance_by_path("/repo/.worktrees/fox")
+    result = state.find_session_by_path("/repo/.worktrees/fox")
     assert result is not None
     assert result[0] == "fox"
 
 
-def test_find_instance_by_path_subdirectory(temp_state_dir):
-    """Test subdirectory of instance_path matches."""
-    state.add_instance(
-        instance_name="fox",
+def test_find_session_by_path_subdirectory(temp_state_dir):
+    """Test subdirectory of session_path matches."""
+    state.add_session(
+        session_name="fox",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/fox",
+        session_path="/repo/.worktrees/fox",
         is_worktree=True,
     )
-    result = state.find_instance_by_path("/repo/.worktrees/fox/src/main.py")
+    result = state.find_session_by_path("/repo/.worktrees/fox/src/main.py")
     assert result is not None
     assert result[0] == "fox"
 
 
-def test_find_instance_by_path_longest_prefix(temp_state_dir):
+def test_find_session_by_path_longest_prefix(temp_state_dir):
     """Test longest-prefix disambiguation: worktree wins over main repo."""
-    state.add_instance(
-        instance_name="main-inst",
+    state.add_session(
+        session_name="main-sess",
         repo_path="/repo",
-        instance_path="/repo",
+        session_path="/repo",
         is_worktree=False,
     )
-    state.add_instance(
-        instance_name="fox",
+    state.add_session(
+        session_name="fox",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/fox",
+        session_path="/repo/.worktrees/fox",
         is_worktree=True,
     )
-    result = state.find_instance_by_path("/repo/.worktrees/fox/src")
+    result = state.find_session_by_path("/repo/.worktrees/fox/src")
     assert result is not None
     assert result[0] == "fox"
 
 
-def test_find_instance_by_path_no_match(temp_state_dir):
+def test_find_session_by_path_no_match(temp_state_dir):
     """Test no match returns None."""
-    state.add_instance(
-        instance_name="fox",
+    state.add_session(
+        session_name="fox",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/fox",
+        session_path="/repo/.worktrees/fox",
         is_worktree=True,
     )
-    result = state.find_instance_by_path("/other/path")
+    result = state.find_session_by_path("/other/path")
     assert result is None
 
 
-def test_find_instance_by_path_no_false_prefix(temp_state_dir):
+def test_find_session_by_path_no_false_prefix(temp_state_dir):
     """Test /repo doesn't false-match /repo2."""
-    state.add_instance(
-        instance_name="main-inst",
+    state.add_session(
+        session_name="main-sess",
         repo_path="/repo",
-        instance_path="/repo",
+        session_path="/repo",
         is_worktree=False,
     )
-    result = state.find_instance_by_path("/repo2/somefile")
+    result = state.find_session_by_path("/repo2/somefile")
     assert result is None
 
 
 # --- claude_session_id tests ---
 
-def test_add_instance_with_claude_session_id(temp_state_dir):
-    """Test adding an instance with claude_session_id."""
-    state.add_instance(
-        instance_name="feature-x",
+def test_add_session_with_claude_session_id(temp_state_dir):
+    """Test adding a session with claude_session_id."""
+    state.add_session(
+        session_name="feature-x",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.worktrees/feature-x",
         claude_session_id="abc-123",
     )
 
     loaded = state_store._load_raw()
-    inst = loaded["sessions"]["default"]["instances"]["feature-x"]
-    assert inst["claude_session_id"] == "abc-123"
+    sess = loaded["sessions"]["feature-x"]
+    assert sess["claude_session_id"] == "abc-123"
 
 
-def test_add_instance_without_claude_session_id(temp_state_dir):
-    """Test adding an instance without claude_session_id omits the field."""
-    state.add_instance(
-        instance_name="feature-x",
+def test_add_session_without_claude_session_id(temp_state_dir):
+    """Test adding a session without claude_session_id omits the field."""
+    state.add_session(
+        session_name="feature-x",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.worktrees/feature-x",
     )
 
     loaded = state_store._load_raw()
-    inst = loaded["sessions"]["default"]["instances"]["feature-x"]
-    assert "claude_session_id" not in inst
+    sess = loaded["sessions"]["feature-x"]
+    assert "claude_session_id" not in sess
 
 
 def test_claude_session_id_from_dict_present(temp_state_dir):
-    """Test Instance.from_dict picks up claude_session_id when present."""
-    inst = state.Instance.from_dict("test", {
+    """Test Session.from_dict picks up claude_session_id when present."""
+    sess = state.Session.from_dict("test", {
         "repo_path": "/repo",
-        "instance_path": "/repo/.worktrees/test",
+        "session_path": "/repo/.worktrees/test",
         "is_worktree": True,
         "claude_session_id": "sess-456",
     })
-    assert inst.claude_session_id == "sess-456"
+    assert sess.claude_session_id == "sess-456"
 
 
 def test_claude_session_id_from_dict_missing(temp_state_dir):
-    """Test Instance.from_dict defaults claude_session_id to None for legacy data."""
-    inst = state.Instance.from_dict("test", {
+    """Test Session.from_dict defaults claude_session_id to None for legacy data."""
+    sess = state.Session.from_dict("test", {
         "repo_path": "/repo",
-        "instance_path": "/repo/.worktrees/test",
+        "session_path": "/repo/.worktrees/test",
         "is_worktree": True,
     })
-    assert inst.claude_session_id is None
+    assert sess.claude_session_id is None
 
 
 def test_claude_session_id_to_dict(temp_state_dir):
-    """Test Instance.to_dict includes claude_session_id when set."""
-    inst = state.WorktreeInstance(
+    """Test Session.to_dict includes claude_session_id when set."""
+    sess = state.WorktreeSession(
         name="test",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/test",
+        session_path="/repo/.worktrees/test",
         claude_session_id="sess-789",
     )
-    d = inst.to_dict()
+    d = sess.to_dict()
     assert d["claude_session_id"] == "sess-789"
 
 
 def test_claude_session_id_to_dict_none(temp_state_dir):
-    """Test Instance.to_dict omits claude_session_id when None."""
-    inst = state.WorktreeInstance(
+    """Test Session.to_dict omits claude_session_id when None."""
+    sess = state.WorktreeSession(
         name="test",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/test",
+        session_path="/repo/.worktrees/test",
     )
-    d = inst.to_dict()
+    d = sess.to_dict()
     assert "claude_session_id" not in d
 
 
-def test_update_instance_claude_session_id(temp_state_dir):
-    """Test updating claude_session_id via update_instance."""
-    state.add_instance(
-        instance_name="feature-x",
+def test_update_session_claude_session_id(temp_state_dir):
+    """Test updating claude_session_id via update_session."""
+    state.add_session(
+        session_name="feature-x",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.worktrees/feature-x",
     )
 
-    state.update_instance("feature-x", claude_session_id="new-sess-id")
+    state.update_session("feature-x", claude_session_id="new-sess-id")
 
     loaded = state_store._load_raw()
-    inst = loaded["sessions"]["default"]["instances"]["feature-x"]
-    assert inst["claude_session_id"] == "new-sess-id"
+    sess = loaded["sessions"]["feature-x"]
+    assert sess["claude_session_id"] == "new-sess-id"
 
 
 def test_rename_preserves_claude_session_id(temp_state_dir):
-    """Test that renaming an instance preserves claude_session_id."""
-    state.add_instance(
-        instance_name="old-name",
+    """Test that renaming a session preserves claude_session_id."""
+    state.add_session(
+        session_name="old-name",
         repo_path="/repo",
-        instance_path="/repo/.worktrees/old-name",
+        session_path="/repo/.worktrees/old-name",
         claude_session_id="preserved-id",
     )
 
-    assert state.rename_instance("old-name", "new-name")
+    assert state.rename_session("old-name", "new-name")
 
     loaded = state_store._load_raw()
-    instances = loaded["sessions"]["default"]["instances"]
-    assert "old-name" not in instances
-    assert "new-name" in instances
-    assert instances["new-name"]["claude_session_id"] == "preserved-id"
+    sessions = loaded["sessions"]
+    assert "old-name" not in sessions
+    assert "new-name" in sessions
+    assert sessions["new-name"]["claude_session_id"] == "preserved-id"
+
+
+# --- Migration tests ---
+
+def test_migrate_old_nested_format(temp_state_dir):
+    """Test that old nested format (sessions.default.instances) is migrated on read."""
+    old_state = {
+        "sessions": {
+            "default": {
+                "tmux_session_id": "$0",
+                "instances": {
+                    "fox": {
+                        "repo_path": "/repo",
+                        "instance_path": "/repo/.worktrees/fox",
+                        "is_worktree": True,
+                        "tmux_window_id": "@1",
+                    }
+                }
+            }
+        }
+    }
+    state_file = temp_state_dir / "state.json"
+    with open(state_file, 'w') as f:
+        json.dump(old_state, f)
+
+    loaded = state_store._load_raw()
+    # Should be flattened: fox at top-level sessions, no "default" key
+    assert "default" not in loaded["sessions"]
+    assert "fox" in loaded["sessions"]
+    assert loaded["sessions"]["fox"]["session_path"] == "/repo/.worktrees/fox"
+    assert loaded["tmux_session_id"] == "$0"
+
+
+def test_find_session_by_tmux_ids(temp_state_dir):
+    """Test finding a session by tmux IDs."""
+    state.add_session(
+        session_name="feature-x",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/feature-x",
+        tmux_session_id="$0",
+        tmux_window_id="@1"
+    )
+
+    result = state.find_session_by_tmux_ids("$0", "@1")
+    assert result is not None
+    session_name, session = result
+    assert session_name == "feature-x"
+    assert session.repo_path == "/repo"
+
+    assert state.find_session_by_tmux_ids("$999", "@999") is None

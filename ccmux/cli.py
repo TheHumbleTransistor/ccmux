@@ -1,71 +1,71 @@
 #!/usr/bin/env python3
-"""Claude Code Multiplexer CLI - Manage multiple Claude Code instances."""
+"""Claude Code Multiplexer CLI - Manage multiple Claude Code sessions."""
 
 from typing import Annotated, Optional
 
 import cyclopts
 from cyclopts import Parameter
 
-from ccmux.instance_ops import (
+from ccmux.session_ops import (
     do_attach,
     do_detach,
-    do_instance_activate,
-    do_instance_deactivate,
-    do_instance_info,
-    do_instance_list,
-    do_instance_new,
-    do_instance_remove,
-    do_instance_rename,
-    do_instance_which,
+    do_session_activate,
+    do_session_deactivate,
+    do_session_info,
     do_session_kill,
+    do_session_list,
+    do_session_new,
+    do_session_remove,
+    do_session_rename,
+    do_session_which,
 )
 from ccmux.session_layout import do_debug_sidebar
 from ccmux.display import console
 
 app = cyclopts.App(
     name="ccmux",
-    help="Claude Code Multiplexer - Manage multiple Claude Code instances.",
+    help="Claude Code Multiplexer - Manage multiple Claude Code sessions.",
 )
 
 
 @app.default
-def instance_info() -> None:
-    """Show current instance info, or auto-attach/create if in a git repo."""
-    result = do_instance_info()
+def session_info() -> None:
+    """Show current session info, or auto-attach/create if in a git repo."""
+    result = do_session_info()
     if result is None:
         app.help_print([])
 
 
 @app.command(name="which")
-def instance_which() -> None:
-    """Print the current instance name (useful for scripting)."""
-    do_instance_which()
+def session_which() -> None:
+    """Print the current session name (useful for scripting)."""
+    do_session_which()
 
 
 @app.command(name="new")
-def instance_new(
+def session_new(
     name: Optional[str] = None,
     *,
     worktree: Annotated[bool, Parameter(name=["-w", "--worktree"])] = False,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
-    """Create a new Claude Code instance in main repo or as a git worktree."""
-    do_instance_new(name=name, worktree=worktree, yes=yes)
+    """Create a new Claude Code session in main repo or as a git worktree."""
+    do_session_new(name=name, worktree=worktree, yes=yes)
 
 
 @app.command(name="list")
-def instance_list() -> None:
-    """List all instances and their tmux session status."""
-    do_instance_list()
+def session_list() -> None:
+    """List all sessions and their tmux session status."""
+    do_session_list()
 
 
 @app.command(name="rename")
-def instance_rename(
+def session_rename(
     old: Optional[str] = None,
     new: Optional[str] = None,
 ) -> None:
-    """Rename a ccmux instance."""
-    do_instance_rename(old=old, new=new)
+    """Rename a ccmux session."""
+    do_session_rename(old=old, new=new)
 
 
 @app.command(name="attach")
@@ -75,23 +75,23 @@ def attach() -> None:
 
 
 @app.command(name="activate")
-def instance_activate(
+def session_activate(
     name: Optional[str] = None,
     *,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
-    """Activate Claude Code in an instance (useful if tmux window was closed)."""
-    do_instance_activate(name=name, yes=yes)
+    """Activate Claude Code in a session (useful if tmux window was closed)."""
+    do_session_activate(name=name, yes=yes)
 
 
 @app.command(name="deactivate")
-def instance_deactivate(
+def session_deactivate(
     name: Optional[str] = None,
     *,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
-    """Deactivate Claude Code instance(s) by killing tmux window (keeps instance)."""
-    do_instance_deactivate(name=name, yes=yes)
+    """Deactivate Claude Code session(s) by killing tmux window (keeps session)."""
+    do_session_deactivate(name=name, yes=yes)
 
 
 @app.command(name="kill")
@@ -104,14 +104,14 @@ def session_kill(
 
 
 @app.command(name="remove")
-def instance_remove(
+def session_remove(
     name: Optional[str] = None,
     *,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
-    all_instances: Annotated[bool, Parameter(name=["--all"], negative="")] = False,
+    all_sessions: Annotated[bool, Parameter(name=["--all"], negative="")] = False,
 ) -> None:
-    """Remove instance(s) permanently (deactivates and deletes worktree)."""
-    do_instance_remove(name=name, yes=yes, all_instances=all_instances)
+    """Remove session(s) permanently (deactivates and deletes worktree)."""
+    do_session_remove(name=name, yes=yes, all_sessions=all_sessions)
 
 
 @app.command(name="detach")
