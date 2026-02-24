@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ccmux"
-version = "0.0.0"
+version = "0.1.0"
 description = "Claude Code Multiplexer - Manage multiple Claude Code instances"
 readme = "README.md"
 requires-python = ">=3.8"

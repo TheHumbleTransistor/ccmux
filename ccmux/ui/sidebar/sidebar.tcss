@@ -80,7 +80,7 @@ SessionRow:hover {
 }
 
 SessionRow.current {
-    background: #585858;
+    background: #4a4a4a;
     color: #bcbcbc;
     text-style: bold;
 }
@@ -113,7 +113,7 @@ SessionRow.current.bell.bell-flash {
 
 /* Activity on current instance: suppress, show neutral gray */
 SessionRow.current.activity {
-    background: #585858;
+    background: #4a4a4a;
 }
 
 /* RepoHeader */
