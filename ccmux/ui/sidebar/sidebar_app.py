@@ -229,11 +229,20 @@ class SidebarApp(App):
 
     async def on_session_row_selected(self, message: SessionRow.Selected) -> None:
         """Switch to the clicked session's tmux window and clear bell alert."""
-        # Auto-reactivate deactivated sessions on click
+        target = f"{INNER_SESSION}:{message.session_name}"
+
+        # Try switching directly first — works when the window still exists.
         try:
-            row = self.query_one(f"#sess-{message.session_name}", SessionRow)
-            if not row.is_active:
-                log.debug("auto-activating inactive session %s", message.session_name)
+            await asyncio.to_thread(
+                subprocess.run,
+                ["tmux", "select-window", "-t", target],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            # Window doesn't exist — auto-activate then retry.
+            log.debug("select-window failed, auto-activating %s", message.session_name)
+            try:
                 result = await asyncio.to_thread(
                     subprocess.run,
                     ["ccmux", "activate", "-y", message.session_name],
@@ -246,19 +255,15 @@ class SidebarApp(App):
                         result.stderr.decode(errors="replace").strip(),
                     )
                     return
-        except Exception:
-            pass
-
-        target = f"{INNER_SESSION}:{message.session_name}"
-        try:
-            await asyncio.to_thread(
-                subprocess.run,
-                ["tmux", "select-window", "-t", target],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError:
-            pass
+                # Retry select-window after activation
+                await asyncio.to_thread(
+                    subprocess.run,
+                    ["tmux", "select-window", "-t", target],
+                    check=True,
+                    capture_output=True,
+                )
+            except Exception:
+                pass
         # Focus the Claude Code pane in the outer session
         try:
             await asyncio.to_thread(
