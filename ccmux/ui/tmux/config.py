@@ -4,19 +4,37 @@ import subprocess
 import time
 
 
+def _wait_for_session(session_name: str, timeout: float = 2.0) -> bool:
+    """Poll ``tmux has-session`` until the session exists or *timeout* elapses.
+
+    Polls every 50 ms.  Returns True if the session was found, False on timeout.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", session_name],
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            return True
+        time.sleep(0.05)
+    return False
+
+
 def apply_claude_inner_session_config(session_name: str) -> bool:
     """Apply tmux configuration to the Claude Code inner session via per-session options.
 
     Does NOT set server-global options (default-terminal, terminal-features)
     to avoid corrupting other tmux sessions on the same server.
     """
-    time.sleep(0.1)
+    _wait_for_session(session_name)
 
     options = [
         ("mouse", "on"),
         ("status", "off"),
         ("set-titles", "on"),
         ("set-titles-string", "tmux:#S · #W"),
+        ("window-size", "latest"),
     ]
     try:
         for key, val in options:
@@ -68,6 +86,7 @@ def apply_outer_session_config(session_name: str) -> bool:
         ("pane-active-border-style", "fg=#d7af5f"),
         ("set-titles", "on"),
         ("set-titles-string", display_title),
+        ("window-size", "latest"),
     ]
     try:
         for key, val in options:

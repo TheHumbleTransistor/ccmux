@@ -57,7 +57,7 @@ from ccmux.tmux_ops import (
     select_window,
     tmux_session_exists,
 )
-from ccmux.ui.tmux import apply_claude_inner_session_config
+from ccmux.ui.tmux import apply_claude_inner_session_config, apply_server_global_config
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +95,7 @@ def create_session_window(
     if is_first:
         window_id = create_tmux_session(INNER_SESSION, name, path, launch_cmd)
         if window_id:
+            apply_server_global_config()
             create_bash_window(name, path)
             if apply_claude_inner_session_config(INNER_SESSION):
                 console.print(f"  [green]\u2713[/green] Applied ccmux tmux configuration")
@@ -344,6 +345,7 @@ def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: 
         if window_id is None:
             console.print(f"[red]Error creating tmux session[/red]", style="bold")
             sys.exit(1)
+        apply_server_global_config()
         create_bash_window(name, path)
         console.print(f"  [green]\u2713[/green] Created tmux session '{INNER_SESSION}' with window '{name}'")
         if apply_claude_inner_session_config(INNER_SESSION):

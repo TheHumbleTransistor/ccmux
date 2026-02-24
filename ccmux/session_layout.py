@@ -119,12 +119,12 @@ def create_outer_session() -> None:
 
     try:
         create_session_simple(OUTER_SESSION, sidebar_cmd)
+        apply_server_global_config()
         if tmux_session_exists(BASH_SESSION):
             split_window(f"{OUTER_SESSION}:0.0", "-v", str(BASH_PANE_HEIGHT),
                          f"TMUX= tmux attach -t ={BASH_SESSION}")
         split_window(f"{OUTER_SESSION}:0.0", "-h", "50%",
                      f"TMUX= tmux attach -t ={INNER_SESSION}")
-        apply_server_global_config()
         apply_outer_session_config(OUTER_SESSION)
         install_inner_hook()
     except Exception as exc:
@@ -178,6 +178,7 @@ def _create_bash_session(bash: str, session_name: str, working_dir: str, bash_cm
     create_tmux_session(bash, session_name, working_dir, bash_cmd)
     set_session_option(bash, "status", "off")
     set_session_option(bash, "mouse", "on")
+    set_session_option(bash, "window-size", "latest")
 
 
 # ---------------------------------------------------------------------------
