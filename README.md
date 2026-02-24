@@ -1,7 +1,8 @@
 # ccmux
 
-<!-- TODO: add demo GIF -->
-<!-- <img src="docs/demo.gif" alt="ccmux demo" width="800"> -->
+<p align="center">
+  <img src="docs/demo.png" alt="ccmux demo" width="800">
+</p>
 
 A streamlined terminal-UI for juggling concurrent Claude Code sessions.
 
