@@ -2,23 +2,10 @@
 
 import subprocess
 import time
-from pathlib import Path
-from typing import Optional
 
 
-# TODO: do we need this function anymore?  if no, let's remove it. Also remove the reference in the project toml file.
-def get_tmux_config_path() -> Path:
-    """Get the path to the tmux.conf file included in the package.
-
-    Returns:
-        Path to the tmux.conf file
-    """
-    return Path(__file__).parent / "tmux.conf"
-
-
-# TODO:  we have two inner sessions: the claude code one and the bash terminal.  We need out naming conventions to make that abundantly clear. Update this function name to clarify and also update the names of the tmux sessions.  
-def apply_inner_session_config(session_name: str) -> bool:
-    """Apply tmux configuration to the inner session via per-session options.
+def apply_claude_inner_session_config(session_name: str) -> bool:
+    """Apply tmux configuration to the Claude Code inner session via per-session options.
 
     Does NOT set server-global options (default-terminal, terminal-features)
     to avoid corrupting other tmux sessions on the same server.
@@ -77,42 +64,3 @@ def apply_outer_session_config(session_name: str) -> bool:
         return True
     except subprocess.CalledProcessError:
         return False
-
-
-# TODO: do we need this function anymore?  if no, let's remove it
-def get_tmux_config_content() -> str:
-    """Get the tmux configuration as a string.
-
-    Returns:
-        String containing the tmux configuration, or error message if not found
-    """
-    config_path = get_tmux_config_path()
-
-    if not config_path.exists():
-        return "# tmux.conf not found in package\n"
-
-    try:
-        return config_path.read_text()
-    except Exception as e:
-        return f"# Error reading tmux.conf: {e}\n"
-
-# TODO: do we need this function anymore?  if no, let's remove it
-def export_tmux_config(output_path: Optional[Path] = None) -> tuple[bool, str]:
-    """Export the tmux configuration to a file or return its content.
-
-    Args:
-        output_path: Optional path to write the config to
-
-    Returns:
-        Tuple of (success, message/content)
-    """
-    content = get_tmux_config_content()
-
-    if output_path:
-        try:
-            output_path.write_text(content)
-            return True, f"Exported tmux configuration to {output_path}"
-        except Exception as e:
-            return False, f"Error writing file: {e}"
-    else:
-        return True, content

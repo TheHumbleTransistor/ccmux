@@ -20,7 +20,7 @@ from rich.table import Table
 
 from ccmux import state
 from ccmux.config import run_post_create
-from ccmux.ui.tmux import apply_inner_session_config, apply_outer_session_config
+from ccmux.ui.tmux import apply_claude_inner_session_config, apply_outer_session_config
 
 # Default session name
 DEFAULT_SESSION = "default"
@@ -864,7 +864,7 @@ def _activate_all_in_session(session: str, yes: bool = False) -> None:
                 inner_exists_flag = True
                 console.print(f"  [green]\u2713[/green] Created tmux session and activated '{wt_name}'")
 
-                if apply_inner_session_config(inner):
+                if apply_claude_inner_session_config(inner):
                     console.print(f"    [green]\u2713[/green] Applied ccmux tmux configuration")
                 else:
                     console.print(f"    [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
@@ -970,7 +970,7 @@ def _activate_single_instance(session: str, name: str, yes: bool = False) -> Non
             _create_bash_window(session, name, wt_path)
             console.print(f"  [green]\u2713[/green] Created tmux session and activated '{name}'")
 
-            if apply_inner_session_config(inner):
+            if apply_claude_inner_session_config(inner):
                 console.print(f"  [green]\u2713[/green] Applied ccmux tmux configuration")
             else:
                 console.print(f"  [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
@@ -1235,7 +1235,7 @@ def instance_new(
             _create_bash_window(session, name, str(instance_path))
             console.print(f"  [green]\u2713[/green] Created tmux session '{inner}' with window '{name}'")
 
-            if apply_inner_session_config(inner):
+            if apply_claude_inner_session_config(inner):
                 console.print(f"  [green]\u2713[/green] Applied ccmux tmux configuration")
             else:
                 console.print(f"  [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
@@ -2157,37 +2157,6 @@ def instance_remove(
 
 # --- Top-Level Commands ---
 
-@app.command
-def export_tmux_config(
-    *,
-    output: Optional[Path] = None,
-) -> None:
-    """Export the ccmux tmux configuration to a file.
-
-    This exports the tmux configuration that ccmux applies to its sessions.
-    You can use this to apply the same configuration globally or to customize it.
-
-    Args:
-        output: Output file path. If not specified, prints to stdout.
-    """
-    from ccmux.ui.tmux import get_tmux_config_content
-
-    content = get_tmux_config_content()
-
-    if output:
-        try:
-            if output.exists():
-                if not Confirm.ask(f"[yellow]File {output} exists. Overwrite?[/yellow]", default=False):
-                    console.print("[yellow]Cancelled.[/yellow]")
-                    return
-
-            output.write_text(content)
-            console.print(f"[green]\u2713[/green] Exported tmux configuration to {output}")
-        except Exception as e:
-            console.print(f"[red]Error writing file:[/red] {e}", style="bold")
-            sys.exit(1)
-    else:
-        console.print(content)
 
 
 @app.command(name="detach")
