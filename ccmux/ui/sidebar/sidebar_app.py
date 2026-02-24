@@ -7,6 +7,7 @@ import subprocess
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Static
@@ -56,7 +57,6 @@ class SidebarApp(App):
         self._refresh_lock = asyncio.Lock()
         self._instance_list:Vertical | None = None
         self._resize_count: int = 0
-        self._last_size_label: str = ""
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -71,14 +71,9 @@ class SidebarApp(App):
         self._instance_list = Vertical(id="instance-list")
         yield self._instance_list
 
-    def _update_size_display(self) -> None:
-        """Periodically update the title with current app dimensions."""
-        w, h = self.size
-        label = f" {w}x{h}"
-        if label != self._last_size_label:
-            self._resize_count += 1
-            self._last_size_label = label
-            log.debug("size changed #%d -> %s", self._resize_count, label)
+    async def _on_resize(self, event: events.Resize) -> None:
+        self._resize_count += 1
+        log.debug("on_resize #%d size=%dx%d", self._resize_count, event.size.width, event.size.height)
         try:
             title = self.query_one("#title", Static)
             title.update(
@@ -87,15 +82,15 @@ class SidebarApp(App):
                 "▄█████ ▄█████ ██▄  ▄██ ██  ██ ██  ██ \n"
                 "██     ██     ██ ▀▀ ██ ██  ██  ████  \n"
                 "▀█████ ▀█████ ██    ██ ▀████▀ ██  ██ \n"
-                f" resize #{self._resize_count} {w}x{h}"
+                f" resize #{self._resize_count} {event.size.width}x{event.size.height}"
             )
         except Exception:
-            log.exception("_update_size_display FAILED")
+            log.exception("_on_resize title update FAILED")
+        await super()._on_resize(event)
 
     async def on_mount(self) -> None:
         await self._refresh_instances(caller="mount")
         self.set_interval(self._poll_interval, self._poll_refresh)
-        self.set_interval(0.5, self._update_size_display)
         self._register_signal_handler()
 
     async def _refresh_instances(self, caller: str = "unknown") -> None:
