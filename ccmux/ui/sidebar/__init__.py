@@ -9,7 +9,6 @@ from ccmux.ui.sidebar.process_id import (  # noqa: F401
 )
 from ccmux.ui.sidebar.widgets import (  # noqa: F401
     InstanceRow,
-    NonInteractiveStatic,
     RepoHeader,
     RepoInstancesList,
 )

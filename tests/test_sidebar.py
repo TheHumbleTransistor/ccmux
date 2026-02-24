@@ -12,9 +12,10 @@ import pytest
 
 from ccmux import state
 from ccmux.state import store as state_store
+from textual.widgets import Static
+
 from ccmux.ui import (
     SidebarApp,
-    NonInteractiveStatic,
     InstanceRow,
     RepoHeader,
     write_pid_file,
@@ -558,7 +559,7 @@ class TestSidebarRendering:
         async with demo_app.run_test() as pilot:
             # Verify initial state — title and instances are present
             app = pilot.app
-            title = app.query_one("#title", NonInteractiveStatic)
+            title = app.query_one("#title", Static)
             assert title.display is True
 
             # Find and click an InstanceRow
@@ -567,7 +568,7 @@ class TestSidebarRendering:
             await pilot.click(InstanceRow)
 
             # After click, all structural widgets must still be mounted and visible
-            title = app.query_one("#title", NonInteractiveStatic)
+            title = app.query_one("#title", Static)
             assert title.display is True
             assert len(app.query(InstanceRow)) > 0
 
@@ -580,7 +581,7 @@ class TestSidebarRendering:
             # Click the title
             await pilot.click("#title")
 
-            title = app.query_one("#title", NonInteractiveStatic)
+            title = app.query_one("#title", Static)
             assert title.display is True
 
             # Click a RepoHeader
@@ -588,7 +589,7 @@ class TestSidebarRendering:
             if len(repo_headers) > 0:
                 await pilot.click(RepoHeader)
                 # Verify everything still intact
-                assert app.query_one("#title", NonInteractiveStatic).display is True
+                assert app.query_one("#title", Static).display is True
                 assert len(app.query(InstanceRow)) > 0
 
     @pytest.mark.asyncio
@@ -605,7 +606,7 @@ class TestSidebarRendering:
                 await pilot.click(f"#{row.id}")
 
             # All structural widgets must survive rapid clicking
-            assert app.query_one("#title", NonInteractiveStatic).display is True
+            assert app.query_one("#title", Static).display is True
             assert app.query_one("#instance-list") is not None
             assert len(app.query(InstanceRow)) > 0
 

@@ -3,7 +3,6 @@
 from ccmux.ui.sidebar import (  # noqa: F401
     SIDEBAR_PIDS_DIR,
     InstanceRow,
-    NonInteractiveStatic,
     RepoHeader,
     RepoInstancesList,
     SidebarApp,

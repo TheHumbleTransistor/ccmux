@@ -9,10 +9,11 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
+from textual.widgets import Static
 
 from ccmux.ui.sidebar import snapshot
 from ccmux.ui.sidebar.snapshot import InstanceSnapshot
-from ccmux.ui.sidebar.widgets import InstanceRow, NonInteractiveStatic, RepoInstancesList
+from ccmux.ui.sidebar.widgets import InstanceRow, RepoInstancesList
 
 POLL_INTERVAL = 5.0
 DEMO_POLL_INTERVAL = 1.0
@@ -54,9 +55,11 @@ class SidebarApp(App):
         self._last_snapshot: list[InstanceSnapshot] | None = None
         self._refresh_lock = asyncio.Lock()
         self._instance_list:Vertical | None = None
+        self._resize_count: int = 0
+        self._last_size_label: str = ""
 
     def compose(self) -> ComposeResult:
-        yield NonInteractiveStatic(
+        yield Static(
             "                                     \n"
             "                                     \n"
             "▄█████ ▄█████ ██▄  ▄██ ██  ██ ██  ██ \n"
@@ -68,9 +71,31 @@ class SidebarApp(App):
         self._instance_list = Vertical(id="instance-list")
         yield self._instance_list
 
+    def _update_size_display(self) -> None:
+        """Periodically update the title with current app dimensions."""
+        w, h = self.size
+        label = f" {w}x{h}"
+        if label != self._last_size_label:
+            self._resize_count += 1
+            self._last_size_label = label
+            log.debug("size changed #%d -> %s", self._resize_count, label)
+        try:
+            title = self.query_one("#title", Static)
+            title.update(
+                "                                     \n"
+                "                                     \n"
+                "▄█████ ▄█████ ██▄  ▄██ ██  ██ ██  ██ \n"
+                "██     ██     ██ ▀▀ ██ ██  ██  ████  \n"
+                "▀█████ ▀█████ ██    ██ ▀████▀ ██  ██ \n"
+                f" resize #{self._resize_count} {w}x{h}"
+            )
+        except Exception:
+            log.exception("_update_size_display FAILED")
+
     async def on_mount(self) -> None:
         await self._refresh_instances(caller="mount")
         self.set_interval(self._poll_interval, self._poll_refresh)
+        self.set_interval(0.5, self._update_size_display)
         self._register_signal_handler()
 
     async def _refresh_instances(self, caller: str = "unknown") -> None:
@@ -102,7 +127,7 @@ class SidebarApp(App):
             log.debug("refresh REBUILD caller=%s", caller)
             container = self._instance_list
             if not snap:
-                new_widgets = [NonInteractiveStatic("  No instances")]
+                new_widgets = [Static("  No instances")]
             else:
                 grouped = snapshot.group_by_repo(snap)
                 new_widgets = [

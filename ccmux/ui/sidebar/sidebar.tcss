@@ -36,7 +36,12 @@ InstanceRow .line2 {
 }
 
 InstanceRow .line2 .name {
-    width: 1fr;
+    width: auto;
+}
+
+InstanceRow .line2 .worktree-suffix {
+    width: auto;
+    color: #666666;
 }
 
 InstanceRow .line3 {
@@ -45,10 +50,19 @@ InstanceRow .line3 {
 
 InstanceRow .line3 .branch {
     width: 1fr;
+    color: #666666;
 }
 
-InstanceRow .line3 .stats {
+InstanceRow .line3 .additions {
     width: auto;
+    color: #5f875f;
+    margin-left: 1;
+}
+
+InstanceRow .line3 .deletions {
+    width: auto;
+    color: #875f5f;
+    margin-left: 1;
 }
 
 InstanceRow .line4 {

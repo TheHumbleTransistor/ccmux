@@ -57,16 +57,13 @@ class InstanceRow(Vertical):
         return ("│", "├── ", "│")
 
     def _format_name_text(self) -> str:
-        """Build the name text, appending (worktree) suffix for worktree instances."""
+        """Build the name text (without worktree suffix — that's a separate widget)."""
         indicator = "\u25cf" if self.is_active else "\u25cb"
         branch_char = self._tree_chars()[1]
-        name_text = f"{branch_char}{indicator} {self.instance_name}"
-        if self.instance_type == "worktree":
-            name_text += " [#666666](worktree)[/#666666]"
-        return name_text
+        return f"{branch_char}{indicator} {self.instance_name}"
 
     def _format_branch_text(self) -> str:
-        """Build the branch/ref portion of line3 with tree prefix."""
+        """Build the branch/ref portion of line3 with tree prefix (plain text, CSS colors)."""
         prefix = "│     " if not self.is_last else "      "
 
         if self.branch is not None:
@@ -80,27 +77,21 @@ class InstanceRow(Vertical):
         max_ref = 39 - len(prefix)
         ref_display = ref_text[:max_ref] if max_ref > 0 else ""
 
-        return f"{prefix}[#666666]{ref_display}[/#666666]"
-
-    def _format_stats_text(self) -> str:
-        """Build the diff stats text with dimmed colors."""
-        if not self.lines_added and not self.lines_removed:
-            return ""
-        parts = []
-        if self.lines_added:
-            parts.append(f"[#5f875f]+{self.lines_added}[/#5f875f]")
-        if self.lines_removed:
-            parts.append(f"[#875f5f]-{self.lines_removed}[/#875f5f]")
-        return " ".join(parts)
+        return f"{prefix}{ref_display}"
 
     def compose(self) -> ComposeResult:
         top, branch_char, tail = self._tree_chars()
         yield Static(top, classes="line1")
         with Horizontal(classes="line2"):
-            yield Static(self._format_name_text(), classes="name", markup=True)
+            yield Static(self._format_name_text(), classes="name")
+            if self.instance_type == "worktree":
+                yield Static(" (worktree)", classes="worktree-suffix")
         with Horizontal(classes="line3"):
-            yield Static(self._format_branch_text(), classes="branch", markup=True)
-            yield Static(self._format_stats_text(), classes="stats", markup=True)
+            yield Static(self._format_branch_text(), classes="branch")
+            if self.lines_added:
+                yield Static(f"+{self.lines_added}", classes="additions")
+            if self.lines_removed:
+                yield Static(f"-{self.lines_removed}", classes="deletions")
         yield Static(tail, classes="line4")
 
     def _toggle_flash(self) -> None:
@@ -154,7 +145,26 @@ class InstanceRow(Vertical):
             self.lines_added = lines_added
             self.lines_removed = lines_removed
             self.query_one(".branch", Static).update(self._format_branch_text())
-            self.query_one(".stats", Static).update(self._format_stats_text())
+            # Update additions widget
+            additions = self.query(".additions")
+            if self.lines_added:
+                if additions:
+                    additions.first().update(f"+{self.lines_added}")
+                else:
+                    line3 = self.query_one(".line3", Horizontal)
+                    line3.mount(Static(f"+{self.lines_added}", classes="additions"))
+            elif additions:
+                additions.first().remove()
+            # Update deletions widget
+            deletions = self.query(".deletions")
+            if self.lines_removed:
+                if deletions:
+                    deletions.first().update(f"-{self.lines_removed}")
+                else:
+                    line3 = self.query_one(".line3", Horizontal)
+                    line3.mount(Static(f"-{self.lines_removed}", classes="deletions"))
+            elif deletions:
+                deletions.first().remove()
         self._update_flash()
 
     async def on_click(self) -> None:
