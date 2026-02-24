@@ -80,17 +80,25 @@ SessionRow:hover {
 }
 
 SessionRow.current {
-    background: #3a3a3a;
+    background: #585858;
     color: #bcbcbc;
     text-style: bold;
 }
 
 SessionRow.bell {
-    background: #402020;
+    background: #711d1d;
+}
+
+SessionRow.bell:hover {
+    background: #7d2222;
 }
 
 SessionRow.activity {
-    background: #1e3520;
+    background: #005f00;
+}
+
+SessionRow.activity:hover {
+    background: #3a573d;
 }
 
 /* Red phase of flash (default when current+bell) */
@@ -105,7 +113,7 @@ SessionRow.current.bell.bell-flash {
 
 /* Activity on current instance: suppress, show neutral gray */
 SessionRow.current.activity {
-    background: #3a3a3a;
+    background: #585858;
 }
 
 /* RepoHeader */
