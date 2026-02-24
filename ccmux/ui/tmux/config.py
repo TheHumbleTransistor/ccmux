@@ -36,10 +36,32 @@ def apply_claude_inner_session_config(session_name: str) -> bool:
         ("set-titles-string", "tmux:#S · #W"),
         ("window-size", "latest"),
     ]
+
+    # Window options for activity/silence monitoring (per-session defaults)
+    window_options = [
+        ("monitor-activity", "on"),
+        ("monitor-silence", "5"),
+    ]
+
+    # Session options for alert behavior
+    session_options_extra = [
+        ("visual-activity", "off"),
+        ("visual-silence", "off"),
+        ("visual-bell", "off"),
+        ("activity-action", "none"),
+        ("silence-action", "none"),
+        ("bell-action", "any"),
+    ]
+
     try:
-        for key, val in options:
+        for key, val in options + session_options_extra:
             subprocess.run(
                 ["tmux", "set-option", "-t", session_name, key, val],
+                check=True, capture_output=True,
+            )
+        for key, val in window_options:
+            subprocess.run(
+                ["tmux", "set-option", "-w", "-t", session_name, key, val],
                 check=True, capture_output=True,
             )
         return True
