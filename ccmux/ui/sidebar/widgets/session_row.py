@@ -59,22 +59,22 @@ class SessionRow(Vertical):
         branch_char = self._tree_chars()[1]
         return f"{branch_char}{indicator} {self.session_name}"
 
-    def _format_branch_text(self) -> str:
-        """Build the branch/ref portion of line3 with tree prefix (plain text, CSS colors)."""
-        prefix = "│     " if not self.is_last else "      "
+    def _tree_prefix(self) -> str:
+        """Return the tree-drawing prefix for line3."""
+        return "│     " if not self.is_last else "      "
 
+    def _format_branch_text(self) -> str:
+        """Build the branch/ref text (without tree prefix)."""
         if self.branch is not None:
             ref_text = self.branch
         elif self.short_sha:
             ref_text = f"HEAD: {self.short_sha}"
         else:
-            return prefix.rstrip()
+            return ""
 
         # Truncate ref to fit: sidebar is ~39 usable chars, prefix is 6
-        max_ref = 39 - len(prefix)
-        ref_display = ref_text[:max_ref] if max_ref > 0 else ""
-
-        return f"{prefix}{ref_display}"
+        max_ref = 39 - 6
+        return ref_text[:max_ref] if max_ref > 0 else ""
 
     def compose(self) -> ComposeResult:
         top, branch_char, tail = self._tree_chars()
@@ -84,6 +84,7 @@ class SessionRow(Vertical):
             if self.session_type == "worktree":
                 yield Static(" (worktree)", classes="worktree-suffix")
         with Horizontal(classes="line3"):
+            yield Static(self._tree_prefix(), classes="tree-prefix")
             yield Static(self._format_branch_text(), classes="branch")
             if self.lines_added:
                 yield Static(f"+{self.lines_added}", classes="additions")
