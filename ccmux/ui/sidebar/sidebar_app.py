@@ -17,7 +17,7 @@ from textual.widgets import Static
 from ccmux.naming import INNER_SESSION
 from ccmux.ui.sidebar import snapshot
 from ccmux.ui.sidebar.snapshot import SessionSnapshot
-from ccmux.ui.sidebar.widgets import SessionRow, RepoSessionsList
+from ccmux.ui.sidebar.widgets import SessionRow, RepoSessionsList, TitleBanner
 
 POLL_INTERVAL = 5.0
 DEMO_POLL_INTERVAL = 1.0
@@ -59,15 +59,7 @@ class SidebarApp(App):
         self._session_list: Vertical | None = None
 
     def compose(self) -> ComposeResult:
-        yield Static(
-            "                                     \n"
-            "                                     \n"
-            "▄█████ ▄█████ ██▄  ▄██ ██  ██ ██  ██ \n"
-            "██     ██     ██ ▀▀ ██ ██  ██  ████  \n"
-            "▀█████ ▀█████ ██    ██ ▀████▀ ██  ██ \n"
-            "                                     ",
-            id="title",
-        )
+        yield TitleBanner()
         self._session_list = Vertical(id="instance-list")
         yield self._session_list
 
@@ -76,6 +68,7 @@ class SidebarApp(App):
         await self._refresh_sessions(caller="mount")
         self.set_interval(self._poll_interval, self._poll_refresh)
         self._register_signal_handler()
+
 
     def _fix_nested_tmux_resize(self) -> None:
         """Work around Textual resize being broken inside nested tmux.
@@ -104,7 +97,9 @@ class SidebarApp(App):
             # Disable in-band resize now.
             driver._in_band_window_resize = False
             try:
-                driver.write("\x1b[?2048l")
+                # Defer the disable sequence until after the first paint so it
+                # doesn't interleave with Textual's initial screen output.
+                self.call_after_refresh(lambda: driver.write("\x1b[?2048l"))
             except Exception:
                 pass
 
@@ -140,6 +135,16 @@ class SidebarApp(App):
                 pass
 
         signal.signal(signal.SIGWINCH, _on_sigwinch)
+
+        # Post an initial Resize with the real pane size.  The pane may have
+        # been split before on_mount ran, and those SIGWINCHs were lost to
+        # Textual's (now-disabled) in-band handler.  This catches up.
+        try:
+            pty = os.get_terminal_size()
+            size = Size(pty.columns, pty.lines)
+            self.post_message(events.Resize(size, size))
+        except OSError:
+            pass
 
     async def _refresh_sessions(self, caller: str = "unknown") -> None:
         """Refresh the session list, using incremental updates when possible."""
