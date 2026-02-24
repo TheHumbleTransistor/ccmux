@@ -65,7 +65,6 @@ class SidebarApp(App):
             "                                     ",
             id="title",
         )
-        yield NonInteractiveStatic("", id="spacer")
         self._instance_list = Vertical(id="instance-list")
         yield self._instance_list
 
