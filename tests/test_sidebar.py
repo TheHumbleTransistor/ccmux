@@ -40,9 +40,9 @@ def temp_pid_dir(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
         import ccmux.ui.sidebar.process_id as pid_mod
-        import ccmux.cli as cli_mod
+        import ccmux.session_layout as layout_mod
         monkeypatch.setattr(pid_mod, "SIDEBAR_PIDS_DIR", tmpdir_path)
-        monkeypatch.setattr(cli_mod, "SIDEBAR_PIDS_DIR", tmpdir_path)
+        monkeypatch.setattr(layout_mod, "SIDEBAR_PIDS_DIR", tmpdir_path)
         yield tmpdir_path
 
 
@@ -196,35 +196,35 @@ class TestPidTracking:
 class TestInnerSessionName:
     """Tests for _inner_session_name and _ccmux_session_from_tmux."""
 
-    def test_inner_session_name(self):
+    def testinner_session_name(self):
         """_inner_session_name appends '-inner' suffix."""
-        from ccmux.cli import _inner_session_name
+        from ccmux.session_naming import inner_session_name
 
-        assert _inner_session_name("default") == "default-inner"
-        assert _inner_session_name("my-session") == "my-session-inner"
+        assert inner_session_name("default") == "default-inner"
+        assert inner_session_name("my-session") == "my-session-inner"
 
     def test_ccmux_session_from_tmux_strips_inner(self):
         """_ccmux_session_from_tmux strips '-inner' suffix."""
-        from ccmux.cli import _ccmux_session_from_tmux
+        from ccmux.session_naming import ccmux_session_from_tmux
 
-        assert _ccmux_session_from_tmux("default-inner") == "default"
-        assert _ccmux_session_from_tmux("my-session-inner") == "my-session"
+        assert ccmux_session_from_tmux("default-inner") == "default"
+        assert ccmux_session_from_tmux("my-session-inner") == "my-session"
 
     def test_ccmux_session_from_tmux_no_suffix(self):
         """_ccmux_session_from_tmux returns name unchanged if no '-inner' suffix."""
-        from ccmux.cli import _ccmux_session_from_tmux
+        from ccmux.session_naming import ccmux_session_from_tmux
 
-        assert _ccmux_session_from_tmux("default") == "default"
-        assert _ccmux_session_from_tmux("my-session") == "my-session"
+        assert ccmux_session_from_tmux("default") == "default"
+        assert ccmux_session_from_tmux("my-session") == "my-session"
 
 
 class TestIsInstanceWindowActive:
     """Tests for is_instance_window_active wrapper."""
 
-    @mock.patch("ccmux.cli.is_window_active_in_session")
+    @mock.patch("ccmux.session_naming.is_window_active_in_session")
     def test_delegates_to_inner_session(self, mock_active):
         """is_instance_window_active checks the inner session."""
-        from ccmux.cli import is_instance_window_active
+        from ccmux.session_naming import is_instance_window_active
 
         mock_active.return_value = True
         result = is_instance_window_active("my-session", "@5")
@@ -232,10 +232,10 @@ class TestIsInstanceWindowActive:
         assert result is True
         mock_active.assert_called_once_with("my-session-inner", "@5")
 
-    @mock.patch("ccmux.cli.is_window_active_in_session")
+    @mock.patch("ccmux.session_naming.is_window_active_in_session")
     def test_returns_false_for_none_window(self, mock_active):
         """is_instance_window_active handles None window ID."""
-        from ccmux.cli import is_instance_window_active
+        from ccmux.session_naming import is_instance_window_active
 
         mock_active.return_value = False
         result = is_instance_window_active("my-session", None)
@@ -245,167 +245,136 @@ class TestIsInstanceWindowActive:
 
 
 class TestCreateOuterSession:
-    """Tests for _create_outer_session CLI helper."""
+    """Tests for create_outer_session helper."""
 
-    @mock.patch("ccmux.cli._install_inner_hook")
-    @mock.patch("ccmux.cli.apply_outer_session_config")
-    @mock.patch("ccmux.cli.apply_server_global_config")
-    @mock.patch("ccmux.cli.subprocess.run")
-    @mock.patch("ccmux.cli.tmux_session_exists")
+    @mock.patch("ccmux.session_layout.install_inner_hook")
+    @mock.patch("ccmux.session_layout.apply_outer_session_config")
+    @mock.patch("ccmux.session_layout.apply_server_global_config")
+    @mock.patch("ccmux.session_layout.split_window")
+    @mock.patch("ccmux.session_layout.create_session_simple")
+    @mock.patch("ccmux.session_layout.tmux_session_exists")
     def test_creates_outer_with_sidebar_inner_and_bash(
-        self, mock_exists, mock_run, mock_server_config, mock_outer_config, mock_hook
+        self, mock_exists, mock_create_simple, mock_split, mock_server_config, mock_outer_config, mock_hook
     ):
-        """_create_outer_session creates outer session with sidebar, inner client, and bash pane."""
-        from ccmux.cli import _create_outer_session
+        """create_outer_session creates outer session with sidebar, inner client, and bash pane."""
+        from ccmux.session_layout import create_outer_session
 
         # outer (ccmux-my-session) doesn't exist, inner and bash do exist
         mock_exists.side_effect = lambda s: s in ("my-session-inner", "my-session-bash")
 
-        _create_outer_session("my-session")
+        create_outer_session("my-session")
 
-        # Should have called new-session, split-window (bash), split-window (inner), set-hook
-        assert mock_run.call_count == 4
+        # Verify create_session_simple creates the sidebar under outer name
+        mock_create_simple.assert_called_once()
+        args = mock_create_simple.call_args[0]
+        assert args[0] == "ccmux-my-session"
+        assert "ccmux.ui.sidebar" in args[1]
 
-        # Verify new-session creates the sidebar under outer name
-        new_session_call = mock_run.call_args_list[0][0][0]
-        assert "new-session" in new_session_call
-        assert "ccmux-my-session" in new_session_call
-        sidebar_cmd = new_session_call[-1]
-        assert "ccmux.ui.sidebar" in sidebar_cmd
+        # Should have 2 split-window calls (bash + inner)
+        assert mock_split.call_count == 2
 
-        # Verify first split-window creates the bash pane (vertical, bottom, fixed rows)
-        bash_split_call = mock_run.call_args_list[1][0][0]
-        assert "split-window" in bash_split_call
-        assert "-v" in bash_split_call
-        bash_cmd = bash_split_call[-1]
-        assert "tmux attach -t =my-session-bash" in bash_cmd
+        # Verify first split creates the bash pane (vertical)
+        bash_split = mock_split.call_args_list[0]
+        assert bash_split[0][1] == "-v"
+        assert "tmux attach -t =my-session-bash" in bash_split[0][3]
 
-        # Verify second split-window creates the inner client (horizontal, right)
-        inner_split_call = mock_run.call_args_list[2][0][0]
-        assert "split-window" in inner_split_call
-        assert "-h" in inner_split_call
-        inner_cmd = inner_split_call[-1]
-        assert "tmux attach -t =my-session-inner" in inner_cmd
-
-        # Verify set-hook installs client-resized with resize-pane commands
-        hook_call = mock_run.call_args_list[3][0][0]
-        assert "set-hook" in hook_call
-        assert "client-resized" in hook_call
-        hook_cmd = hook_call[-1]
-        assert "resize-pane" in hook_cmd
-        assert f"-x {41}" in hook_cmd
-        # With bash session, should also resize bash pane height
-        assert f"-y {4}" in hook_cmd
+        # Verify second split creates the inner client (horizontal)
+        inner_split = mock_split.call_args_list[1]
+        assert inner_split[0][1] == "-h"
+        assert "tmux attach -t =my-session-inner" in inner_split[0][3]
 
         mock_outer_config.assert_called_once_with("ccmux-my-session")
         mock_hook.assert_called_once_with("my-session")
 
-    @mock.patch("ccmux.cli._install_inner_hook")
-    @mock.patch("ccmux.cli.apply_outer_session_config")
-    @mock.patch("ccmux.cli.apply_server_global_config")
-    @mock.patch("ccmux.cli.subprocess.run")
-    @mock.patch("ccmux.cli.tmux_session_exists")
+    @mock.patch("ccmux.session_layout.install_inner_hook")
+    @mock.patch("ccmux.session_layout.apply_outer_session_config")
+    @mock.patch("ccmux.session_layout.apply_server_global_config")
+    @mock.patch("ccmux.session_layout.split_window")
+    @mock.patch("ccmux.session_layout.create_session_simple")
+    @mock.patch("ccmux.session_layout.tmux_session_exists")
     def test_creates_outer_without_bash_session(
-        self, mock_exists, mock_run, mock_server_config, mock_outer_config, mock_hook
+        self, mock_exists, mock_create_simple, mock_split, mock_server_config, mock_outer_config, mock_hook
     ):
-        """_create_outer_session creates 2-pane layout when bash session doesn't exist."""
-        from ccmux.cli import _create_outer_session
+        """create_outer_session creates 2-pane layout when bash session doesn't exist."""
+        from ccmux.session_layout import create_outer_session
 
         # outer doesn't exist, inner exists, bash doesn't
         mock_exists.side_effect = lambda s: s == "my-session-inner"
 
-        _create_outer_session("my-session")
+        create_outer_session("my-session")
 
-        # Should have called new-session, split-window (inner), set-hook
-        assert mock_run.call_count == 3
+        mock_create_simple.assert_called_once()
 
-        # Verify new-session creates the sidebar
-        new_session_call = mock_run.call_args_list[0][0][0]
-        assert "new-session" in new_session_call
-
-        # Verify split-window creates the inner client
-        split_call = mock_run.call_args_list[1][0][0]
-        assert "split-window" in split_call
-        inner_cmd = split_call[-1]
-        assert "tmux attach -t =my-session-inner" in inner_cmd
-
-        # Verify set-hook installs client-resized with sidebar resize only
-        hook_call = mock_run.call_args_list[2][0][0]
-        assert "set-hook" in hook_call
-        assert "client-resized" in hook_call
-        hook_cmd = hook_call[-1]
-        assert "resize-pane" in hook_cmd
-        assert f"-x {41}" in hook_cmd
-        # Without bash session, should NOT have bash pane resize
-        assert "-y" not in hook_cmd
+        # Should have 1 split-window call (inner only, no bash)
+        assert mock_split.call_count == 1
+        inner_split = mock_split.call_args_list[0]
+        assert inner_split[0][1] == "-h"
+        assert "tmux attach -t =my-session-inner" in inner_split[0][3]
 
         mock_outer_config.assert_called_once_with("ccmux-my-session")
         mock_hook.assert_called_once_with("my-session")
 
-    @mock.patch("ccmux.cli.subprocess.run")
-    @mock.patch("ccmux.cli.tmux_session_exists")
-    def test_skips_if_outer_exists(self, mock_exists, mock_run):
-        """_create_outer_session skips if outer session already exists."""
-        from ccmux.cli import _create_outer_session
+    @mock.patch("ccmux.session_layout.create_session_simple")
+    @mock.patch("ccmux.session_layout.tmux_session_exists")
+    def test_skips_if_outer_exists(self, mock_exists, mock_create_simple):
+        """create_outer_session skips if outer session already exists."""
+        from ccmux.session_layout import create_outer_session
 
         # Both exist
         mock_exists.return_value = True
 
-        _create_outer_session("my-session")
-        mock_run.assert_not_called()
+        create_outer_session("my-session")
+        mock_create_simple.assert_not_called()
 
-    @mock.patch("ccmux.cli.subprocess.run")
-    @mock.patch("ccmux.cli.tmux_session_exists")
-    def test_skips_if_inner_missing(self, mock_exists, mock_run):
-        """_create_outer_session skips if inner session doesn't exist."""
-        from ccmux.cli import _create_outer_session
+    @mock.patch("ccmux.session_layout.create_session_simple")
+    @mock.patch("ccmux.session_layout.tmux_session_exists")
+    def test_skips_if_inner_missing(self, mock_exists, mock_create_simple):
+        """create_outer_session skips if inner session doesn't exist."""
+        from ccmux.session_layout import create_outer_session
 
         # Neither exists
         mock_exists.return_value = False
 
-        _create_outer_session("my-session")
-        mock_run.assert_not_called()
+        create_outer_session("my-session")
+        mock_create_simple.assert_not_called()
 
 
 class TestKillOuterSession:
-    """Tests for _kill_outer_session CLI helper."""
+    """Tests for kill_outer_session helper."""
 
-    @mock.patch("ccmux.cli.subprocess.run")
-    @mock.patch("ccmux.cli.tmux_session_exists", return_value=True)
-    def test_kills_outer_session(self, mock_exists, mock_run):
-        """_kill_outer_session kills the outer tmux session."""
-        from ccmux.cli import _kill_outer_session
+    @mock.patch("ccmux.session_layout.kill_tmux_session", return_value=True)
+    def test_kills_outer_session(self, mock_kill):
+        """kill_outer_session kills the outer and bash tmux sessions."""
+        from ccmux.session_layout import kill_outer_session
 
-        assert _kill_outer_session("my-session") is True
+        assert kill_outer_session("my-session") is True
 
-        kill_call = mock_run.call_args[0][0]
-        assert "kill-session" in kill_call
-        assert "=ccmux-my-session" in kill_call
+        calls = [c[0][0] for c in mock_kill.call_args_list]
+        assert "my-session-bash" in calls
+        assert "ccmux-my-session" in calls
 
-    @mock.patch("ccmux.cli.tmux_session_exists", return_value=False)
-    def test_returns_false_when_no_session(self, mock_exists):
-        """_kill_outer_session returns False when session doesn't exist."""
-        from ccmux.cli import _kill_outer_session
+    @mock.patch("ccmux.session_layout.kill_tmux_session", return_value=False)
+    def test_returns_false_when_no_session(self, mock_kill):
+        """kill_outer_session returns False when session doesn't exist."""
+        from ccmux.session_layout import kill_outer_session
 
-        assert _kill_outer_session("my-session") is False
+        assert kill_outer_session("my-session") is False
 
-    @mock.patch("ccmux.cli.subprocess.run")
-    @mock.patch("ccmux.cli.tmux_session_exists", return_value=True)
-    def test_returns_false_on_kill_failure(self, mock_exists, mock_run):
-        """_kill_outer_session returns False if kill-session fails."""
-        from ccmux.cli import _kill_outer_session
+    @mock.patch("ccmux.session_layout.kill_tmux_session", return_value=False)
+    def test_returns_false_on_kill_failure(self, mock_kill):
+        """kill_outer_session returns False if kill-session fails."""
+        from ccmux.session_layout import kill_outer_session
 
-        mock_run.side_effect = subprocess.CalledProcessError(1, "tmux")
-        assert _kill_outer_session("my-session") is False
+        assert kill_outer_session("my-session") is False
 
 
 class TestNotifySidebars:
-    """Tests for _notify_sidebars CLI helper."""
+    """Tests for notify_sidebars helper."""
 
-    @mock.patch("ccmux.cli.os.kill")
+    @mock.patch("ccmux.session_layout.os.kill")
     def test_sends_sigusr1_to_active_pids(self, mock_kill, temp_pid_dir):
-        """_notify_sidebars sends SIGUSR1 to all PIDs in session dir."""
-        from ccmux.cli import _notify_sidebars
+        """notify_sidebars sends SIGUSR1 to all PIDs in session dir."""
+        from ccmux.session_layout import notify_sidebars
 
         # Create PID files
         pid_dir = temp_pid_dir / "test-session"
@@ -413,7 +382,7 @@ class TestNotifySidebars:
         (pid_dir / "1234.pid").write_text("1234")
         (pid_dir / "5678.pid").write_text("5678")
 
-        _notify_sidebars("test-session")
+        notify_sidebars("test-session")
 
         calls = mock_kill.call_args_list
         pids_signaled = {c[0][0] for c in calls}
@@ -421,10 +390,10 @@ class TestNotifySidebars:
         for call in calls:
             assert call[0][1] == signal.SIGUSR1
 
-    @mock.patch("ccmux.cli.os.kill")
+    @mock.patch("ccmux.session_layout.os.kill")
     def test_cleans_stale_pid_files(self, mock_kill, temp_pid_dir):
-        """_notify_sidebars removes PID files for dead processes."""
-        from ccmux.cli import _notify_sidebars
+        """notify_sidebars removes PID files for dead processes."""
+        from ccmux.session_layout import notify_sidebars
 
         pid_dir = temp_pid_dir / "test-session"
         pid_dir.mkdir(parents=True)
@@ -433,30 +402,30 @@ class TestNotifySidebars:
 
         mock_kill.side_effect = ProcessLookupError
 
-        _notify_sidebars("test-session")
+        notify_sidebars("test-session")
 
         assert not stale_pid_file.exists()
 
     def test_no_pid_dir(self, temp_pid_dir):
-        """_notify_sidebars handles missing PID directory gracefully."""
-        from ccmux.cli import _notify_sidebars
+        """notify_sidebars handles missing PID directory gracefully."""
+        from ccmux.session_layout import notify_sidebars
 
         # Should not raise
-        _notify_sidebars("non-existent-session")
+        notify_sidebars("non-existent-session")
 
 
 
 class TestInstallInnerHook:
-    """Tests for _install_inner_hook and _uninstall_inner_hook."""
+    """Tests for install_inner_hook and uninstall_inner_hook."""
 
-    @mock.patch("ccmux.cli.subprocess.run")
-    def test_creates_hook_script(self, mock_run, tmp_path, monkeypatch):
-        """_install_inner_hook writes a script that syncs bash window and notifies sidebars."""
-        import ccmux.cli as cli_mod
-        monkeypatch.setattr(cli_mod, "HOOKS_DIR", tmp_path)
+    @mock.patch("ccmux.session_layout.set_hook")
+    def test_creates_hook_script(self, mock_set_hook, tmp_path, monkeypatch):
+        """install_inner_hook writes a script that syncs bash window and notifies sidebars."""
+        import ccmux.session_layout as layout_mod
+        monkeypatch.setattr(layout_mod, "HOOKS_DIR", tmp_path)
 
-        from ccmux.cli import _install_inner_hook
-        _install_inner_hook("test-session")
+        from ccmux.session_layout import install_inner_hook
+        install_inner_hook("test-session")
 
         script = tmp_path / "notify-sidebar-test-session.sh"
         assert script.exists()
@@ -471,72 +440,75 @@ class TestInstallInnerHook:
         # Should NOT contain join-pane (that was the old approach)
         assert "join-pane" not in content
 
-        # Verify tmux set-hook was called on the INNER session
-        call_args = mock_run.call_args[0][0]
-        assert "set-hook" in call_args
-        assert "test-session-inner" in call_args
-        assert "after-select-window" in call_args
+        # Verify set_hook was called on the INNER session
+        assert mock_set_hook.call_count == 2
+        # Last call should be after-select-window on the inner session
+        last_call = mock_set_hook.call_args_list[-1]
+        assert last_call[0][0] == "test-session-inner"
+        assert last_call[0][1] == "after-select-window"
 
-    @mock.patch("ccmux.cli.subprocess.run")
-    def test_uninstall_removes_hook(self, mock_run, tmp_path, monkeypatch):
-        """_uninstall_inner_hook removes the hook and script."""
-        import ccmux.cli as cli_mod
-        monkeypatch.setattr(cli_mod, "HOOKS_DIR", tmp_path)
+    @mock.patch("ccmux.session_layout.unset_hook")
+    def test_uninstall_removes_hook(self, mock_unset_hook, tmp_path, monkeypatch):
+        """uninstall_inner_hook removes the hook and script."""
+        import ccmux.session_layout as layout_mod
+        monkeypatch.setattr(layout_mod, "HOOKS_DIR", tmp_path)
 
         # Create a script to remove
         script = tmp_path / "notify-sidebar-test-session.sh"
         script.write_text("#!/bin/sh\n")
 
-        from ccmux.cli import _uninstall_inner_hook
-        _uninstall_inner_hook("test-session")
+        from ccmux.session_layout import uninstall_inner_hook
+        uninstall_inner_hook("test-session")
 
         assert not script.exists()
-        call_args = mock_run.call_args[0][0]
-        assert "set-hook" in call_args
-        assert "-u" in call_args
-        # Should target the inner session
-        assert "test-session-inner" in call_args
+        # Verify unset_hook was called for both hooks on the inner session
+        assert mock_unset_hook.call_count == 2
+        targets = [c[0][0] for c in mock_unset_hook.call_args_list]
+        hooks = [c[0][1] for c in mock_unset_hook.call_args_list]
+        assert all(t == "test-session-inner" for t in targets)
+        assert "alert-bell" in hooks
+        assert "after-select-window" in hooks
 
 
 class TestEnsureOuterSession:
-    """Tests for _ensure_outer_session CLI helper."""
+    """Tests for ensure_outer_session helper."""
 
-    @mock.patch("ccmux.cli._install_inner_hook")
-    @mock.patch("ccmux.cli.tmux_session_exists")
+    @mock.patch("ccmux.session_layout.install_inner_hook")
+    @mock.patch("ccmux.session_layout.tmux_session_exists")
     def test_installs_hook_if_outer_exists(self, mock_exists, mock_hook):
-        """_ensure_outer_session just installs hook if both sessions exist."""
-        from ccmux.cli import _ensure_outer_session
+        """ensure_outer_session just installs hook if both sessions exist."""
+        from ccmux.session_layout import ensure_outer_session
 
         # Both inner and outer exist
         mock_exists.return_value = True
 
-        _ensure_outer_session("my-session")
+        ensure_outer_session("my-session")
 
         mock_hook.assert_called_once_with("my-session")
 
-    @mock.patch("ccmux.cli._create_outer_session")
-    @mock.patch("ccmux.cli.tmux_session_exists")
+    @mock.patch("ccmux.session_layout.create_outer_session")
+    @mock.patch("ccmux.session_layout.tmux_session_exists")
     def test_creates_outer_if_missing(self, mock_exists, mock_create):
-        """_ensure_outer_session creates outer session if inner exists but outer doesn't."""
-        from ccmux.cli import _ensure_outer_session
+        """ensure_outer_session creates outer session if inner exists but outer doesn't."""
+        from ccmux.session_layout import ensure_outer_session
 
         # Inner exists, outer doesn't
         mock_exists.side_effect = lambda s: s == "my-session-inner"
 
-        _ensure_outer_session("my-session")
+        ensure_outer_session("my-session")
 
         mock_create.assert_called_once_with("my-session")
 
-    @mock.patch("ccmux.cli._create_outer_session")
-    @mock.patch("ccmux.cli.tmux_session_exists")
+    @mock.patch("ccmux.session_layout.create_outer_session")
+    @mock.patch("ccmux.session_layout.tmux_session_exists")
     def test_returns_early_if_inner_missing(self, mock_exists, mock_create):
-        """_ensure_outer_session returns early if inner session doesn't exist."""
-        from ccmux.cli import _ensure_outer_session
+        """ensure_outer_session returns early if inner session doesn't exist."""
+        from ccmux.session_layout import ensure_outer_session
 
         # Neither exists
         mock_exists.return_value = False
 
-        _ensure_outer_session("my-session")
+        ensure_outer_session("my-session")
 
         mock_create.assert_not_called()
 
