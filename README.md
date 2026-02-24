@@ -14,8 +14,7 @@ A streamlined terminal-UI for juggling concurrent Claude Code sessions.
 ## Installation
 
 ```bash
-git clone git@github.com:TheHumbleTransistor/ccmux.git
-pip install ./ccmux
+pip install ccmux
 ```
 
 ## Quick Start
