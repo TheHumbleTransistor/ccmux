@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 
+# TODO: do we need this function anymore?  if no, let's remove it. Also remove the reference in the project toml file.
 def get_tmux_config_path() -> Path:
     """Get the path to the tmux.conf file included in the package.
 
@@ -15,6 +16,7 @@ def get_tmux_config_path() -> Path:
     return Path(__file__).parent / "tmux.conf"
 
 
+# TODO:  we have two inner sessions: the claude code one and the bash terminal.  We need out naming conventions to make that abundantly clear. Update this function name to clarify and also update the names of the tmux sessions.  
 def apply_inner_session_config(session_name: str) -> bool:
     """Apply tmux configuration to the inner session via per-session options.
 
@@ -43,7 +45,7 @@ def apply_inner_session_config(session_name: str) -> bool:
 def apply_outer_session_config(session_name: str) -> bool:
     """Apply minimal outer config via per-session set-option.
 
-    The outer session has no status bar, mouse on, C-Space prefix, and no escape delay.
+    The outer session has no status bar, mouse on, and C-Space prefix.
     Sets the terminal title to a friendly display name derived from the session name.
 
     Note: These stay programmatic (not in tmux.conf) because ``source-file``
@@ -61,7 +63,6 @@ def apply_outer_session_config(session_name: str) -> bool:
         ("status", "off"),
         ("mouse", "on"),
         ("prefix", "C-Space"),
-        ("escape-time", "0"),
         ("pane-border-style", "fg=#333333"),
         ("pane-active-border-style", "fg=#d7af5f"),
         ("set-titles", "on"),
@@ -78,6 +79,7 @@ def apply_outer_session_config(session_name: str) -> bool:
         return False
 
 
+# TODO: do we need this function anymore?  if no, let's remove it
 def get_tmux_config_content() -> str:
     """Get the tmux configuration as a string.
 
@@ -94,7 +96,7 @@ def get_tmux_config_content() -> str:
     except Exception as e:
         return f"# Error reading tmux.conf: {e}\n"
 
-
+# TODO: do we need this function anymore?  if no, let's remove it
 def export_tmux_config(output_path: Optional[Path] = None) -> tuple[bool, str]:
     """Export the tmux configuration to a file or return its content.
 
