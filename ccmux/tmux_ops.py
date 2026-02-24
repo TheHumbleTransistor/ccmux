@@ -280,6 +280,18 @@ def unset_hook(target: str, hook: str) -> bool:
         return False
 
 
+def resize_pane(target: str, width: int) -> bool:
+    """Resize a tmux pane to a fixed width."""
+    try:
+        subprocess.run(
+            ["tmux", "resize-pane", "-t", target, "-x", str(width)],
+            check=True, capture_output=True,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
 def select_pane(target: str) -> bool:
     """Select a tmux pane. Returns True on success."""
     try:

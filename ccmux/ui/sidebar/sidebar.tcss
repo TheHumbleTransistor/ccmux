@@ -11,7 +11,7 @@ Screen {
     color: #d7af5f;
     background: #1e1e1e;
     text-style: bold;
-    text-align: center;
+    text-align: left;
     text-wrap: nowrap;
     text-overflow: clip;
 }
