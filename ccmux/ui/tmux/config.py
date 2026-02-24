@@ -55,6 +55,10 @@ def apply_outer_session_config(session_name: str) -> bool:
 
     The outer session has no status bar, mouse on, C-Space prefix, and no escape delay.
     Sets the terminal title to a friendly display name derived from the session name.
+
+    Note: These stay programmatic (not in tmux.conf) because ``source-file``
+    has no ``-t`` flag — session-scoped options like prefix, border styles,
+    and title string require ``set-option -t <session>``.
     """
     if session_name == "ccmux":
         display_title = "CCMUX"
