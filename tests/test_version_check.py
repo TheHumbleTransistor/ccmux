@@ -1,4 +1,4 @@
-"""Tests for ccmux.version_check module."""
+"""Tests for ccmux.session_ops module."""
 
 import json
 import tempfile
@@ -72,60 +72,60 @@ def test_version_survives_session_add_remove(temp_state_dir):
 
 def test_no_tmux_running_returns_false(temp_state_dir, monkeypatch):
     """No live tmux session → returns False regardless of version state."""
-    monkeypatch.setattr("ccmux.version_check.__version__", "2.0.0")
+    monkeypatch.setattr("ccmux.session_ops.__version__", "2.0.0")
     state.set_tmux_session_version("1.0.0")
 
-    monkeypatch.setattr("ccmux.version_check.tmux_session_exists", lambda name: False)
+    monkeypatch.setattr("ccmux.session_ops.tmux_session_exists", lambda name: False)
 
-    from ccmux.version_check import stale_sessions_running
+    from ccmux.session_ops import stale_sessions_running
 
     assert stale_sessions_running() is False
 
 
 def test_matching_version_returns_false(temp_state_dir, monkeypatch):
     """Live tmux + matching version → returns False."""
-    monkeypatch.setattr("ccmux.version_check.__version__", "1.0.0")
+    monkeypatch.setattr("ccmux.session_ops.__version__", "1.0.0")
     state.set_tmux_session_version("1.0.0")
 
-    monkeypatch.setattr("ccmux.version_check.tmux_session_exists", lambda name: True)
+    monkeypatch.setattr("ccmux.session_ops.tmux_session_exists", lambda name: True)
 
-    from ccmux.version_check import stale_sessions_running
+    from ccmux.session_ops import stale_sessions_running
 
     assert stale_sessions_running() is False
 
 
 def test_mismatched_version_returns_true(temp_state_dir, monkeypatch):
     """Live tmux + different version → returns True."""
-    monkeypatch.setattr("ccmux.version_check.__version__", "2.0.0")
+    monkeypatch.setattr("ccmux.session_ops.__version__", "2.0.0")
     state.set_tmux_session_version("1.0.0")
 
-    monkeypatch.setattr("ccmux.version_check.tmux_session_exists", lambda name: True)
+    monkeypatch.setattr("ccmux.session_ops.tmux_session_exists", lambda name: True)
 
-    from ccmux.version_check import stale_sessions_running
+    from ccmux.session_ops import stale_sessions_running
 
     assert stale_sessions_running() is True
 
 
 def test_no_stored_version_with_active_tmux_returns_true(temp_state_dir, monkeypatch):
     """No stored version + live tmux → returns True (pre-tracking upgrade)."""
-    monkeypatch.setattr("ccmux.version_check.__version__", "1.0.0")
+    monkeypatch.setattr("ccmux.session_ops.__version__", "1.0.0")
     # No set_tmux_session_version call — stored is None
 
-    monkeypatch.setattr("ccmux.version_check.tmux_session_exists", lambda name: True)
+    monkeypatch.setattr("ccmux.session_ops.tmux_session_exists", lambda name: True)
 
-    from ccmux.version_check import stale_sessions_running
+    from ccmux.session_ops import stale_sessions_running
 
     assert stale_sessions_running() is True
 
 
 def test_no_side_effects(temp_state_dir, monkeypatch):
     """stale_sessions_running() does not modify state."""
-    monkeypatch.setattr("ccmux.version_check.__version__", "2.0.0")
+    monkeypatch.setattr("ccmux.session_ops.__version__", "2.0.0")
     state.set_tmux_session_version("1.0.0")
 
-    monkeypatch.setattr("ccmux.version_check.tmux_session_exists", lambda name: True)
+    monkeypatch.setattr("ccmux.session_ops.tmux_session_exists", lambda name: True)
 
-    from ccmux.version_check import stale_sessions_running
+    from ccmux.session_ops import stale_sessions_running
 
     stale_sessions_running()
     # Version should remain unchanged

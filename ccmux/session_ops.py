@@ -68,6 +68,14 @@ from ccmux.tmux_ops import (
 from ccmux.ui.tmux import apply_claude_inner_session_config, apply_server_global_config
 
 
+def stale_sessions_running() -> bool:
+    """Return True if ccmux tmux sessions are running on an outdated version."""
+    if not tmux_session_exists(INNER_SESSION):
+        return False
+    stored = state.get_tmux_session_version()
+    return stored != __version__
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers (extracted from duplicated patterns)
 # ---------------------------------------------------------------------------
@@ -389,6 +397,7 @@ def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: 
         else:
             console.print(f"  [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
         create_outer_session()
+        state.set_tmux_session_version(__version__)
     else:
         cc_window_id = create_tmux_window(INNER_SESSION, name, path, launch_cmd)
         if cc_window_id is None:
@@ -422,8 +431,6 @@ def _save_new_session_state(
     )
     tag_window_with_session_id(cc_window_id, name)
     tag_window_with_session_id(bash_window_id, name)
-
-    state.set_tmux_session_version(__version__)
 
 
 # ---------------------------------------------------------------------------
