@@ -13,6 +13,7 @@ Made by [bold #bcbcbc]The Humble Transistor[/]
 Embedded electronics development
 [dim]https://TheHumbleTransistor.com[/]
 
+Contribute here:
 [dim]https://github.com/TheHumbleTransistor/ccmux[/]
 """
 
