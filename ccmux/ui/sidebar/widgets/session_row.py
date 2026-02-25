@@ -61,6 +61,7 @@ class SessionRow(Vertical):
         self._flash_timer = None
         self._breath_timer = None
         self._breath_frame = 0
+        self._breath_offset = hash(session_name) % len(self._BREATH_COLORS)
         if is_current:
             self.add_class("current")
         self._apply_alert_class(alert_state)
@@ -79,7 +80,7 @@ class SessionRow(Vertical):
         if not self.is_active:
             indicator = "\u25cb"  # ○
         elif self._breath_timer is not None:
-            color = self._BREATH_COLORS[self._breath_frame % len(self._BREATH_COLORS)]
+            color = self._BREATH_COLORS[(self._breath_frame + self._breath_offset) % len(self._BREATH_COLORS)]
             indicator = f"[{color}]\u25cf[/]"
         else:
             indicator = "\u25cf"  # ● (inherits grey text color)
