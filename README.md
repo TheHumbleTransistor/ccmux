@@ -12,6 +12,24 @@ A streamlined terminal-UI for juggling concurrent Claude Code sessions.
 - **CLI session management** — create, list, activate, remove sessions from the terminal
 - **Git worktree isolation** — spin up duplicate sessions on isolated branches; use  `ccmux.toml` files to add additional steps when spinning up worktrees, such as setting up untracked build dependencies 
 
+## Prerequisites
+
+Before installing ccmux, make sure you have:
+
+1. **tmux** — terminal multiplexer
+   ```bash
+   # Ubuntu/Debian
+   sudo apt install tmux
+   # macOS
+   brew install tmux
+   ```
+
+2. **Claude Code** — Anthropic's CLI for Claude
+   ```bash
+   npm install -g @anthropic-ai/claude-code
+   ```
+   See [Claude Code documentation](https://docs.anthropic.com/en/docs/claude-code) for details.
+
 ## Installation
 
 ```bash

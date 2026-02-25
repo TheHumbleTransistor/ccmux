@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Claude Code Multiplexer CLI - Manage multiple Claude Code sessions."""
 
+import shutil
 from typing import Annotated, Optional
 
 import cyclopts
@@ -131,6 +132,11 @@ def debug_sidebar() -> None:
     do_debug_sidebar()
 
 
+def check_claude_installed() -> bool:
+    """Check if Claude Code CLI is available on PATH."""
+    return shutil.which("claude") is not None
+
+
 def main():
     """Main entry point for the CLI."""
     import sys
@@ -143,6 +149,13 @@ def main():
         console.print("  macOS:          brew install tmux")
         console.print("  Fedora:         sudo dnf install tmux")
         console.print("  Arch:           sudo pacman -S tmux")
+        sys.exit(1)
+
+    if not check_claude_installed():
+        console.print("[red]Error:[/red] Claude Code is not installed or not found on PATH.", style="bold")
+        console.print("\nInstall Claude Code:")
+        console.print("  npm install -g @anthropic-ai/claude-code")
+        console.print("\nFor more info: https://docs.anthropic.com/en/docs/claude-code")
         sys.exit(1)
 
     try:
