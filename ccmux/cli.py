@@ -131,11 +131,22 @@ def debug_sidebar() -> None:
 
 def main():
     """Main entry point for the CLI."""
+    import sys
+    from ccmux.tmux_ops import check_tmux_installed
+
+    if not check_tmux_installed():
+        console.print("[red]Error:[/red] tmux is not installed or not found on PATH.", style="bold")
+        console.print("\nInstall tmux for your platform:")
+        console.print("  Ubuntu/Debian:  sudo apt install tmux")
+        console.print("  macOS:          brew install tmux")
+        console.print("  Fedora:         sudo dnf install tmux")
+        console.print("  Arch:           sudo pacman -S tmux")
+        sys.exit(1)
+
     try:
         app()
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")
-        import sys
         sys.exit(130)
 
 

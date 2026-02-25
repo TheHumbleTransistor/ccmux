@@ -6,6 +6,11 @@ import subprocess
 from typing import Optional
 
 
+def check_tmux_installed() -> bool:
+    """Check if tmux is available on PATH."""
+    return shutil.which("tmux") is not None
+
+
 def _terminal_size_flags() -> list[str]:
     """Return [-x, cols, -y, rows] for the current terminal, or [] on failure."""
     try:
