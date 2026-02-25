@@ -55,17 +55,18 @@ def _base_sessions(
 
 
 # Scripted alert phases: (ticks, kwargs WITHOUT current — current is user-controlled)
+# Activity always precedes bell (work happens before prompting the user).
 _PHASES: list[tuple[int, dict]] = [
-    # 1. Resting — everything quiet
-    (8, {}),
-    # 2. Activity on feat-auth (breathing dot)
-    (8, dict(alerts={"feat-auth": "activity"})),
-    # 3. Bell on default (red flash)
+    # 1. Activity on feat-auth right away (breathing dot)
+    (2, dict(alerts={"feat-auth": "activity"})),
+    # 2. Bell on feat-auth (work finished, needs input) — visible within 2s
+    (8, dict(alerts={"feat-auth": "bell"})),
+    # 3. Activity on default (work in progress)
+    (8, dict(alerts={"default": "activity"})),
+    # 4. Bell on default (needs input)
     (8, dict(alerts={"default": "bell"})),
-    # 4. Activity on main
+    # 5. Activity on main
     (8, dict(alerts={"main": "activity"})),
-    # 5. Activity on feat-auth again
-    (8, dict(alerts={"feat-auth": "activity"})),
     # 6. Extra session appears (tests rebuild path)
     (8, dict(extra_session=True)),
     # 7. Back to quiet
