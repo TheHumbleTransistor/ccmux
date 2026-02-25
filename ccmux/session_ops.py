@@ -103,11 +103,14 @@ def stale_sessions_running() -> bool:
 
 def build_claude_command(name: str, path: str, claude_session_id: str, resume: bool = False) -> str:
     """Build the shell command to launch or resume Claude Code in a tmux pane."""
-    flag = "--resume" if resume else "--session-id"
+    if resume:
+        claude_part = f"claude --resume {claude_session_id} || claude"
+    else:
+        claude_part = f"claude --session-id {claude_session_id}"
     return (
         f"export CCMUX_SESSION={name}; "
         f"unset CLAUDECODE; "
-        f"claude {flag} {claude_session_id}; while true; do $SHELL; done"
+        f"{claude_part}; while true; do $SHELL; done"
     )
 
 

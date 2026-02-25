@@ -13,6 +13,11 @@ def test_resume_uses_resume_flag():
     assert "--session-id" not in cmd
 
 
+def test_resume_falls_back_to_new_session():
+    cmd = build_claude_command("my-session", "/tmp/path", "abc-123", resume=True)
+    assert "claude --resume abc-123 || claude" in cmd
+
+
 def test_default_is_not_resume():
     cmd = build_claude_command("my-session", "/tmp/path", "abc-123")
     assert "--session-id abc-123" in cmd
