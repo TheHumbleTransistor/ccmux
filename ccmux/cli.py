@@ -167,6 +167,9 @@ def main():
         console.print("\nFor more info: https://docs.anthropic.com/en/docs/claude-code")
         sys.exit(1)
 
+    from ccmux.version_check import check_version_mismatch
+    check_version_mismatch()
+
     try:
         app()
     except KeyboardInterrupt:

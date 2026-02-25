@@ -423,6 +423,9 @@ def _save_new_session_state(
     tag_window_with_session_id(cc_window_id, name)
     tag_window_with_session_id(bash_window_id, name)
 
+    from ccmux import __version__
+    state.set_state_version(__version__)
+
 
 # ---------------------------------------------------------------------------
 # session_rename decomposed

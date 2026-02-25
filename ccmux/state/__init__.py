@@ -13,6 +13,8 @@ from ccmux.state.store import (
     update_tmux_ids,
     clear_tmux_window_ids,
     update_session,
+    get_state_version,
+    set_state_version,
     STATE_DIR,
     STATE_FILE,
 )
@@ -32,6 +34,8 @@ __all__ = [
     "update_tmux_ids",
     "clear_tmux_window_ids",
     "update_session",
+    "get_state_version",
+    "set_state_version",
     "STATE_DIR",
     "STATE_FILE",
 ]
