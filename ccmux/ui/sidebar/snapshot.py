@@ -19,7 +19,6 @@ class SessionSnapshot:
     is_current: bool
     alert_state: str | None
     session_id: int = 0
-    tmux_cc_window_id: str | None = None
     branch: str | None = None
     short_sha: str = ""
     lines_added: int = 0
@@ -215,7 +214,6 @@ async def build_snapshot() -> list[SessionSnapshot]:
             is_current=is_current,
             alert_state=alert_state,
             session_id=sess.id,
-            tmux_cc_window_id=sess.tmux_cc_window_id,
             branch=branch,
             short_sha=short_sha,
             lines_added=added,

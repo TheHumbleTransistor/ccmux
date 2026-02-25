@@ -605,23 +605,23 @@ class TestSidebarRendering:
 
 
 class TestSessionRowSelected:
-    """Tests for SessionRow.Selected message carrying window ID."""
+    """Tests for SessionRow.Selected message carrying session ID."""
 
-    def test_select_message_includes_window_id(self):
-        """SessionRow.Selected carries the tmux_cc_window_id from the row."""
-        msg = SessionRow.Selected("fox", tmux_cc_window_id="@9")
+    def test_select_message_includes_session_id(self):
+        """SessionRow.Selected carries the session_id from the row."""
+        msg = SessionRow.Selected("fox", session_id=3)
         assert msg.session_name == "fox"
-        assert msg.tmux_cc_window_id == "@9"
+        assert msg.session_id == 3
 
-    def test_select_message_window_id_defaults_to_none(self):
-        """SessionRow.Selected defaults tmux_cc_window_id to None."""
+    def test_select_message_session_id_defaults_to_zero(self):
+        """SessionRow.Selected defaults session_id to 0."""
         msg = SessionRow.Selected("fox")
         assert msg.session_name == "fox"
-        assert msg.tmux_cc_window_id is None
+        assert msg.session_id == 0
 
     @pytest.mark.asyncio
-    async def test_click_posts_message_with_window_id(self):
-        """Clicking a SessionRow posts Selected with the correct window ID."""
+    async def test_click_posts_message_with_session_id(self):
+        """Clicking a SessionRow posts Selected with the correct session ID."""
         from tests.demo_sidebar import make_demo_provider
 
         provider = make_demo_provider()
@@ -634,9 +634,8 @@ class TestSessionRowSelected:
             rows = pilot.app.query(SessionRow)
             assert len(rows) > 0
             first_row = rows[0]
-            # Verify the row carries a window ID
-            assert first_row.tmux_cc_window_id is not None
-            assert first_row.tmux_cc_window_id.startswith("@")
+            # Verify the row carries a session ID
+            assert first_row.session_id > 0
 
 
 class TestAboutPanel:

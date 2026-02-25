@@ -14,6 +14,7 @@ from textual.containers import Vertical
 from textual.geometry import Size
 from textual.widgets import Static
 
+from ccmux import state
 from ccmux.naming import INNER_SESSION
 from ccmux.ui.sidebar import snapshot
 from ccmux.ui.sidebar.snapshot import SessionSnapshot
@@ -274,9 +275,11 @@ class SidebarApp(App):
             await self._refresh_sessions(caller="select")
             return
 
-        # Use window ID when available for precise targeting; fall back to name.
-        if message.tmux_cc_window_id:
-            target = message.tmux_cc_window_id
+        # Look up window ID from state for precise targeting; fall back to name.
+        sess = await asyncio.to_thread(state.get_session, message.session_name)
+        cc_window_id = sess.tmux_cc_window_id if sess else None
+        if cc_window_id:
+            target = cc_window_id
         else:
             target = f"{INNER_SESSION}:{message.session_name}"
         name_target = f"{INNER_SESSION}:{message.session_name}"

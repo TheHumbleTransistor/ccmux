@@ -29,10 +29,10 @@ class SessionRow(Vertical):
     class Selected(Message):
         """Posted when the user clicks a session row."""
 
-        def __init__(self, session_name: str, tmux_cc_window_id: str | None = None) -> None:
+        def __init__(self, session_name: str, session_id: int = 0) -> None:
             super().__init__()
             self.session_name = session_name
-            self.tmux_cc_window_id = tmux_cc_window_id
+            self.session_id = session_id
 
     def __init__(
         self,
@@ -46,12 +46,12 @@ class SessionRow(Vertical):
         short_sha: str = "",
         lines_added: int = 0,
         lines_removed: int = 0,
-        tmux_cc_window_id: str | None = None,
+        session_id: int = 0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.session_name = session_name
-        self.tmux_cc_window_id = tmux_cc_window_id
+        self.session_id = session_id
         self.session_type = session_type
         self.is_active = is_active
         self.is_current = is_current
@@ -223,4 +223,4 @@ class SessionRow(Vertical):
 
     async def on_click(self) -> None:
         """Signal that this session row was clicked."""
-        self.post_message(self.Selected(self.session_name, self.tmux_cc_window_id))
+        self.post_message(self.Selected(self.session_name, self.session_id))

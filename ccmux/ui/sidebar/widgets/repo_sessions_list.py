@@ -36,6 +36,6 @@ class RepoSessionsList(Vertical):
                 short_sha=entry.short_sha,
                 lines_added=entry.lines_added,
                 lines_removed=entry.lines_removed,
-                tmux_cc_window_id=entry.tmux_cc_window_id,
+                session_id=entry.session_id,
                 id=f"sess-{entry.session_name}",
             )
