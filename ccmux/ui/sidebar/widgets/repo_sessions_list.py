@@ -5,7 +5,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Vertical
 
-from ccmux.ui.sidebar.snapshot import SessionSnapshot
+from ccmux.ui.sidebar.snapshot import DerivedSessionState
 from ccmux.ui.sidebar.widgets.repo_header import RepoHeader
 from ccmux.ui.sidebar.widgets.session_row import SessionRow
 
@@ -16,7 +16,7 @@ class RepoSessionsList(Vertical):
     def __init__(
         self,
         repo_name: str,
-        sessions: list[SessionSnapshot],
+        sessions: list[DerivedSessionState],
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -26,11 +26,13 @@ class RepoSessionsList(Vertical):
     def compose(self) -> ComposeResult:
         yield RepoHeader(f"\u25cf {self.repo_name}/")
         last_idx = len(self.sessions) - 1
-        for i, entry in enumerate(self.sessions):
+        for i, derived in enumerate(self.sessions):
+            entry = derived.snapshot
             yield SessionRow(
                 entry.session_name, entry.session_type,
                 entry.is_active, entry.is_current,
-                entry.alert_state,
+                status=derived.status,
+                has_blocker_alert=derived.has_blocker_alert,
                 is_last=(i == last_idx),
                 branch=entry.branch,
                 short_sha=entry.short_sha,

@@ -141,35 +141,23 @@ SessionRow.current .deletions {
     color: #6a2d2d;
 }
 
-SessionRow.bell {
+SessionRow.blocker-alert {
     background: #711d1d;
 }
 
-SessionRow.bell:hover {
+SessionRow.blocker-alert:hover {
     background: #7d2222;
 }
 
-SessionRow.activity {
-}
-
-SessionRow.activity:hover {
-}
-
-/* Red phase of flash (default when current+bell) */
-SessionRow.current.bell {
+/* Red phase of flash (default when current+blocker-alert) */
+SessionRow.current.blocker-alert {
     background: #711d1d;
     color: #1e1e1e;
 }
 
 /* Alternate phase of flash (matches normal current background) */
-SessionRow.current.bell.bell-flash {
+SessionRow.current.blocker-alert.blocker-alert-flash {
     background: #e0e0e0;
-}
-
-/* Activity on current instance: suppress, inverted style is sufficient */
-SessionRow.current.activity {
-    background: white;
-    color: #1e1e1e;
 }
 
 /* RepoHeader */

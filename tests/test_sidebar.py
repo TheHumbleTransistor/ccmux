@@ -170,16 +170,20 @@ class TestGroupByRepo:
 
     def test_group_by_repo_sorts_by_id(self):
         """Worktree sessions sort by session_id (creation order), not alphabetically."""
-        from ccmux.ui.sidebar.snapshot import SessionSnapshot, group_by_repo
+        from ccmux.ui.sidebar.snapshot import SessionSnapshot, DerivedSessionState, group_by_repo
 
         snapshots = [
             SessionSnapshot("repo", "main-sess", "main", True, False, None, session_id=1),
             SessionSnapshot("repo", "zebra", "worktree", True, False, None, session_id=2),
             SessionSnapshot("repo", "alpha", "worktree", True, False, None, session_id=3),
         ]
+        derived = [
+            DerivedSessionState(snapshot=s, status="idle", has_blocker_alert=False)
+            for s in snapshots
+        ]
 
-        grouped = group_by_repo(snapshots)
-        names = [e.session_name for e in grouped["repo"]]
+        grouped = group_by_repo(derived)
+        names = [d.snapshot.session_name for d in grouped["repo"]]
         # main first, then worktrees in creation order (zebra before alpha)
         assert names == ["main-sess", "zebra", "alpha"]
 
@@ -220,6 +224,86 @@ class TestResolveAlertState:
         from ccmux.ui.sidebar.snapshot import resolve_alert_state
         flags = {"bell": False, "recently_active": False, "sid": "1"}
         assert resolve_alert_state(flags) is None
+
+
+class TestStickyBlockedState:
+    """Tests for the sticky blocked/blocker-alert state machine in SidebarApp."""
+
+    def _make_app(self):
+        """Create a SidebarApp with no snapshot function for unit-testing state logic."""
+        app = SidebarApp(snapshot_fn=lambda: [], poll_interval=60.0)
+        # Initialise sticky sets (normally done in __init__)
+        return app
+
+    def _snap(self, name="fox", is_active=True, alert_state=None):
+        from ccmux.ui.sidebar.snapshot import SessionSnapshot
+        return SessionSnapshot(
+            repo_name="repo", session_name=name, session_type="worktree",
+            is_active=is_active, is_current=False, alert_state=alert_state,
+            session_id=1,
+        )
+
+    def test_bell_sets_blocked_and_alert(self):
+        """Bell event sets both blocked status and blocker alert flag."""
+        app = self._make_app()
+        status, has_alert = app._compute_session_state(self._snap(alert_state="bell"))
+        assert status == "blocked"
+        assert has_alert is True
+
+    def test_click_clears_alert_but_not_blocked(self):
+        """After bell, clearing blocker_alerted (simulating click) keeps blocked status."""
+        app = self._make_app()
+        # Bell fires
+        app._compute_session_state(self._snap(alert_state="bell"))
+        # Simulate click: clear blocker alert only
+        app._blocker_alerted_sessions.discard("fox")
+        # Next poll with None (tmux bell flag cleared after window select)
+        status, has_alert = app._compute_session_state(self._snap(alert_state=None))
+        assert status == "blocked"
+        assert has_alert is False
+
+    def test_activity_clears_both(self):
+        """Activity event clears both blocked status and blocker alert."""
+        app = self._make_app()
+        # Bell fires
+        app._compute_session_state(self._snap(alert_state="bell"))
+        assert "fox" in app._blocked_sessions
+        assert "fox" in app._blocker_alerted_sessions
+        # Activity fires
+        status, has_alert = app._compute_session_state(self._snap(alert_state="activity"))
+        assert status == "active"
+        assert has_alert is False
+        assert "fox" not in app._blocked_sessions
+        assert "fox" not in app._blocker_alerted_sessions
+
+    def test_deactivation_clears_all(self):
+        """Deactivation clears all sticky state."""
+        app = self._make_app()
+        # Bell fires
+        app._compute_session_state(self._snap(alert_state="bell"))
+        # Session deactivates
+        status, has_alert = app._compute_session_state(self._snap(is_active=False))
+        assert status == "deactivated"
+        assert has_alert is False
+        assert "fox" not in app._blocked_sessions
+        assert "fox" not in app._blocker_alerted_sessions
+
+    def test_idle_when_no_sticky_state(self):
+        """Active session with no alert and no sticky state → idle."""
+        app = self._make_app()
+        status, has_alert = app._compute_session_state(self._snap(alert_state=None))
+        assert status == "idle"
+        assert has_alert is False
+
+    def test_sticky_persists_across_none_polls(self):
+        """Blocked status persists when tmux returns None (bell flag cleared)."""
+        app = self._make_app()
+        # Bell fires
+        app._compute_session_state(self._snap(alert_state="bell"))
+        # Multiple None polls (tmux cleared the bell flag)
+        for _ in range(3):
+            status, has_alert = app._compute_session_state(self._snap(alert_state=None))
+            assert status == "blocked"
 
 
 class TestPidTracking:

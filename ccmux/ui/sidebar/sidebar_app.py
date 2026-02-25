@@ -17,7 +17,7 @@ from textual.widgets import Static
 from ccmux import state
 from ccmux.naming import INNER_SESSION
 from ccmux.ui.sidebar import snapshot
-from ccmux.ui.sidebar.snapshot import SessionSnapshot
+from ccmux.ui.sidebar.snapshot import DerivedSessionState, SessionSnapshot
 from ccmux.ui.sidebar.widgets import SessionRow, RepoSessionsList, TitleBanner, AboutPanel
 
 POLL_INTERVAL = 5.0
@@ -58,7 +58,9 @@ class SidebarApp(App):
         self._snapshot_fn = snapshot_fn
         self._poll_interval = poll_interval
         self._on_select = on_select
-        self._last_snapshot: list[SessionSnapshot] | None = None
+        self._last_derived: list[DerivedSessionState] | None = None
+        self._blocked_sessions: set[str] = set()
+        self._blocker_alerted_sessions: set[str] = set()
         self._refresh_lock = asyncio.Lock()
         self._session_list: Vertical | None = None
         self._about_visible = False
@@ -175,6 +177,37 @@ class SidebarApp(App):
         except OSError:
             pass
 
+    def _compute_session_state(
+        self, entry: SessionSnapshot,
+    ) -> tuple[str, bool]:
+        """Compute derived (status, has_blocker_alert) from raw snapshot + sticky state."""
+        name = entry.session_name
+        raw_alert = entry.alert_state
+
+        if not entry.is_active:
+            # Deactivated — clear all sticky state
+            self._blocked_sessions.discard(name)
+            self._blocker_alerted_sessions.discard(name)
+            return ("deactivated", False)
+
+        if raw_alert == "bell":
+            self._blocked_sessions.add(name)
+            self._blocker_alerted_sessions.add(name)
+        elif raw_alert == "activity":
+            self._blocked_sessions.discard(name)
+            self._blocker_alerted_sessions.discard(name)
+        # raw_alert is None → sticky state persists (key for blocked persistence)
+
+        if raw_alert == "activity":
+            status = "active"
+        elif name in self._blocked_sessions:
+            status = "blocked"
+        else:
+            status = "idle"
+
+        has_blocker_alert = name in self._blocker_alerted_sessions
+        return (status, has_blocker_alert)
+
     async def _refresh_sessions(self, caller: str = "unknown") -> None:
         """Refresh the session list, using incremental updates when possible."""
         if self._session_list is None:
@@ -190,23 +223,34 @@ class SidebarApp(App):
             else:
                 snap = await snapshot.build_snapshot()
 
-            if snap == self._last_snapshot:
+            # Compute derived state for each entry
+            derived = [
+                DerivedSessionState(
+                    snapshot=entry,
+                    status=computed[0],
+                    has_blocker_alert=computed[1],
+                )
+                for entry in snap
+                for computed in [self._compute_session_state(entry)]
+            ]
+
+            if derived == self._last_derived:
                 log.debug("refresh SKIP (no change) caller=%s", caller)
                 return
 
-            old_snap = self._last_snapshot
-            self._last_snapshot = snap
+            old_derived = self._last_derived
+            self._last_derived = derived
 
-            if self._try_incremental_update(old_snap, snap):
+            if self._try_incremental_update(old_derived, derived):
                 log.debug("refresh INCREMENTAL caller=%s", caller)
                 return
 
             log.debug("refresh REBUILD caller=%s", caller)
             container = self._session_list
-            if not snap:
+            if not derived:
                 new_widgets = [Static("  No sessions")]
             else:
-                grouped = snapshot.group_by_repo(snap)
+                grouped = snapshot.group_by_repo(derived)
                 new_widgets = [
                     RepoSessionsList(repo_name, entries, id=f"repo-group-{repo_name}")
                     for repo_name, entries in grouped.items()
@@ -215,23 +259,29 @@ class SidebarApp(App):
             await container.mount(*new_widgets)
 
     def _try_incremental_update(
-        self, old_snap: list[SessionSnapshot] | None, new_snap: list[SessionSnapshot],
+        self,
+        old_derived: list[DerivedSessionState] | None,
+        new_derived: list[DerivedSessionState],
     ) -> bool:
         """Update session rows in place if structure is unchanged. Return True on success."""
-        if not old_snap or not new_snap:
+        if not old_derived or not new_derived:
             return False
         # Structure check: same (repo, name) pairs in same order
-        if [(e.repo_name, e.session_name) for e in old_snap] != [
-            (e.repo_name, e.session_name) for e in new_snap
+        if [
+            (d.snapshot.repo_name, d.snapshot.session_name) for d in old_derived
+        ] != [
+            (d.snapshot.repo_name, d.snapshot.session_name) for d in new_derived
         ]:
             return False
-        for old_entry, new_entry in zip(old_snap, new_snap):
-            if old_entry != new_entry:
-                row = self.query_one(f"#sess-{new_entry.session_name}", SessionRow)
+        for old_d, new_d in zip(old_derived, new_derived):
+            if old_d != new_d:
+                entry = new_d.snapshot
+                row = self.query_one(f"#sess-{entry.session_name}", SessionRow)
                 row.update_state(
-                    new_entry.is_active, new_entry.is_current, new_entry.alert_state,
-                    new_entry.branch, new_entry.short_sha,
-                    new_entry.lines_added, new_entry.lines_removed,
+                    entry.is_active, entry.is_current,
+                    new_d.status, new_d.has_blocker_alert,
+                    entry.branch, entry.short_sha,
+                    entry.lines_added, entry.lines_removed,
                 )
         return True
 
@@ -257,13 +307,15 @@ class SidebarApp(App):
         )
 
     async def on_session_row_selected(self, message: SessionRow.Selected) -> None:
-        """Switch to the clicked session's tmux window and clear bell alert."""
-        # Clear bell styling on the widget for instant feedback (all modes)
+        """Switch to the clicked session's tmux window and clear blocker alert."""
+        # Clear blocker alert (row background) but keep blocked status (red circle)
+        self._blocker_alerted_sessions.discard(message.session_name)
         try:
             row = self.query_one(f"#sess-{message.session_name}", SessionRow)
-            if row.alert_state == "bell":
+            if row.has_blocker_alert:
                 row.update_state(
-                    row.is_active, row.is_current, None,
+                    row.is_active, row.is_current,
+                    row.status, False,
                     row.branch, row.short_sha,
                     row.lines_added, row.lines_removed,
                 )
