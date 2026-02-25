@@ -13,7 +13,7 @@ from ccmux.naming import INNER_SESSION
 
 _log = logging.getLogger("ccmux.sidebar")
 
-ACTIVITY_TIMEOUT = 5  # seconds since last output to consider "recently active"
+ACTIVITY_TIMEOUT = 5  # maximum seconds since last output to consider "recently active"
 
 
 @dataclass(frozen=True, slots=True)
