@@ -7,13 +7,13 @@ from textual.widgets import Static
 from ccmux import __version__
 
 ABOUT_TEXT = f"""\
-[bold #d7af5f]ccmux[/] [dim]v{__version__}[/]
+[dim]version {__version__}[/]
 
 Made by [bold #bcbcbc]The Humble Transistor[/]
 Embedded electronics development
-[dim]TheHumbleTransistor.com[/]
+[dim]https://TheHumbleTransistor.com[/]
 
-[dim]github.com/TheHumbleTransistor/ccmux[/]
+[dim]https://github.com/TheHumbleTransistor/ccmux[/]
 """
 
 
