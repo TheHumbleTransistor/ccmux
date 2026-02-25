@@ -14,3 +14,11 @@ When working on GitHub issues, follow this process exactly:
 ## Branch Naming
 - Always create feature branches: `feature/issue-<number>-<short-description>`
 - Never work directly on master
+
+## Architecture Conventions
+
+### Error Handling Layering
+- `ccmux/session_ops.py` (and other business-logic modules) should **raise exceptions** for error conditions
+- `ccmux/cli.py` is responsible for **catching exceptions** and presenting user-facing error messages via `console.print()` + `sys.exit()`
+- This keeps business logic testable and decoupled from presentation
+

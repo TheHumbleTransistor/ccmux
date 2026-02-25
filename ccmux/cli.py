@@ -2,11 +2,13 @@
 """Claude Code Multiplexer CLI - Manage multiple Claude Code sessions."""
 
 import shutil
+import sys
 from typing import Annotated, Optional
 
 import cyclopts
 from cyclopts import Parameter
 
+from ccmux.exceptions import SessionExistsError
 from ccmux.session_ops import (
     do_attach,
     do_detach,
@@ -53,7 +55,11 @@ def session_new(
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
     """Create a new Claude Code session in main repo or as a git worktree."""
-    do_session_new(name=name, worktree=worktree, yes=yes)
+    try:
+        do_session_new(name=name, worktree=worktree, yes=yes)
+    except SessionExistsError as e:
+        console.print(f"[red]Error:[/red] {e}", style="bold")
+        sys.exit(1)
 
 
 @app.command(name="list")
@@ -68,7 +74,11 @@ def session_rename(
     new: Optional[str] = None,
 ) -> None:
     """Rename a ccmux session."""
-    do_session_rename(old=old, new=new)
+    try:
+        do_session_rename(old=old, new=new)
+    except SessionExistsError as e:
+        console.print(f"[red]Error:[/red] {e}", style="bold")
+        sys.exit(1)
 
 
 @app.command(name="attach")
@@ -139,7 +149,6 @@ def check_claude_installed() -> bool:
 
 def main():
     """Main entry point for the CLI."""
-    import sys
     from ccmux.tmux_ops import check_tmux_installed
 
     if not check_tmux_installed():

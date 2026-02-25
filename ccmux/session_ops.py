@@ -1,4 +1,9 @@
-"""Session lifecycle logic for ccmux: create, activate, deactivate, remove, rename."""
+"""Session lifecycle logic for ccmux: create, activate, deactivate, remove, rename.
+
+Functions in this module should raise exceptions for error conditions rather
+than calling console.print()/sys.exit() directly. The CLI layer (cli.py)
+is responsible for catching exceptions and presenting errors to the user.
+"""
 
 import os
 import re
@@ -12,6 +17,7 @@ from typing import Optional
 from rich.prompt import Confirm, Prompt
 
 from ccmux import state
+from ccmux.exceptions import SessionExistsError
 from ccmux.config import run_post_create
 from ccmux.display import console, display_session_table, show_session_info
 from ccmux.git_ops import (
@@ -246,20 +252,26 @@ def _resolve_session_type(repo_root: Path, worktree: bool, yes: bool) -> bool:
     return False
 
 
+def session_name_exists(name: str, repo_root: Path) -> bool:
+    """Check if a session name is already in use (session state or worktree on disk)."""
+    if state.get_session(name):
+        return True
+    test_path = repo_root / ".worktrees" / name
+    return worktree_exists(test_path, repo_root)
+
+
 def _generate_session_name(repo_root: Path, create_as_worktree: bool, name: Optional[str]) -> str:
     """Generate or sanitize session name."""
     if name is not None:
-        return sanitize_name(name)
+        sanitized = sanitize_name(name)
+        if session_name_exists(sanitized, repo_root):
+            raise SessionExistsError(sanitized)
+        return sanitized
 
     for _ in range(20):
         candidate = sanitize_name(generate_animal_name())
-        if create_as_worktree:
-            test_path = repo_root / ".worktrees" / candidate
-            if not worktree_exists(test_path, repo_root) and not state.get_session(candidate):
-                return candidate
-        else:
-            if not state.get_session(candidate):
-                return candidate
+        if not session_name_exists(candidate, repo_root):
+            return candidate
 
     base = sanitize_name(generate_animal_name())
     suffix = __import__("random").randint(10, 99)
@@ -612,6 +624,10 @@ def do_session_rename(old: Optional[str] = None, new: Optional[str] = None) -> N
     if old_name == new_name:
         console.print(f"[yellow]Session is already named '{old_name}'.[/yellow]")
         return
+
+    repo_root = Path(session_data.repo_path)
+    if session_name_exists(new_name, repo_root):
+        raise SessionExistsError(new_name)
 
     is_wt = session_data.is_worktree
     tmux_cc_window_id = session_data.tmux_cc_window_id
