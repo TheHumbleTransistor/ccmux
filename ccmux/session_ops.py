@@ -301,7 +301,7 @@ def _reactivate_single_orphan(sess) -> None:
     path = sess.session_path
     sess_type = sess.session_type + " repo" if not sess.is_worktree else "worktree"
 
-    orphan_session_id = str(uuid.uuid4())
+    orphan_session_id = sess.claude_session_id or str(uuid.uuid4())
     cmd = build_launch_command(name, path, orphan_session_id, f"{sess_type} session: {name}")
 
     cc_window_id = create_tmux_window(INNER_SESSION, name, path, cmd)
@@ -935,7 +935,7 @@ def _activate_all(yes: bool = False) -> None:
         if sess.tmux_cc_window_id:
             state.clear_tmux_window_ids(sess.name)
         is_first = not inner_exists and i == 0
-        claude_session_id = str(uuid.uuid4())
+        claude_session_id = sess.claude_session_id or str(uuid.uuid4())
         launch_cmd = build_activate_command(sess.name, sess.session_path, claude_session_id)
 
         cc_window_id, bash_window_id = create_session_window(sess.name, sess.session_path, launch_cmd, is_first)
@@ -981,7 +981,7 @@ def _activate_single(name: str, yes: bool = False) -> None:
     console.print(f"  Session: {session.session_path}")
 
     is_first = not tmux_session_exists(INNER_SESSION)
-    claude_session_id = str(uuid.uuid4())
+    claude_session_id = session.claude_session_id or str(uuid.uuid4())
     launch_cmd = build_activate_command(name, session.session_path, claude_session_id)
 
     cc_window_id, bash_window_id = create_session_window(name, session.session_path, launch_cmd, is_first)
