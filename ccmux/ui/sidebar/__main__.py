@@ -16,9 +16,11 @@ def main() -> None:
             print("Error: demo requires the tests package (not installed)", file=sys.stderr)
             sys.exit(1)
 
+        provider = make_demo_provider()
         app = SidebarApp(
-            snapshot_fn=make_demo_provider(),
+            snapshot_fn=provider,
             poll_interval=DEMO_POLL_INTERVAL,
+            on_select=provider.select,
         )
         app.run()
         return

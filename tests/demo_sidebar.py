@@ -1,47 +1,108 @@
 """Demo snapshot builder for sidebar testing."""
 
-from collections.abc import Awaitable, Callable
+import random
 
 from ccmux.ui.sidebar.snapshot import SessionSnapshot
 
-
-def build_demo_snapshot(tick: int) -> list[SessionSnapshot]:
-    """Build varying snapshot data to exercise refresh/rebuild paths."""
-    # Cycle current session among three sessions
-    current_idx = tick % 3
-    # Cycle alert states: None -> bell -> activity -> None
-    alert_cycle = [None, "bell", "activity", None]
-    alert_for = lambda offset: alert_cycle[(tick + offset) % len(alert_cycle)]
-
-    base = [
-        SessionSnapshot("my-project", "main", "main", True, current_idx == 0, alert_for(0),
-                         branch="main", short_sha="a1b2c3d", lines_added=15, lines_removed=3),
-        SessionSnapshot("my-project", "feat-auth", "worktree", True, current_idx == 1, alert_for(1),
-                         branch="feat/auth-system", short_sha="e4f5a6b", lines_added=47, lines_removed=12),
-        SessionSnapshot("my-project", "fix-bug", "worktree", False, current_idx == 2, alert_for(2),
-                         branch=None, short_sha="7c8d9e0", lines_added=3, lines_removed=1),
-        SessionSnapshot("other-repo", "default", "main", True, False, alert_for(3),
-                         branch="main", short_sha="f1a2b3c", lines_added=8, lines_removed=0),
-        SessionSnapshot("other-repo", "refactor", "worktree", False, False, None,
-                         branch="refactor/cleanup", short_sha="d4e5f6a", lines_added=128, lines_removed=89),
-    ]
-
-    # Every 8th tick, add an extra session (tests full rebuild path)
-    if (tick // 4) % 2 == 1:
-        base.append(SessionSnapshot("other-repo", "hotfix", "worktree", True, False, "bell",
-                                     branch="hotfix/urgent", short_sha="b7c8d9e", lines_added=5, lines_removed=2))
-
-    return base
+# Static session metadata:
+#   (session_name, repo, session_type, branch, short_sha, +lines, -lines)
+_SESSION_META = [
+    ("main",      "my-project", "main",     "main",             "a1b2c3d", 15,   3),
+    ("feat-auth", "my-project", "worktree", "feat/auth-system", "e4f5a6b", 47,  12),
+    ("fix-bug",   "my-project", "worktree", None,               "7c8d9e0",  3,   1),
+    ("default",   "other-repo", "main",     "main",             "f1a2b3c",  8,   0),
+    ("refactor",  "other-repo", "worktree", "refactor/cleanup", "d4e5f6a", 128, 89),
+]
 
 
-def make_demo_provider() -> Callable[[], Awaitable[list[SessionSnapshot]]]:
-    """Return an async closure that auto-increments the demo tick."""
-    tick = 0
+class DemoProvider:
+    """Stateful demo snapshot provider with per-session activity cycling.
 
-    async def _provider() -> list[SessionSnapshot]:
-        nonlocal tick
-        snapshot = build_demo_snapshot(tick)
-        tick += 1
-        return snapshot
+    Each session independently cycles: idle → activity → bell → idle with
+    randomised durations.  Durations are tuned so ~3 of 5 sessions are in
+    the *activity* state at any given tick.
 
-    return _provider
+    A fixed RNG seed keeps the demo deterministic across runs.
+    """
+
+    # Tick-count ranges for each state.
+    # Average cycle: 18.5 (activity) + 6 (bell) + 7 (idle) = 31.5 ticks.
+    # Fraction in activity ≈ 18.5 / 31.5 ≈ 59 % → 5 × 0.59 ≈ 3 sessions.
+    _ACTIVITY_TICKS = (12, 25)
+    _BELL_TICKS = (4, 8)
+    _IDLE_TICKS = (4, 10)
+
+    def __init__(self) -> None:
+        self._current = "main"
+        self._dismissed_bells: set[str] = set()
+        self._rng = random.Random(42)
+        # Per-session state: {name: [state, ticks_remaining]}
+        # state is None | "activity" | "bell"
+        self._states: dict[str, list] = {}
+        self._init_staggered()
+
+    def _init_staggered(self) -> None:
+        """Seed sessions at staggered points so they don't transition together."""
+        for i, (name, *_) in enumerate(_SESSION_META):
+            if i < 3:
+                # First three start in activity, each offset into the cycle
+                ttl = self._rng.randint(*self._ACTIVITY_TICKS) - i * 4
+                self._states[name] = ["activity", max(2, ttl)]
+            else:
+                # Remaining start idle with short staggered waits
+                self._states[name] = [None, self._rng.randint(2, 7)]
+
+    def _advance_states(self) -> None:
+        """Tick every session's independent state machine."""
+        for name in self._states:
+            state, ttl = self._states[name]
+            ttl -= 1
+            if ttl <= 0:
+                if state is None:
+                    self._states[name] = [
+                        "activity", self._rng.randint(*self._ACTIVITY_TICKS),
+                    ]
+                elif state == "activity":
+                    self._states[name] = [
+                        "bell", self._rng.randint(*self._BELL_TICKS),
+                    ]
+                else:  # bell → idle
+                    self._states[name] = [
+                        None, self._rng.randint(*self._IDLE_TICKS),
+                    ]
+            else:
+                self._states[name] = [state, ttl]
+
+    def select(self, session_name: str) -> None:
+        """Set the current session (called on click)."""
+        self._current = session_name
+        # Dismiss any bell on the selected session (mirrors real tmux bell-clear)
+        self._dismissed_bells.add(session_name)
+
+    async def __call__(self) -> list[SessionSnapshot]:
+        """Build the snapshot for the current tick, then advance."""
+        sessions = []
+        for name, repo, stype, branch, sha, added, removed in _SESSION_META:
+            alert = self._states[name][0]
+            # Suppress bells the user dismissed by clicking
+            if name in self._dismissed_bells and alert == "bell":
+                alert = None
+            sessions.append(SessionSnapshot(
+                repo, name, stype, True,
+                name == self._current, alert,
+                branch=branch, short_sha=sha,
+                lines_added=added, lines_removed=removed,
+            ))
+
+        self._advance_states()
+        # Clear dismissals for sessions that have left the bell state
+        self._dismissed_bells = {
+            n for n in self._dismissed_bells
+            if self._states[n][0] == "bell"
+        }
+        return sessions
+
+
+def make_demo_provider() -> DemoProvider:
+    """Return a DemoProvider instance (callable + select method)."""
+    return DemoProvider()

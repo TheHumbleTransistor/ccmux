@@ -50,10 +50,12 @@ class SidebarApp(App):
         self,
         snapshot_fn: Callable[[], Awaitable[list[SessionSnapshot]]] | None = None,
         poll_interval: float = POLL_INTERVAL,
+        on_select: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__()
         self._snapshot_fn = snapshot_fn
         self._poll_interval = poll_interval
+        self._on_select = on_select
         self._last_snapshot: list[SessionSnapshot] | None = None
         self._refresh_lock = asyncio.Lock()
         self._session_list: Vertical | None = None
@@ -229,6 +231,23 @@ class SidebarApp(App):
 
     async def on_session_row_selected(self, message: SessionRow.Selected) -> None:
         """Switch to the clicked session's tmux window and clear bell alert."""
+        # Clear bell styling on the widget for instant feedback (all modes)
+        try:
+            row = self.query_one(f"#sess-{message.session_name}", SessionRow)
+            if row.alert_state == "bell":
+                row.update_state(
+                    row.is_active, row.is_current, None,
+                    row.branch, row.short_sha,
+                    row.lines_added, row.lines_removed,
+                )
+        except Exception:
+            pass
+
+        if self._on_select is not None:
+            self._on_select(message.session_name)
+            await self._refresh_sessions(caller="select")
+            return
+
         target = f"{INNER_SESSION}:{message.session_name}"
 
         # Try switching directly first — works when the window still exists.
@@ -283,15 +302,4 @@ class SidebarApp(App):
                 capture_output=True,
             )
         except subprocess.CalledProcessError:
-            pass
-        # Immediately clear bell styling on the widget for instant feedback
-        try:
-            row = self.query_one(f"#sess-{message.session_name}", SessionRow)
-            if row.alert_state == "bell":
-                row.update_state(
-                    row.is_active, row.is_current, None,
-                    row.branch, row.short_sha,
-                    row.lines_added, row.lines_removed,
-                )
-        except Exception:
             pass

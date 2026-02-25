@@ -9,6 +9,23 @@ from textual.widgets import Static
 class SessionRow(Vertical):
     """A clickable 4-line row showing tree hierarchy, session status, name, and git info."""
 
+    # Breathing animation: dot color steps for one full cycle (grey→green→grey).
+    # Uses exact 256-color palette entries to avoid rounding artifacts in tmux.
+    #   247=#9e9e9e  108=#87af87  71=#5faf5f  77=#5fd75f  40=#00d700  46=#00ff00
+    _BREATH_COLORS = [
+        "#9e9e9e",  # 247 — grey (rest)
+        "#87af87",  # 108
+        "#5faf5f",  #  71
+        "#5fd75f",  #  77
+        "#00d700",  #  40
+        "#00ff00",  #  46 — green (peak)
+        "#00d700",  #  40
+        "#5fd75f",  #  77
+        "#5faf5f",  #  71
+        "#87af87",  # 108
+    ]
+    _BREATH_INTERVAL = 0.2  # seconds between color steps (10 × 0.2s = 2s cycle)
+
     class Selected(Message):
         """Posted when the user clicks a session row."""
 
@@ -42,10 +59,14 @@ class SessionRow(Vertical):
         self.lines_added = lines_added
         self.lines_removed = lines_removed
         self._flash_timer = None
+        self._breath_timer = None
+        self._breath_frame = 0
+        self._breath_offset = hash(session_name) % len(self._BREATH_COLORS)
         if is_current:
             self.add_class("current")
         self._apply_alert_class(alert_state)
         self._update_flash()
+        self._update_breathing()
 
     def _tree_chars(self) -> tuple[str, str, str]:
         """Return (top, branch, tail) tree characters."""
@@ -55,8 +76,14 @@ class SessionRow(Vertical):
 
     def _format_name_text(self) -> str:
         """Build the name text (without worktree suffix — that's a separate widget)."""
-        indicator = "\u25cf" if self.is_active else "\u25cb"
         branch_char = self._tree_chars()[1]
+        if not self.is_active:
+            indicator = "\u25cb"  # ○
+        elif self._breath_timer is not None:
+            color = self._BREATH_COLORS[(self._breath_frame + self._breath_offset) % len(self._BREATH_COLORS)]
+            indicator = f"[{color}]\u25cf[/]"
+        else:
+            indicator = "\u25cf"  # ● (inherits grey text color)
         return f"{branch_char}{indicator} {self.session_name}"
 
     def _tree_prefix(self) -> str:
@@ -106,6 +133,30 @@ class SessionRow(Vertical):
             self._flash_timer = None
             self.remove_class("bell-flash")
 
+    def _update_breathing(self) -> None:
+        """Start or stop the breathing dot timer based on activity state."""
+        should_breathe = self.alert_state == "activity"
+        if should_breathe and self._breath_timer is None:
+            self._breath_timer = self.set_interval(
+                self._BREATH_INTERVAL, self._advance_breath
+            )
+        elif not should_breathe and self._breath_timer is not None:
+            self._breath_timer.stop()
+            self._breath_timer = None
+            self._breath_frame = 0
+            try:
+                self.query_one(".name", Static).update(self._format_name_text())
+            except Exception:
+                pass  # widget not yet mounted
+
+    def _advance_breath(self) -> None:
+        """Advance the breathing animation by one frame."""
+        self._breath_frame = (self._breath_frame + 1) % len(self._BREATH_COLORS)
+        try:
+            self.query_one(".name", Static).update(self._format_name_text())
+        except Exception:
+            pass  # widget not yet mounted
+
     def _apply_alert_class(self, alert_state: str | None) -> None:
         """Add/remove bell and activity CSS classes based on alert state."""
         if alert_state == "bell":
@@ -136,6 +187,8 @@ class SessionRow(Vertical):
         if alert_state != self.alert_state:
             self.alert_state = alert_state
             self._apply_alert_class(alert_state)
+            self._update_breathing()
+            self.query_one(".name", Static).update(self._format_name_text())
         if (branch != self.branch or short_sha != self.short_sha
                 or lines_added != self.lines_added or lines_removed != self.lines_removed):
             self.branch = branch
