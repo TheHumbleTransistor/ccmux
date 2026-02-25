@@ -93,21 +93,13 @@ def stale_sessions_running() -> bool:
 # Shared helpers (extracted from duplicated patterns)
 # ---------------------------------------------------------------------------
 
-def build_launch_command(name: str, path: str, claude_session_id: str) -> str:
-    """Build the shell command to launch Claude Code in a tmux pane."""
+def build_claude_command(name: str, path: str, claude_session_id: str, resume: bool = False) -> str:
+    """Build the shell command to launch or resume Claude Code in a tmux pane."""
+    flag = "--resume" if resume else "--session-id"
     return (
         f"export CCMUX_SESSION={name}; "
         f"unset CLAUDECODE; "
-        f"claude --session-id {claude_session_id}; while true; do $SHELL; done"
-    )
-
-
-def build_activate_command(name: str, path: str, claude_session_id: str) -> str:
-    """Build the shell command to activate Claude Code in a tmux pane."""
-    return (
-        f"export CCMUX_SESSION={name}; "
-        f"unset CLAUDECODE; "
-        f"claude --session-id {claude_session_id}; while true; do $SHELL; done"
+        f"claude {flag} {claude_session_id}; while true; do $SHELL; done"
     )
 
 
@@ -328,7 +320,7 @@ def _reactivate_single_orphan(sess) -> None:
     sess_type = sess.session_type + " repo" if not sess.is_worktree else "worktree"
 
     orphan_session_id = sess.claude_session_id or str(uuid.uuid4())
-    cmd = build_launch_command(name, path, orphan_session_id)
+    cmd = build_claude_command(name, path, orphan_session_id, resume=bool(sess.claude_session_id))
 
     cc_window_id = create_tmux_window(INNER_SESSION, name, path, cmd)
     if cc_window_id:
@@ -360,7 +352,7 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool
 
     session_type = "worktree" if create_as_worktree else "main repo"
     claude_session_id = str(uuid.uuid4())
-    launch_cmd = build_launch_command(name, str(session_path), claude_session_id)
+    launch_cmd = build_claude_command(name, str(session_path), claude_session_id)
 
     cc_window_id, bash_window_id = _create_new_session_window(name, str(session_path), launch_cmd, is_first)
 
@@ -540,15 +532,9 @@ def _create_renamed_window(new_name: str, new_path: Path, session_data, migrated
     old_session_id = session_data.claude_session_id
     new_session_id = old_session_id if migrated else str(uuid.uuid4())
 
-    if migrated and old_session_id:
-        claude_arg = f"claude --resume {old_session_id}"
-    else:
-        claude_arg = f"claude --session-id {new_session_id}"
-
-    launch_cmd = (
-        f"export CCMUX_SESSION={new_name}; "
-        f"unset CLAUDECODE; "
-        f"{claude_arg}; while true; do $SHELL; done"
+    launch_cmd = build_claude_command(
+        new_name, str(new_path), new_session_id,
+        resume=bool(migrated and old_session_id),
     )
 
     window_id = create_tmux_window(INNER_SESSION, new_name, str(new_path), launch_cmd)
@@ -948,7 +934,7 @@ def _activate_all(yes: bool = False) -> None:
             state.clear_tmux_window_ids(sess.name)
         is_first = not inner_exists and i == 0
         claude_session_id = sess.claude_session_id or str(uuid.uuid4())
-        launch_cmd = build_activate_command(sess.name, sess.session_path, claude_session_id)
+        launch_cmd = build_claude_command(sess.name, sess.session_path, claude_session_id, resume=bool(sess.claude_session_id))
 
         cc_window_id, bash_window_id = create_session_window(sess.name, sess.session_path, launch_cmd, is_first)
         if cc_window_id:
@@ -990,7 +976,7 @@ def _activate_single(name: str, yes: bool = False) -> None:
 
     is_first = not tmux_session_exists(INNER_SESSION)
     claude_session_id = session.claude_session_id or str(uuid.uuid4())
-    launch_cmd = build_activate_command(name, session.session_path, claude_session_id)
+    launch_cmd = build_claude_command(name, session.session_path, claude_session_id, resume=bool(session.claude_session_id))
 
     cc_window_id, bash_window_id = create_session_window(name, session.session_path, launch_cmd, is_first)
 
