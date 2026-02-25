@@ -18,23 +18,18 @@ _SESSION_META = [
 class DemoProvider:
     """Stateful demo snapshot provider with per-session activity cycling.
 
-    Each session independently cycles: idle → activity → bell → idle with
-    randomised durations.  Durations are tuned so ~3 of 5 sessions are in
-    the *activity* state at any given tick.
+    Each session independently cycles: idle → activity → bell, where bell
+    is sticky and only cleared by clicking (select).  Without user
+    interaction all sessions eventually converge to the bell state.
 
     A fixed RNG seed keeps the demo deterministic across runs.
     """
 
-    # Tick-count ranges for each state.
-    # Average cycle: 18.5 (activity) + 6 (bell) + 7 (idle) = 31.5 ticks.
-    # Fraction in activity ≈ 18.5 / 31.5 ≈ 59 % → 5 × 0.59 ≈ 3 sessions.
     _ACTIVITY_TICKS = (12, 25)
-    _BELL_TICKS = (4, 8)
     _IDLE_TICKS = (4, 10)
 
     def __init__(self) -> None:
         self._current = "main"
-        self._dismissed_bells: set[str] = set()
         self._rng = random.Random(42)
         # Per-session state: {name: [state, ticks_remaining]}
         # state is None | "activity" | "bell"
@@ -56,50 +51,38 @@ class DemoProvider:
         """Tick every session's independent state machine."""
         for name in self._states:
             state, ttl = self._states[name]
+            if state == "bell":
+                continue  # sticky — only cleared by select()
             ttl -= 1
             if ttl <= 0:
                 if state is None:
                     self._states[name] = [
                         "activity", self._rng.randint(*self._ACTIVITY_TICKS),
                     ]
-                elif state == "activity":
-                    self._states[name] = [
-                        "bell", self._rng.randint(*self._BELL_TICKS),
-                    ]
-                else:  # bell → idle
-                    self._states[name] = [
-                        None, self._rng.randint(*self._IDLE_TICKS),
-                    ]
+                else:  # activity → bell (sticky)
+                    self._states[name] = ["bell", 0]
             else:
                 self._states[name] = [state, ttl]
 
     def select(self, session_name: str) -> None:
         """Set the current session (called on click)."""
         self._current = session_name
-        # Dismiss any bell on the selected session (mirrors real tmux bell-clear)
-        self._dismissed_bells.add(session_name)
+        # Clear bell on clicked session — transition back to idle
+        if self._states.get(session_name, [None])[0] == "bell":
+            self._states[session_name] = [None, self._rng.randint(*self._IDLE_TICKS)]
 
     async def __call__(self) -> list[SessionSnapshot]:
         """Build the snapshot for the current tick, then advance."""
         sessions = []
         for name, repo, stype, branch, sha, added, removed in _SESSION_META:
-            alert = self._states[name][0]
-            # Suppress bells the user dismissed by clicking
-            if name in self._dismissed_bells and alert == "bell":
-                alert = None
             sessions.append(SessionSnapshot(
                 repo, name, stype, True,
-                name == self._current, alert,
+                name == self._current, self._states[name][0],
                 branch=branch, short_sha=sha,
                 lines_added=added, lines_removed=removed,
             ))
 
         self._advance_states()
-        # Clear dismissals for sessions that have left the bell state
-        self._dismissed_bells = {
-            n for n in self._dismissed_bells
-            if self._states[n][0] == "bell"
-        }
         return sessions
 
 
