@@ -81,12 +81,20 @@ from ccmux.tmux_ops import (
 from ccmux.ui.tmux import apply_claude_inner_session_config, apply_server_global_config
 
 
+def _major_minor(version: str) -> str:
+    """Extract 'major.minor' from a version string (e.g. '0.3.1.dev5+gabc' → '0.3')."""
+    parts = version.split(".")
+    return ".".join(parts[:2]) if len(parts) >= 2 else version
+
+
 def stale_sessions_running() -> bool:
-    """Return True if ccmux tmux sessions are running on an outdated version."""
+    """Return True if ccmux tmux sessions are running on an outdated major.minor version."""
     if not tmux_session_exists(INNER_SESSION):
         return False
     stored = state.get_tmux_session_version()
-    return stored != __version__
+    if stored is None:
+        return True
+    return _major_minor(stored) != _major_minor(__version__)
 
 
 # ---------------------------------------------------------------------------
