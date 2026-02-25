@@ -80,9 +80,25 @@ SessionRow:hover {
 }
 
 SessionRow.current {
-    background: #4a4a4a;
-    color: #bcbcbc;
+    background: white;
+    color: #1e1e1e;
     text-style: bold;
+}
+
+SessionRow.current .worktree-suffix {
+    color: #555555;
+}
+
+SessionRow.current .branch {
+    color: #555555;
+}
+
+SessionRow.current .additions {
+    color: #2d6a2d;
+}
+
+SessionRow.current .deletions {
+    color: #6a2d2d;
 }
 
 SessionRow.bell {
@@ -101,17 +117,19 @@ SessionRow.activity:hover {
 
 /* Red phase of flash (default when current+bell) */
 SessionRow.current.bell {
-    background: #4a2828;
+    background: #711d1d;
+    color: #1e1e1e;
 }
 
 /* Alternate phase of flash (matches normal current background) */
 SessionRow.current.bell.bell-flash {
-    background: #3a3a3a;
+    background: #e0e0e0;
 }
 
-/* Activity on current instance: suppress, show neutral gray */
+/* Activity on current instance: suppress, inverted style is sufficient */
 SessionRow.current.activity {
-    background: #4a4a4a;
+    background: white;
+    color: #1e1e1e;
 }
 
 /* RepoHeader */
