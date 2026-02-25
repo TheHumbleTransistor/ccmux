@@ -1,4 +1,9 @@
-"""Session lifecycle logic for ccmux: create, activate, deactivate, remove, rename."""
+"""Session lifecycle logic for ccmux: create, activate, deactivate, remove, rename.
+
+Functions in this module should raise exceptions for error conditions rather
+than calling console.print()/sys.exit() directly. The CLI layer (cli.py)
+is responsible for catching exceptions and presenting errors to the user.
+"""
 
 import os
 import re
@@ -12,6 +17,7 @@ from typing import Optional
 from rich.prompt import Confirm, Prompt
 
 from ccmux import state
+from ccmux.exceptions import SessionExistsError
 from ccmux.config import run_post_create
 from ccmux.display import console, display_session_table, show_session_info
 from ccmux.git_ops import (
@@ -259,8 +265,7 @@ def _generate_session_name(repo_root: Path, create_as_worktree: bool, name: Opti
     if name is not None:
         sanitized = sanitize_name(name)
         if session_name_exists(sanitized, repo_root):
-            console.print(f"[red]Error:[/red] Session '{sanitized}' already exists.", style="bold")
-            sys.exit(1)
+            raise SessionExistsError(sanitized)
         return sanitized
 
     for _ in range(20):
@@ -622,8 +627,7 @@ def do_session_rename(old: Optional[str] = None, new: Optional[str] = None) -> N
 
     repo_root = Path(session_data.repo_path)
     if session_name_exists(new_name, repo_root):
-        console.print(f"[red]Error:[/red] Session '{new_name}' already exists.", style="bold")
-        sys.exit(1)
+        raise SessionExistsError(new_name)
 
     is_wt = session_data.is_worktree
     tmux_cc_window_id = session_data.tmux_cc_window_id
