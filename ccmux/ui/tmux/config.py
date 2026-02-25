@@ -106,7 +106,6 @@ def apply_outer_session_config(session_name: str) -> bool:
         ("set-titles", "on"),
         ("set-titles-string", display_title),
         ("window-size", "latest"),
-        ("bell-action", "none"),
     ]
     try:
         for key, val in options:
