@@ -31,13 +31,26 @@ class SessionSnapshot:
     lines_removed: int = 0
 
 
-def group_by_repo(snapshot: list[SessionSnapshot]) -> dict[str, list[SessionSnapshot]]:
-    """Group snapshot entries by repo name."""
-    repos: dict[str, list[SessionSnapshot]] = {}
-    for entry in snapshot:
-        repos.setdefault(entry.repo_name, []).append(entry)
-    for entries in repos.values():
-        entries.sort(key=lambda e: (e.session_type != "main", e.session_id))
+@dataclass(frozen=True, slots=True)
+class DerivedSessionState:
+    """Computed session state wrapping a raw snapshot with UI-level status."""
+
+    snapshot: SessionSnapshot
+    status: str  # "deactivated" | "idle" | "blocked" | "active"
+    has_blocker_alert: bool
+
+
+def group_by_repo(
+    entries: list[DerivedSessionState],
+) -> dict[str, list[DerivedSessionState]]:
+    """Group derived session entries by repo name."""
+    repos: dict[str, list[DerivedSessionState]] = {}
+    for entry in entries:
+        repos.setdefault(entry.snapshot.repo_name, []).append(entry)
+    for repo_entries in repos.values():
+        repo_entries.sort(
+            key=lambda d: (d.snapshot.session_type != "main", d.snapshot.session_id),
+        )
     return repos
 
 

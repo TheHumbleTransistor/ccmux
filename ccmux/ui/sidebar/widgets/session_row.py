@@ -40,7 +40,8 @@ class SessionRow(Vertical):
         session_type: str,
         is_active: bool,
         is_current: bool,
-        alert_state: str | None = None,
+        status: str = "idle",
+        has_blocker_alert: bool = False,
         is_last: bool = False,
         branch: str | None = None,
         short_sha: str = "",
@@ -55,7 +56,8 @@ class SessionRow(Vertical):
         self.session_type = session_type
         self.is_active = is_active
         self.is_current = is_current
-        self.alert_state = alert_state
+        self.status = status
+        self.has_blocker_alert = has_blocker_alert
         self.is_last = is_last
         self.branch = branch
         self.short_sha = short_sha
@@ -67,7 +69,7 @@ class SessionRow(Vertical):
         self._breath_offset = hash(session_name) % len(self._BREATH_COLORS)
         if is_current:
             self.add_class("current")
-        self._apply_alert_class(alert_state)
+        self._apply_blocker_alert_class(has_blocker_alert)
         self._update_flash()
         self._update_breathing()
 
@@ -80,13 +82,15 @@ class SessionRow(Vertical):
     def _format_name_text(self) -> str:
         """Build the name text (without worktree suffix — that's a separate widget)."""
         branch_char = self._tree_chars()[1]
-        if not self.is_active:
-            indicator = "\u25cb"  # ○
-        elif self._breath_timer is not None:
+        if self.status == "deactivated":
+            indicator = "\u25cb"  # ○ grey
+        elif self.status == "blocked":
+            indicator = "[#d70000]\u25cf[/]"  # ● static red
+        elif self.status == "active" and self._breath_timer is not None:
             color = self._BREATH_COLORS[(self._breath_frame + self._breath_offset) % len(self._BREATH_COLORS)]
-            indicator = f"[{color}]\u25cf[/]"
+            indicator = f"[{color}]\u25cf[/]"  # ● animated green
         else:
-            indicator = "\u25cf"  # ● (inherits grey text color)
+            indicator = "\u25cf"  # ● grey (idle)
         return f"{branch_char}{indicator} {self.session_name}"
 
     def _tree_prefix(self) -> str:
@@ -123,22 +127,22 @@ class SessionRow(Vertical):
         yield Static(tail, classes="line4")
 
     def _toggle_flash(self) -> None:
-        """Toggle the bell-flash CSS class for the flash animation."""
-        self.toggle_class("bell-flash")
+        """Toggle the blocker-alert-flash CSS class for the flash animation."""
+        self.toggle_class("blocker-alert-flash")
 
     def _update_flash(self) -> None:
-        """Start or stop the flash timer based on current + bell state."""
-        should_flash = self.is_current and self.alert_state == "bell"
+        """Start or stop the flash timer based on current + blocker alert state."""
+        should_flash = self.is_current and self.has_blocker_alert
         if should_flash and self._flash_timer is None:
             self._flash_timer = self.set_interval(0.5, self._toggle_flash)
         elif not should_flash and self._flash_timer is not None:
             self._flash_timer.stop()
             self._flash_timer = None
-            self.remove_class("bell-flash")
+            self.remove_class("blocker-alert-flash")
 
     def _update_breathing(self) -> None:
-        """Start or stop the breathing dot timer based on activity state."""
-        should_breathe = self.alert_state == "activity"
+        """Start or stop the breathing dot timer based on active status."""
+        should_breathe = self.status == "active"
         if should_breathe and self._breath_timer is None:
             self._breath_timer = self.set_interval(
                 self._BREATH_INTERVAL, self._advance_breath
@@ -160,38 +164,35 @@ class SessionRow(Vertical):
         except Exception:
             pass  # widget not yet mounted
 
-    def _apply_alert_class(self, alert_state: str | None) -> None:
-        """Add/remove bell and activity CSS classes based on alert state."""
-        if alert_state == "bell":
-            self.add_class("bell")
-            self.remove_class("activity")
-        elif alert_state == "activity":
-            self.add_class("activity")
-            self.remove_class("bell")
+    def _apply_blocker_alert_class(self, has_blocker_alert: bool) -> None:
+        """Add/remove the blocker-alert CSS class for the row red background."""
+        if has_blocker_alert:
+            self.add_class("blocker-alert")
         else:
-            self.remove_class("bell")
-            self.remove_class("activity")
+            self.remove_class("blocker-alert")
 
     def update_state(
-        self, is_active: bool, is_current: bool, alert_state: str | None,
+        self, is_active: bool, is_current: bool,
+        status: str, has_blocker_alert: bool,
         branch: str | None = None, short_sha: str = "",
         lines_added: int = 0, lines_removed: int = 0,
     ) -> None:
         """Update mutable display state without rebuilding the widget."""
         if is_active != self.is_active:
             self.is_active = is_active
-            self.query_one(".name", Static).update(self._format_name_text())
         if is_current != self.is_current:
             self.is_current = is_current
             if is_current:
                 self.add_class("current")
             else:
                 self.remove_class("current")
-        if alert_state != self.alert_state:
-            self.alert_state = alert_state
-            self._apply_alert_class(alert_state)
+        if status != self.status:
+            self.status = status
             self._update_breathing()
             self.query_one(".name", Static).update(self._format_name_text())
+        if has_blocker_alert != self.has_blocker_alert:
+            self.has_blocker_alert = has_blocker_alert
+            self._apply_blocker_alert_class(has_blocker_alert)
         if (branch != self.branch or short_sha != self.short_sha
                 or lines_added != self.lines_added or lines_removed != self.lines_removed):
             self.branch = branch
