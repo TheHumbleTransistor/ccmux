@@ -139,6 +139,24 @@ def remove_worktree(repo_path: Path, worktree_path: Path) -> None:
     )
 
 
+def worktree_status(worktree_path: Path) -> list[str]:
+    """Check for uncommitted changes in a worktree path.
+
+    Returns a list of dirty file lines (from git status --porcelain),
+    or an empty list if the worktree is clean.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(worktree_path), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return [line for line in result.stdout.strip().split("\n") if line]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+
+
 def get_branch_name(path: str) -> str:
     """Get the current branch name for a git working directory."""
     try:

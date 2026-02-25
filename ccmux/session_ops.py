@@ -21,6 +21,7 @@ from ccmux.git_ops import (
     move_worktree,
     remove_worktree,
     worktree_exists,
+    worktree_status,
 )
 from ccmux.naming import (
     BASH_SESSION,
@@ -658,14 +659,24 @@ def _remove_all_sessions(sessions: list, yes: bool) -> None:
     console.print(f"\n[bold red]WARNING: This will permanently delete {len(sessions)} session(s)[/bold red]")
     console.print("[red]Any uncommitted changes will be lost![/red]\n")
 
+    # Gather dirty file info per session for display
+    dirty_map: dict[str, list[str]] = {}
+    for sess in sessions:
+        if sess.is_worktree and Path(sess.session_path).exists():
+            dirty = worktree_status(Path(sess.session_path))
+            if dirty:
+                dirty_map[sess.name] = dirty
+
     if active:
         console.print(f"  Active ({len(active)}):")
         for sess in active:
-            console.print(f"    \u2022 {sess.name}")
+            dirty_tag = f" [bold yellow]({len(dirty_map[sess.name])} uncommitted change(s))[/bold yellow]" if sess.name in dirty_map else ""
+            console.print(f"    \u2022 {sess.name}{dirty_tag}")
     if inactive:
         console.print(f"  Inactive ({len(inactive)}):")
         for sess in inactive:
-            console.print(f"    \u2022 {sess.name}")
+            dirty_tag = f" [bold yellow]({len(dirty_map[sess.name])} uncommitted change(s))[/bold yellow]" if sess.name in dirty_map else ""
+            console.print(f"    \u2022 {sess.name}{dirty_tag}")
     console.print()
 
     if not yes:
@@ -673,16 +684,12 @@ def _remove_all_sessions(sessions: list, yes: bool) -> None:
             console.print("[yellow]Cancelled.[/yellow]")
             return
 
+    # Delete worktrees and remove from state BEFORE killing tmux windows.
+    # This ensures cleanup completes even if the user is running ccmux
+    # from a bash pane of a session being removed.
     removed = 0
     for sess in sessions:
-        is_active = sess in active
-        if is_active and sess.tmux_cc_window_id:
-            if kill_tmux_window(sess.tmux_cc_window_id):
-                console.print(f"  [green]\u2713[/green] Deactivated '{sess.name}'")
-            else:
-                console.print(f"  [yellow]Window '{sess.name}' already closed[/yellow]")
-
-        prefix = "    " if is_active else "  "
+        prefix = "  "
         _delete_session_worktree(sess, prefix)
         state.remove_session(sess.name)
         console.print(f"{prefix}[green]\u2713[/green] Removed '{sess.name}' from tracking")
@@ -716,22 +723,41 @@ def _remove_single_session(name: str, sessions: list, yes: bool) -> None:
     is_main_repo = not session.is_worktree
     wt_path = Path(session.session_path)
 
-    _print_remove_warning(name, is_main_repo, wt_path, is_active)
+    # Check for uncommitted changes in worktree sessions
+    dirty_files: list[str] = []
+    if session.is_worktree and wt_path.exists():
+        dirty_files = worktree_status(wt_path)
+
+    _print_remove_warning(name, is_main_repo, wt_path, is_active, dirty_files)
 
     if not yes:
-        prompt = f"[bold red]Remove '{name}' from tracking?[/bold red]" if is_main_repo else f"[bold red]Permanently remove session '{name}'?[/bold red]"
-        if not Confirm.ask(prompt, default=False):
-            console.print("[yellow]Cancelled.[/yellow]")
-            return
+        if dirty_files:
+            # Require typing session name to confirm when there are uncommitted changes
+            typed = Prompt.ask(
+                f"[bold red]Type the session name '{name}' to confirm removal[/bold red]"
+            )
+            if typed != name:
+                console.print("[yellow]Cancelled \u2014 name did not match.[/yellow]")
+                return
+        else:
+            prompt = f"[bold red]Remove '{name}' from tracking?[/bold red]" if is_main_repo else f"[bold red]Permanently remove session '{name}'?[/bold red]"
+            if not Confirm.ask(prompt, default=False):
+                console.print("[yellow]Cancelled.[/yellow]")
+                return
+
+    # Delete worktree and remove from state BEFORE killing tmux windows.
+    # This ensures cleanup completes even if the user is running ccmux
+    # from the bash pane of the session being removed (killing that window
+    # would terminate this process).
+    _delete_session_worktree(session)
+    state.remove_session(name)
+    console.print(f"  [green]\u2713[/green] Removed '{name}' from tracking")
 
     if is_active:
         kill_session_windows(name, session.tmux_cc_window_id, session.tmux_bash_window_id)
         console.print(f"  [green]\u2713[/green] Deactivated '{name}'")
 
-    _delete_session_worktree(session)
-    state.remove_session(name)
     notify_sidebars()
-    console.print(f"  [green]\u2713[/green] Removed '{name}' from tracking")
 
     remaining = state.get_all_sessions()
     if not remaining:
@@ -745,7 +771,10 @@ def _remove_single_session(name: str, sessions: list, yes: bool) -> None:
         console.print(f"\n[bold green]Success![/bold green] Session '{name}' removed.")
 
 
-def _print_remove_warning(name: str, is_main_repo: bool, wt_path: Path, is_active: bool) -> None:
+def _print_remove_warning(
+    name: str, is_main_repo: bool, wt_path: Path, is_active: bool,
+    dirty_files: list[str] | None = None,
+) -> None:
     """Print the warning message before removing a session."""
     if is_main_repo:
         console.print(f"\n[bold red]WARNING: Removing main repository '{name}' from tracking[/bold red]")
@@ -754,7 +783,17 @@ def _print_remove_warning(name: str, is_main_repo: bool, wt_path: Path, is_activ
         console.print(f"\n[bold red]WARNING: Removing session '{name}'[/bold red]")
         console.print("[red]This will permanently delete the worktree and any uncommitted changes![/red]")
     console.print(f"  Path: {wt_path}")
-    console.print(f"  Status: {'Active' if is_active else 'Inactive'}\n")
+    console.print(f"  Status: {'Active' if is_active else 'Inactive'}")
+
+    if dirty_files:
+        console.print()
+        console.print(f"  [bold yellow]\u26a0 UNCOMMITTED CHANGES ({len(dirty_files)} file(s)):[/bold yellow]")
+        for f in dirty_files[:20]:
+            console.print(f"    [yellow]{f}[/yellow]")
+        if len(dirty_files) > 20:
+            console.print(f"    [dim]... and {len(dirty_files) - 20} more[/dim]")
+
+    console.print()
 
 
 def do_session_remove(name: Optional[str] = None, yes: bool = False, all_sessions: bool = False) -> None:
