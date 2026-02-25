@@ -66,12 +66,10 @@ from ccmux.ui.tmux import apply_claude_inner_session_config, apply_server_global
 # Shared helpers (extracted from duplicated patterns)
 # ---------------------------------------------------------------------------
 
-def build_launch_command(name: str, path: str, claude_session_id: str, description: str = "") -> str:
+def build_launch_command(name: str, path: str, claude_session_id: str) -> str:
     """Build the shell command to launch Claude Code in a tmux pane."""
-    desc = f" ({description})" if description else ""
     return (
         f"export CCMUX_SESSION={name}; "
-        f"echo 'Launching Claude Code in {path}{desc}'; "
         f"unset CLAUDECODE; "
         f"claude --session-id {claude_session_id}; while true; do $SHELL; done"
     )
@@ -81,7 +79,6 @@ def build_activate_command(name: str, path: str, claude_session_id: str) -> str:
     """Build the shell command to activate Claude Code in a tmux pane."""
     return (
         f"export CCMUX_SESSION={name}; "
-        f"echo 'Activating Claude Code in {path}'; "
         f"unset CLAUDECODE; "
         f"claude --session-id {claude_session_id}; while true; do $SHELL; done"
     )
@@ -302,7 +299,7 @@ def _reactivate_single_orphan(sess) -> None:
     sess_type = sess.session_type + " repo" if not sess.is_worktree else "worktree"
 
     orphan_session_id = sess.claude_session_id or str(uuid.uuid4())
-    cmd = build_launch_command(name, path, orphan_session_id, f"{sess_type} session: {name}")
+    cmd = build_launch_command(name, path, orphan_session_id)
 
     cc_window_id = create_tmux_window(INNER_SESSION, name, path, cmd)
     if cc_window_id:
@@ -334,7 +331,7 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool
 
     session_type = "worktree" if create_as_worktree else "main repo"
     claude_session_id = str(uuid.uuid4())
-    launch_cmd = build_launch_command(name, str(session_path), claude_session_id, f"{session_type} session: {name}")
+    launch_cmd = build_launch_command(name, str(session_path), claude_session_id)
 
     cc_window_id, bash_window_id = _create_new_session_window(name, str(session_path), launch_cmd, is_first)
 
@@ -526,7 +523,6 @@ def _create_renamed_window(new_name: str, new_path: Path, session_data, migrated
 
     launch_cmd = (
         f"export CCMUX_SESSION={new_name}; "
-        f"echo 'Launching Claude Code in {new_path}'; "
         f"unset CLAUDECODE; "
         f"{claude_arg}; while true; do $SHELL; done"
     )
