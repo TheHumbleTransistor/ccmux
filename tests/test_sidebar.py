@@ -444,9 +444,9 @@ class TestInstallInnerHook:
         assert "join-pane" not in content
 
         # Verify set_hook was called on the INNER session
-        assert mock_set_hook.call_count == 2
+        assert mock_set_hook.call_count == 3
 
-        # Verify both hooks target the correct window via #{window_id}
+        # Verify all hooks target the inner session
         bell_call = mock_set_hook.call_args_list[0]
         assert bell_call[0][0] == "ccmux-inner"
         assert bell_call[0][1] == "alert-bell"
@@ -456,6 +456,12 @@ class TestInstallInnerHook:
         assert select_call[0][0] == "ccmux-inner"
         assert select_call[0][1] == "after-select-window"
         assert "-t '#{window_id}'" in select_call[0][2]
+
+        activity_call = mock_set_hook.call_args_list[2]
+        assert activity_call[0][0] == "ccmux-inner"
+        assert activity_call[0][1] == "alert-activity"
+        assert "@ccmux_bell" in activity_call[0][2]
+        assert "run-shell" in activity_call[0][2]
 
     @mock.patch("ccmux.session_layout.unset_hook")
     def test_uninstall_removes_hook(self, mock_unset_hook, tmp_path, monkeypatch):
@@ -471,13 +477,14 @@ class TestInstallInnerHook:
         uninstall_inner_hook()
 
         assert not script.exists()
-        # Verify unset_hook was called for both hooks on the inner session
-        assert mock_unset_hook.call_count == 2
+        # Verify unset_hook was called for all hooks on the inner session
+        assert mock_unset_hook.call_count == 3
         targets = [c[0][0] for c in mock_unset_hook.call_args_list]
         hooks = [c[0][1] for c in mock_unset_hook.call_args_list]
         assert all(t == "ccmux-inner" for t in targets)
         assert "alert-bell" in hooks
         assert "after-select-window" in hooks
+        assert "alert-activity" in hooks
 
 
 class TestEnsureOuterSession:
