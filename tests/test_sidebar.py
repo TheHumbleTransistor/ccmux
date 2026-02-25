@@ -385,6 +385,14 @@ class TestCreateOuterSession:
         """create_outer_session creates outer session with sidebar, inner client, and bash pane."""
         from ccmux.session_layout import create_outer_session
 
+        # Track call order across all mocks
+        call_log = []
+        mock_create_simple.side_effect = lambda *a, **kw: call_log.append("create_session_simple")
+        mock_server_config.side_effect = lambda *a, **kw: call_log.append("apply_server_global_config")
+        mock_outer_config.side_effect = lambda *a, **kw: call_log.append("apply_outer_session_config")
+        mock_split.side_effect = lambda *a, **kw: call_log.append("split_window")
+        mock_hook.side_effect = lambda *a, **kw: call_log.append("install_inner_hook")
+
         # outer (ccmux) doesn't exist, inner and bash do exist
         mock_exists.side_effect = lambda s: s in ("ccmux-inner", "ccmux-bash")
 
@@ -411,6 +419,14 @@ class TestCreateOuterSession:
 
         mock_outer_config.assert_called_once_with("ccmux")
         mock_hook.assert_called_once()
+
+        # Verify outer config is applied BEFORE splits (mouse=on before clients attach)
+        outer_config_idx = call_log.index("apply_outer_session_config")
+        first_split_idx = call_log.index("split_window")
+        assert outer_config_idx < first_split_idx, (
+            f"apply_outer_session_config (index {outer_config_idx}) must be called "
+            f"before split_window (index {first_split_idx}); call order: {call_log}"
+        )
 
     @mock.patch("ccmux.session_layout.install_inner_hook")
     @mock.patch("ccmux.session_layout.apply_outer_session_config")
@@ -463,6 +479,82 @@ class TestCreateOuterSession:
 
         create_outer_session()
         mock_create_simple.assert_not_called()
+
+
+class TestApplyServerGlobalConfig:
+    """Tests for terminal-features deduplication in apply_server_global_config."""
+
+    @mock.patch("ccmux.ui.tmux.config.subprocess.run")
+    def test_skips_append_when_rgb_already_present(self, mock_run):
+        """apply_server_global_config does not append when tmux-256color:RGB exists."""
+        from ccmux.ui.tmux.config import apply_server_global_config
+
+        def fake_run(cmd, **kwargs):
+            result = mock.MagicMock()
+            if cmd[:3] == ["tmux", "show-options", "-g"]:
+                result.returncode = 0
+                result.stdout = "xterm-256color:clipboard:ccolour:cstyle:focus:overline:RGB:strikethrough:title:usstyle,tmux-256color:RGB"
+                return result
+            # set-option -g default-terminal
+            result.returncode = 0
+            return result
+
+        mock_run.side_effect = fake_run
+
+        assert apply_server_global_config() is True
+
+        # Should have called set-option for default-terminal and show-options,
+        # but NOT the -as append
+        cmds = [call[0][0] for call in mock_run.call_args_list]
+        assert ["tmux", "set-option", "-g", "default-terminal", "tmux-256color"] in cmds
+        assert ["tmux", "show-options", "-g", "-v", "terminal-features"] in cmds
+        # No -as append command
+        for cmd in cmds:
+            assert "-as" not in cmd, f"Unexpected append command: {cmd}"
+
+    @mock.patch("ccmux.ui.tmux.config.subprocess.run")
+    def test_appends_when_rgb_not_present(self, mock_run):
+        """apply_server_global_config appends when tmux-256color:RGB is missing."""
+        from ccmux.ui.tmux.config import apply_server_global_config
+
+        def fake_run(cmd, **kwargs):
+            result = mock.MagicMock()
+            if cmd[:3] == ["tmux", "show-options", "-g"]:
+                result.returncode = 0
+                result.stdout = "xterm-256color:clipboard"
+                return result
+            result.returncode = 0
+            return result
+
+        mock_run.side_effect = fake_run
+
+        assert apply_server_global_config() is True
+
+        cmds = [call[0][0] for call in mock_run.call_args_list]
+        append_cmds = [c for c in cmds if "-as" in c]
+        assert len(append_cmds) == 1
+
+    @mock.patch("ccmux.ui.tmux.config.subprocess.run")
+    def test_appends_when_show_options_fails(self, mock_run):
+        """apply_server_global_config falls back to appending if show-options fails."""
+        from ccmux.ui.tmux.config import apply_server_global_config
+
+        def fake_run(cmd, **kwargs):
+            result = mock.MagicMock()
+            if cmd[:3] == ["tmux", "show-options", "-g"]:
+                result.returncode = 1
+                result.stdout = ""
+                return result
+            result.returncode = 0
+            return result
+
+        mock_run.side_effect = fake_run
+
+        assert apply_server_global_config() is True
+
+        cmds = [call[0][0] for call in mock_run.call_args_list]
+        append_cmds = [c for c in cmds if "-as" in c]
+        assert len(append_cmds) == 1
 
 
 class TestKillOuterSession:

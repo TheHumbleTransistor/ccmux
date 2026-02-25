@@ -126,13 +126,13 @@ def create_outer_session() -> None:
     try:
         create_session_simple(OUTER_SESSION, sidebar_cmd)
         apply_server_global_config()
+        apply_outer_session_config(OUTER_SESSION)
         if tmux_session_exists(BASH_SESSION):
             split_window(f"{OUTER_SESSION}:0.0", "-v", str(BASH_PANE_HEIGHT),
                          f"TMUX= tmux attach -t ={BASH_SESSION}")
         split_window(f"{OUTER_SESSION}:0.0", "-h", "50%",
                      f"TMUX= tmux attach -t ={INNER_SESSION}")
         resize_pane(f"{OUTER_SESSION}:0.0", SIDEBAR_WIDTH)
-        apply_outer_session_config(OUTER_SESSION)
         install_inner_hook()
     except Exception as exc:
         print(
@@ -210,10 +210,10 @@ def do_debug_sidebar() -> None:
 
     try:
         create_session_simple(session_name, sidebar_cmd)
+        apply_outer_session_config(session_name)
         split_window(f"{session_name}:0.0", "-v", str(BASH_PANE_HEIGHT), "bash")
         split_window(f"{session_name}:0.0", "-h", "50%", "bash")
         resize_pane(f"{session_name}:0.0", SIDEBAR_WIDTH)
-        apply_outer_session_config(session_name)
         select_pane(f"{session_name}:0.1")
     except Exception as exc:
         console.print(

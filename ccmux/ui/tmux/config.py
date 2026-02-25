@@ -66,15 +66,37 @@ def apply_claude_inner_session_config(session_name: str) -> bool:
         return False
 
 
+def _terminal_features_contains_rgb() -> bool:
+    """Check if ``tmux-256color:RGB`` is already in ``terminal-features``.
+
+    Returns ``False`` (meaning "go ahead and append") when the check itself
+    fails — e.g. on older tmux versions that don't support ``show-options``.
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "show-options", "-g", "-v", "terminal-features"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return False
+        return "tmux-256color:RGB" in result.stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def apply_server_global_config() -> bool:
     """Apply server-global tmux options for true-color support."""
-    commands = [
-        ["tmux", "set-option", "-g", "default-terminal", "tmux-256color"],
-        ["tmux", "set-option", "-as", "terminal-features", ",tmux-256color:RGB"],
-    ]
     try:
-        for cmd in commands:
-            subprocess.run(cmd, check=True, capture_output=True)
+        subprocess.run(
+            ["tmux", "set-option", "-g", "default-terminal", "tmux-256color"],
+            check=True, capture_output=True,
+        )
+        if not _terminal_features_contains_rgb():
+            subprocess.run(
+                ["tmux", "set-option", "-as", "terminal-features",
+                 ",tmux-256color:RGB"],
+                check=True, capture_output=True,
+            )
         return True
     except subprocess.CalledProcessError:
         return False
