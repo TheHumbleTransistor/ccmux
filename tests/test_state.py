@@ -508,3 +508,75 @@ def test_find_session_by_tmux_ids(temp_state_dir):
     assert session.repo_path == "/repo"
 
     assert state.find_session_by_tmux_ids("$999", "@999") is None
+
+
+# --- Session ID tests ---
+
+def test_add_session_assigns_id(temp_state_dir):
+    """Test that add_session auto-assigns incrementing IDs."""
+    state.add_session(
+        session_name="sess-a",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/a",
+    )
+    state.add_session(
+        session_name="sess-b",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/b",
+    )
+    state.add_session(
+        session_name="sess-c",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/c",
+    )
+
+    loaded = state_store._load_raw()
+    assert loaded["sessions"]["sess-a"]["id"] == 1
+    assert loaded["sessions"]["sess-b"]["id"] == 2
+    assert loaded["sessions"]["sess-c"]["id"] == 3
+    assert loaded["next_id"] == 4
+
+
+def test_migration_backfills_id(temp_state_dir):
+    """Test that legacy sessions without id get sequential IDs on load."""
+    legacy_state = {
+        "sessions": {
+            "fox": {
+                "repo_path": "/repo",
+                "session_path": "/repo/.worktrees/fox",
+                "is_worktree": True,
+                "tmux_window_id": "@1",
+            },
+            "bear": {
+                "repo_path": "/repo",
+                "session_path": "/repo",
+                "is_worktree": False,
+                "tmux_window_id": "@2",
+            },
+        }
+    }
+    state_file = temp_state_dir / "state.json"
+    with open(state_file, 'w') as f:
+        json.dump(legacy_state, f)
+
+    loaded = state_store._load_raw()
+    assert loaded["sessions"]["fox"]["id"] == 1
+    assert loaded["sessions"]["bear"]["id"] == 2
+    assert loaded["next_id"] == 3
+
+
+def test_rename_preserves_id(temp_state_dir):
+    """Test that renaming a session preserves its id."""
+    state.add_session(
+        session_name="old-name",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/old-name",
+    )
+
+    loaded = state_store._load_raw()
+    original_id = loaded["sessions"]["old-name"]["id"]
+
+    assert state.rename_session("old-name", "new-name")
+
+    loaded = state_store._load_raw()
+    assert loaded["sessions"]["new-name"]["id"] == original_id

@@ -12,6 +12,7 @@ class Session:
     session_path: str
     tmux_window_id: Optional[str] = None
     claude_session_id: Optional[str] = None
+    id: int = 0
 
     @property
     def is_worktree(self) -> bool:
@@ -27,6 +28,7 @@ class Session:
             "session_path": self.session_path,
             "is_worktree": self.is_worktree,
             "tmux_window_id": self.tmux_window_id,
+            "id": self.id,
         }
         if self.claude_session_id:
             d["claude_session_id"] = self.claude_session_id
@@ -41,6 +43,7 @@ class Session:
             session_path=data.get("session_path") or data.get("instance_path"),
             tmux_window_id=data.get("tmux_window_id"),
             claude_session_id=data.get("claude_session_id"),
+            id=data.get("id", 0),
         )
         if data.get("is_worktree", True):
             return WorktreeSession(**kwargs)

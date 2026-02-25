@@ -18,6 +18,8 @@ class SessionSnapshot:
     is_active: bool
     is_current: bool
     alert_state: str | None
+    session_id: int = 0
+    tmux_window_id: str | None = None
     branch: str | None = None
     short_sha: str = ""
     lines_added: int = 0
@@ -30,7 +32,7 @@ def group_by_repo(snapshot: list[SessionSnapshot]) -> dict[str, list[SessionSnap
     for entry in snapshot:
         repos.setdefault(entry.repo_name, []).append(entry)
     for entries in repos.values():
-        entries.sort(key=lambda e: (e.session_type != "main", e.session_name))
+        entries.sort(key=lambda e: (e.session_type != "main", e.session_id))
     return repos
 
 
@@ -192,6 +194,8 @@ async def build_snapshot() -> list[SessionSnapshot]:
             is_active=is_active,
             is_current=is_current,
             alert_state=alert_state,
+            session_id=sess.id,
+            tmux_window_id=sess.tmux_window_id,
             branch=branch,
             short_sha=short_sha,
             lines_added=added,

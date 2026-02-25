@@ -231,7 +231,7 @@ def _generate_session_name(repo_root: Path, create_as_worktree: bool, name: Opti
         candidate = sanitize_name(generate_animal_name())
         if create_as_worktree:
             test_path = repo_root / ".worktrees" / candidate
-            if not worktree_exists(test_path, repo_root):
+            if not worktree_exists(test_path, repo_root) and not state.get_session(candidate):
                 return candidate
         else:
             if not state.get_session(candidate):

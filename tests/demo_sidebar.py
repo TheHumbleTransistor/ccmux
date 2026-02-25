@@ -5,13 +5,13 @@ import random
 from ccmux.ui.sidebar.snapshot import SessionSnapshot
 
 # Static session metadata:
-#   (session_name, repo, session_type, branch, short_sha, +lines, -lines)
+#   (session_name, repo, session_type, branch, short_sha, +lines, -lines, session_id, tmux_window_id)
 _SESSION_META = [
-    ("main",      "my-project", "main",     "main",             "a1b2c3d", 15,   3),
-    ("feat-auth", "my-project", "worktree", "feat/auth-system", "e4f5a6b", 47,  12),
-    ("fix-bug",   "my-project", "worktree", None,               "7c8d9e0",  3,   1),
-    ("default",   "other-repo", "main",     "main",             "f1a2b3c",  8,   0),
-    ("refactor",  "other-repo", "worktree", "refactor/cleanup", "d4e5f6a", 128, 89),
+    ("main",      "my-project", "main",     "main",             "a1b2c3d", 15,   3, 1, "@100"),
+    ("feat-auth", "my-project", "worktree", "feat/auth-system", "e4f5a6b", 47,  12, 2, "@101"),
+    ("fix-bug",   "my-project", "worktree", None,               "7c8d9e0",  3,   1, 3, "@102"),
+    ("default",   "other-repo", "main",     "main",             "f1a2b3c",  8,   0, 4, "@103"),
+    ("refactor",  "other-repo", "worktree", "refactor/cleanup", "d4e5f6a", 128, 89, 5, "@104"),
 ]
 
 
@@ -74,11 +74,11 @@ class DemoProvider:
     async def __call__(self) -> list[SessionSnapshot]:
         """Build the snapshot for the current tick, then advance."""
         sessions = []
-        for name, repo, stype, branch, sha, added, removed in _SESSION_META:
+        for name, repo, stype, branch, sha, added, removed, sid, wid in _SESSION_META:
             sessions.append(SessionSnapshot(
                 repo, name, stype, True,
                 name == self._current, self._states[name][0],
-                branch=branch, short_sha=sha,
+                session_id=sid, tmux_window_id=wid, branch=branch, short_sha=sha,
                 lines_added=added, lines_removed=removed,
             ))
 

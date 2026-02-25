@@ -165,6 +165,25 @@ class TestSidebarDataHelpers:
                 assert sess.session_type == "main"
 
 
+class TestGroupByRepo:
+    """Tests for group_by_repo sort order."""
+
+    def test_group_by_repo_sorts_by_id(self):
+        """Worktree sessions sort by session_id (creation order), not alphabetically."""
+        from ccmux.ui.sidebar.snapshot import SessionSnapshot, group_by_repo
+
+        snapshots = [
+            SessionSnapshot("repo", "main-sess", "main", True, False, None, session_id=1),
+            SessionSnapshot("repo", "zebra", "worktree", True, False, None, session_id=2),
+            SessionSnapshot("repo", "alpha", "worktree", True, False, None, session_id=3),
+        ]
+
+        grouped = group_by_repo(snapshots)
+        names = [e.session_name for e in grouped["repo"]]
+        # main first, then worktrees in creation order (zebra before alpha)
+        assert names == ["main-sess", "zebra", "alpha"]
+
+
 class TestPidTracking:
     """Tests for PID file management."""
 
@@ -583,6 +602,41 @@ class TestSidebarRendering:
         assert SidebarApp.ALLOW_SELECT is False
         async with demo_app.run_test() as pilot:
             assert pilot.app.ALLOW_SELECT is False
+
+
+class TestSessionRowSelected:
+    """Tests for SessionRow.Selected message carrying window ID."""
+
+    def test_select_message_includes_window_id(self):
+        """SessionRow.Selected carries the tmux_window_id from the row."""
+        msg = SessionRow.Selected("fox", tmux_window_id="@9")
+        assert msg.session_name == "fox"
+        assert msg.tmux_window_id == "@9"
+
+    def test_select_message_window_id_defaults_to_none(self):
+        """SessionRow.Selected defaults tmux_window_id to None."""
+        msg = SessionRow.Selected("fox")
+        assert msg.session_name == "fox"
+        assert msg.tmux_window_id is None
+
+    @pytest.mark.asyncio
+    async def test_click_posts_message_with_window_id(self):
+        """Clicking a SessionRow posts Selected with the correct window ID."""
+        from tests.demo_sidebar import make_demo_provider
+
+        provider = make_demo_provider()
+        app = SidebarApp(
+            snapshot_fn=provider,
+            poll_interval=60.0,
+            on_select=lambda name: provider.select(name),
+        )
+        async with app.run_test() as pilot:
+            rows = pilot.app.query(SessionRow)
+            assert len(rows) > 0
+            first_row = rows[0]
+            # Verify the row carries a window ID
+            assert first_row.tmux_window_id is not None
+            assert first_row.tmux_window_id.startswith("@")
 
 
 class TestAboutPanel:

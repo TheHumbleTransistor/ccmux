@@ -54,6 +54,19 @@ def _load_raw() -> dict:
                     data["tmux_session_id"] = old_tmux_id
                 break  # Only one old session ("default") expected
 
+    # Backfill id for sessions that lack it
+    needs_backfill = any(
+        "id" not in sess_data
+        for sess_data in data.get("sessions", {}).values()
+    )
+    if needs_backfill:
+        next_id = data.get("next_id", 1)
+        for sess_data in data["sessions"].values():
+            if "id" not in sess_data:
+                sess_data["id"] = next_id
+                next_id += 1
+        data["next_id"] = next_id
+
     return data
 
 
@@ -81,11 +94,15 @@ def add_session(
     if tmux_session_id:
         state["tmux_session_id"] = tmux_session_id
 
+    session_id = state.get("next_id", 1)
+    state["next_id"] = session_id + 1
+
     sess_data = {
         "repo_path": repo_path,
         "session_path": session_path,
         "is_worktree": is_worktree,
         "tmux_window_id": tmux_window_id,
+        "id": session_id,
     }
     if claude_session_id:
         sess_data["claude_session_id"] = claude_session_id
