@@ -17,7 +17,7 @@ from textual.widgets import Static
 from ccmux.naming import INNER_SESSION
 from ccmux.ui.sidebar import snapshot
 from ccmux.ui.sidebar.snapshot import SessionSnapshot
-from ccmux.ui.sidebar.widgets import SessionRow, RepoSessionsList, TitleBanner
+from ccmux.ui.sidebar.widgets import SessionRow, RepoSessionsList, TitleBanner, AboutPanel
 
 POLL_INTERVAL = 5.0
 DEMO_POLL_INTERVAL = 1.0
@@ -45,6 +45,7 @@ class SidebarApp(App):
 
     CSS_PATH = "sidebar.tcss"
     ALLOW_SELECT = False
+    BINDINGS = [("escape", "close_about", "Close about panel")]
 
     def __init__(
         self,
@@ -59,11 +60,13 @@ class SidebarApp(App):
         self._last_snapshot: list[SessionSnapshot] | None = None
         self._refresh_lock = asyncio.Lock()
         self._session_list: Vertical | None = None
+        self._about_visible = False
 
     def compose(self) -> ComposeResult:
         yield TitleBanner()
         self._session_list = Vertical(id="instance-list")
         yield self._session_list
+        yield AboutPanel(id="about-panel")
 
     async def on_mount(self) -> None:
         self._fix_nested_tmux_resize()
@@ -71,6 +74,29 @@ class SidebarApp(App):
         self.set_interval(self._poll_interval, self._poll_refresh)
         self._register_signal_handler()
 
+
+    def _toggle_about(self) -> None:
+        """Toggle between the session list and the about panel."""
+        self._about_visible = not self._about_visible
+        self.query_one("#about-panel").display = self._about_visible
+        self.query_one("#instance-list").display = not self._about_visible
+
+    def _close_about(self) -> None:
+        """Close the about panel if it is currently visible."""
+        if self._about_visible:
+            self._toggle_about()
+
+    def on_title_banner_clicked(self) -> None:
+        """Handle title banner click by toggling the about panel."""
+        self._toggle_about()
+
+    def on_about_panel_closed(self) -> None:
+        """Handle back button click in the about panel."""
+        self._close_about()
+
+    def action_close_about(self) -> None:
+        """Close the about panel via Escape key."""
+        self._close_about()
 
     def _fix_nested_tmux_resize(self) -> None:
         """Work around Textual resize being broken inside nested tmux.
