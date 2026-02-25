@@ -19,11 +19,13 @@ from ccmux.session_ops import (
     do_session_rename,
     do_session_which,
 )
+from ccmux import __version__
 from ccmux.session_layout import do_debug_sidebar
 from ccmux.display import console
 
 app = cyclopts.App(
     name="ccmux",
+    version=__version__,
     help="Claude Code Multiplexer - Manage multiple Claude Code sessions.",
 )
 
