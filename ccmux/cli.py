@@ -11,7 +11,7 @@ from rich.prompt import Confirm
 
 from ccmux import __version__
 from ccmux.display import console
-from ccmux.exceptions import SessionExistsError
+from ccmux.exceptions import CcmuxError, NoSessionsFound
 from ccmux.naming import BASH_SESSION, INNER_SESSION, OUTER_SESSION
 from ccmux.session_layout import do_debug_sidebar
 from ccmux.session_ops import (
@@ -60,11 +60,7 @@ def session_new(
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
     """Create a new Claude Code session in main repo or as a git worktree."""
-    try:
-        do_session_new(name=name, worktree=worktree, yes=yes)
-    except SessionExistsError as e:
-        console.print(f"[red]Error:[/red] {e}", style="bold")
-        sys.exit(1)
+    do_session_new(name=name, worktree=worktree, yes=yes)
 
 
 @app.command(name="list")
@@ -79,11 +75,7 @@ def session_rename(
     new: Optional[str] = None,
 ) -> None:
     """Rename a ccmux session."""
-    try:
-        do_session_rename(old=old, new=new)
-    except SessionExistsError as e:
-        console.print(f"[red]Error:[/red] {e}", style="bold")
-        sys.exit(1)
+    do_session_rename(old=old, new=new)
 
 
 @app.command(name="attach")
@@ -204,6 +196,16 @@ def main():
 
     try:
         app()
+    except NoSessionsFound as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        if e.hint:
+            console.print(f"  {e.hint}")
+        sys.exit(0)
+    except CcmuxError as e:
+        console.print(f"[red]Error:[/red] {e}", style="bold")
+        if hasattr(e, "hint") and e.hint:
+            console.print(f"  {e.hint}")
+        sys.exit(e.exit_code)
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")
         sys.exit(130)

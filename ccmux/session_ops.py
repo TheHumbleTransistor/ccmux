@@ -9,7 +9,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -17,9 +16,23 @@ from typing import Optional
 from rich.prompt import Confirm, Prompt
 
 from ccmux import __version__, state
-from ccmux.exceptions import SessionExistsError
 from ccmux.config import run_post_create
 from ccmux.display import console, display_session_table, show_session_info
+from ccmux.exceptions import (
+    ActivationError,
+    AttachError,
+    DefaultBranchError,
+    DetachError,
+    InvalidArgumentError,
+    NoSessionsFound,
+    NotInCcmuxSessionError,
+    NotInGitRepoError,
+    SessionExistsError,
+    SessionNotFoundError,
+    TmuxError,
+    UserAbortedError,
+    WorktreeError,
+)
 from ccmux.git_ops import (
     create_worktree,
     get_default_branch,
@@ -229,17 +242,15 @@ def migrate_claude_session(old_path: str, new_path: str, session_id: str) -> boo
 # ---------------------------------------------------------------------------
 
 def _validate_repo_context() -> tuple[Path, str]:
-    """Validate git repo and return (repo_root, default_branch). Exits on error."""
+    """Validate git repo and return (repo_root, default_branch). Raises on error."""
     repo_root = get_repo_root()
     if repo_root is None:
-        console.print("[red]Error:[/red] Not inside a git repository.", style="bold")
-        sys.exit(1)
+        raise NotInGitRepoError()
     os.chdir(repo_root)
 
     default_branch = get_default_branch()
     if default_branch is None:
-        console.print("[red]Error:[/red] Could not detect default branch (main/master).", style="bold")
-        sys.exit(1)
+        raise DefaultBranchError()
     return repo_root, default_branch
 
 
@@ -252,8 +263,7 @@ def _resolve_session_type(repo_root: Path, worktree: bool, yes: bool) -> bool:
         console.print(f"[yellow]Warning:[/yellow] Main repository already has a session: '{existing_main.name}'")
         if yes or Confirm.ask("Create a worktree instead?", default=True):
             return True
-        console.print("[red]Aborted:[/red] Main repository already in use.")
-        sys.exit(1)
+        raise UserAbortedError("Main repository already in use.")
     return False
 
 
@@ -292,8 +302,7 @@ def _setup_worktree(repo_root: Path, session_path: Path, default_branch: str, na
             create_worktree(repo_root, session_path, default_branch)
             console.print(f"  [green]\u2713[/green] Created detached worktree from {default_branch}")
         except subprocess.CalledProcessError as e:
-            console.print(f"[red]Error creating worktree:[/red] {e}", style="bold")
-            sys.exit(1)
+            raise WorktreeError("creation", str(e)) from e
     run_post_create(repo_root, session_path, name)
 
 
@@ -384,8 +393,7 @@ def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: 
     if is_first:
         cc_window_id = create_tmux_session(INNER_SESSION, name, path, launch_cmd)
         if cc_window_id is None:
-            console.print(f"[red]Error creating tmux session[/red]", style="bold")
-            sys.exit(1)
+            raise TmuxError("session creation")
         apply_server_global_config()
         bash_window_id = create_bash_window(name, path)
         console.print(f"  [green]\u2713[/green] Created tmux session '{INNER_SESSION}' with window '{name}'")
@@ -398,8 +406,7 @@ def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: 
     else:
         cc_window_id = create_tmux_window(INNER_SESSION, name, path, launch_cmd)
         if cc_window_id is None:
-            console.print(f"[red]Error creating tmux window[/red]", style="bold")
-            sys.exit(1)
+            raise TmuxError("window creation")
         bash_window_id = create_bash_window(name, path)
         select_window(INNER_SESSION, name)
         console.print(f"  [green]\u2713[/green] Created new window '{name}'")
@@ -441,21 +448,18 @@ def _resolve_rename_args(old: Optional[str], new: Optional[str]) -> tuple[str, s
         new_name = sanitize_name(new)
         session_data = state.get_session(old_name)
         if not session_data:
-            console.print(f"[red]Error:[/red] Session '{old_name}' not found.", style="bold")
-            sys.exit(1)
+            raise SessionNotFoundError(old_name)
     elif old is not None and new is None:
         new_name = sanitize_name(old)
         detected = detect_current_ccmux_session_any()
         if not detected:
-            console.print("[red]Error:[/red] Not in a ccmux session.", style="bold")
-            sys.exit(1)
+            raise NotInCcmuxSessionError()
         old_name = detected[0]
         session_data = detected[1]
     elif old is None and new is None:
         old_name, new_name, session_data = _interactive_rename()
     else:
-        console.print("[red]Error:[/red] Provide both old and new names, one name to rename current session, or run without args for interactive mode.", style="bold")
-        sys.exit(1)
+        raise InvalidArgumentError("Provide both old and new names, one name to rename current session, or run without args for interactive mode.")
     return old_name, new_name, session_data
 
 
@@ -463,8 +467,7 @@ def _interactive_rename() -> tuple[str, str, object]:
     """Handle interactive rename mode."""
     sessions = state.get_all_sessions()
     if not sessions:
-        console.print(f"[yellow]No sessions found.[/yellow]")
-        sys.exit(0)
+        raise NoSessionsFound()
 
     console.print(f"\n[bold]Sessions:[/bold]")
     for i, sess in enumerate(sessions):
@@ -499,14 +502,14 @@ def _rename_active_worktree(old_name: str, new_name: str, session_data) -> None:
             move_worktree(repo_path, old_path, new_path)
             console.print(f"  [green]\u2713[/green] Moved worktree directory: {old_path.name} -> {new_path.name}")
         except subprocess.CalledProcessError as e:
-            console.print(f"[red]Error moving worktree:[/red] {e}", style="bold")
-            sys.exit(1)
+            raise WorktreeError("move", str(e)) from e
 
     migrated = _migrate_session_data(session_data, old_path, new_path)
 
     if not state.rename_session(old_name, new_name):
-        _print_rename_error(old_name, new_name)
-        sys.exit(1)
+        if not state.get_session(old_name):
+            raise SessionNotFoundError(old_name)
+        raise SessionExistsError(new_name)
     state.update_session(new_name, session_path=str(new_path))
 
     new_cc_window_id = _create_renamed_window(new_name, new_path, session_data, migrated)
@@ -590,20 +593,21 @@ def _rename_inactive_worktree(old_name: str, new_name: str, session_data) -> Non
             move_worktree(repo_path, old_path, new_path)
             console.print(f"  [green]\u2713[/green] Moved worktree directory: {old_path.name} -> {new_path.name}")
         except subprocess.CalledProcessError as e:
-            console.print(f"[red]Error moving worktree:[/red] {e}", style="bold")
-            sys.exit(1)
+            raise WorktreeError("move", str(e)) from e
 
     if not state.rename_session(old_name, new_name):
-        _print_rename_error(old_name, new_name)
-        sys.exit(1)
+        if not state.get_session(old_name):
+            raise SessionNotFoundError(old_name)
+        raise SessionExistsError(new_name)
     state.update_session(new_name, session_path=str(new_path))
 
 
 def _rename_main_repo_session(old_name: str, new_name: str, session_data, is_active: bool) -> None:
     """Rename a main repo (non-worktree) session."""
     if not state.rename_session(old_name, new_name):
-        _print_rename_error(old_name, new_name)
-        sys.exit(1)
+        if not state.get_session(old_name):
+            raise SessionNotFoundError(old_name)
+        raise SessionExistsError(new_name)
 
     if is_active:
         tmux_cc_window_id = session_data.tmux_cc_window_id
@@ -613,13 +617,6 @@ def _rename_main_repo_session(old_name: str, new_name: str, session_data, is_act
             console.print(f"  [yellow]\u26a0[/yellow] Could not rename tmux window")
         rename_tmux_window(f"{BASH_SESSION}:{old_name}", new_name)
 
-
-def _print_rename_error(old_name: str, new_name: str) -> None:
-    """Print rename error message."""
-    if not state.get_session(old_name):
-        console.print(f"[red]Error:[/red] Session '{old_name}' not found.", style="bold")
-    else:
-        console.print(f"[red]Error:[/red] Session '{new_name}' already exists.", style="bold")
 
 
 def do_session_rename(old: Optional[str] = None, new: Optional[str] = None) -> None:
@@ -736,9 +733,7 @@ def _remove_single_session(name: str, sessions: list, yes: bool) -> None:
     session = find_session_by_name(sessions, name)
 
     if session is None:
-        console.print(f"[red]Error:[/red] Session '{name}' not found.", style="bold")
-        console.print(f"List sessions with: [cyan]ccmux list[/cyan]")
-        sys.exit(1)
+        raise SessionNotFoundError(name, "List sessions with: ccmux list")
 
     is_active = session in active
     is_main_repo = not session.is_worktree
@@ -824,17 +819,17 @@ def do_session_remove(name: Optional[str] = None, yes: bool = False, all_session
         if detected:
             name = detected[0]
         else:
-            console.print("[red]Error:[/red] No session name provided and could not auto-detect.", style="bold")
-            console.print("  Run from within a ccmux session, or specify a name:")
-            console.print("    [cyan]ccmux remove <name>[/cyan]")
-            console.print("  To remove all sessions:")
-            console.print("    [cyan]ccmux remove --all[/cyan]")
-            sys.exit(1)
+            raise InvalidArgumentError(
+                "No session name provided and could not auto-detect.\n"
+                "  Run from within a ccmux session, or specify a name:\n"
+                "    ccmux remove <name>\n"
+                "  To remove all sessions:\n"
+                "    ccmux remove --all"
+            )
 
     sessions = state.get_all_sessions()
     if not sessions:
-        console.print(f"[yellow]No sessions found.[/yellow]")
-        sys.exit(0)
+        raise NoSessionsFound()
 
     if name is None:
         _remove_all_sessions(sessions, yes)
@@ -881,8 +876,7 @@ def _deactivate_single_session(name: str, sessions: list, active_sessions: list)
     """Deactivate a single session."""
     session = find_session_by_name(sessions, name)
     if session is None:
-        console.print(f"[red]Error:[/red] Session '{name}' not found.", style="bold")
-        sys.exit(1)
+        raise SessionNotFoundError(name)
 
     if session not in active_sessions:
         console.print(f"[yellow]Session '{name}' is already inactive.[/yellow]")
@@ -905,8 +899,7 @@ def do_session_deactivate(name: Optional[str] = None, yes: bool = False) -> None
     sessions = state.get_all_sessions()
 
     if not sessions:
-        console.print(f"[yellow]No sessions found.[/yellow]")
-        sys.exit(0)
+        raise NoSessionsFound()
 
     active, _ = partition_sessions_by_active(sessions)
 
@@ -929,9 +922,7 @@ def _activate_all(yes: bool = False) -> None:
     """Activate all inactive sessions."""
     sessions = state.get_all_sessions()
     if not sessions:
-        console.print(f"[yellow]No sessions found.[/yellow]")
-        console.print(f"Create one with: [cyan]ccmux new[/cyan]")
-        sys.exit(0)
+        raise NoSessionsFound("Create one with: ccmux new")
 
     _, inactive = partition_sessions_by_active(sessions)
     if not inactive:
@@ -980,15 +971,11 @@ def _activate_single(name: str, yes: bool = False) -> None:
     """Activate a single session by name."""
     sessions = state.get_all_sessions()
     if not sessions:
-        console.print(f"[yellow]No sessions found.[/yellow]")
-        console.print(f"Create one with: [cyan]ccmux new[/cyan]")
-        sys.exit(0)
+        raise NoSessionsFound("Create one with: ccmux new")
 
     session = find_session_by_name(sessions, name)
     if session is None:
-        console.print(f"[red]Error:[/red] Session '{name}' not found.", style="bold")
-        console.print(f"List sessions with: [cyan]ccmux list[/cyan]")
-        sys.exit(1)
+        raise SessionNotFoundError(name, "List sessions with: ccmux list")
 
     if is_session_window_active(session.tmux_cc_window_id):
         ensure_outer_session()
@@ -1008,8 +995,7 @@ def _activate_single(name: str, yes: bool = False) -> None:
     cc_window_id, bash_window_id = create_session_window(name, session.session_path, launch_cmd, is_first)
 
     if cc_window_id is None:
-        console.print(f"[red]Error activating Claude Code[/red]", style="bold")
-        sys.exit(1)
+        raise ActivationError(name)
 
     if is_first:
         console.print(f"  [green]\u2713[/green] Created tmux session and activated '{name}'")
@@ -1144,34 +1130,27 @@ def _try_cwd_match() -> bool:
 def do_detach(all_clients: bool = False) -> None:
     """Detach the ccmux tmux session."""
     if not tmux_session_exists(OUTER_SESSION):
-        console.print(f"[red]Error:[/red] No active ccmux session.", style="bold")
-        sys.exit(1)
+        raise DetachError("No active ccmux session.")
     try:
         if all_clients:
             detach_client(session=OUTER_SESSION)
         else:
             clients = list_clients(OUTER_SESSION)
             if not clients:
-                console.print("[red]Error:[/red] No clients attached to ccmux session.", style="bold")
-                sys.exit(1)
+                raise DetachError("No clients attached to ccmux session.")
             detach_client(client_tty=clients[0])
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]Error detaching:[/red] {e}", style="bold")
-        sys.exit(1)
+        raise DetachError(f"Detach failed: {e}") from e
 
 
 def do_attach() -> None:
     """Attach to the ccmux tmux session."""
     sessions = state.get_all_sessions()
     if not sessions:
-        console.print(f"[red]Error:[/red] No ccmux session found.", style="bold")
-        console.print(f"\nCreate a session with: [cyan]ccmux new[/cyan]")
-        sys.exit(1)
+        raise AttachError("No ccmux session found.", "Create a session with: ccmux new")
 
     if not tmux_session_exists(INNER_SESSION):
-        console.print(f"[red]Error:[/red] Tmux session no longer exists.", style="bold")
-        console.print(f"\nThe tmux session was closed. Activate sessions with: [cyan]ccmux activate[/cyan]")
-        sys.exit(1)
+        raise AttachError("Tmux session no longer exists.", "Activate sessions with: ccmux activate")
 
     ensure_outer_session()
     notify_sidebars()
@@ -1182,7 +1161,7 @@ def do_session_which() -> None:
     """Print the current session name (useful for scripting)."""
     detected = detect_current_ccmux_session_any()
     if detected is None:
-        sys.exit(1)
+        raise NotInCcmuxSessionError()
     print(detected[0])
 
 
