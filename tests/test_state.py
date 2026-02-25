@@ -49,7 +49,7 @@ def test_add_session(temp_state_dir):
         repo_path="/repo",
         session_path="/repo/.worktrees/feature-x",
         tmux_session_id="$0",
-        tmux_window_id="@1"
+        tmux_cc_window_id="@1"
     )
 
     loaded = state_store._load_raw()
@@ -58,7 +58,7 @@ def test_add_session(temp_state_dir):
     sess = loaded["sessions"]["feature-x"]
     assert sess["repo_path"] == "/repo"
     assert sess["session_path"] == "/repo/.worktrees/feature-x"
-    assert sess["tmux_window_id"] == "@1"
+    assert sess["tmux_window_ids"]["claude_code"] == "@1"
     assert loaded["tmux_session_id"] == "$0"
 
 
@@ -103,18 +103,18 @@ def test_update_tmux_ids(temp_state_dir):
         repo_path="/repo",
         session_path="/repo/.worktrees/feature-x",
         tmux_session_id="$0",
-        tmux_window_id="@1"
+        tmux_cc_window_id="@1"
     )
 
     state.update_tmux_ids(
         session_name="feature-x",
         tmux_session_id="$1",
-        tmux_window_id="@2"
+        tmux_cc_window_id="@2"
     )
 
     loaded = state_store._load_raw()
     assert loaded["tmux_session_id"] == "$1"
-    assert loaded["sessions"]["feature-x"]["tmux_window_id"] == "@2"
+    assert loaded["sessions"]["feature-x"]["tmux_window_ids"]["claude_code"] == "@2"
 
 
 def test_get_session(temp_state_dir):
@@ -138,13 +138,13 @@ def test_get_all_sessions(temp_state_dir):
         session_name="feature-x",
         repo_path="/repo1",
         session_path="/repo1/.worktrees/feature-x",
-        tmux_window_id="@1"
+        tmux_cc_window_id="@1"
     )
     state.add_session(
         session_name="feature-y",
         repo_path="/repo2",
         session_path="/repo2/.worktrees/feature-y",
-        tmux_window_id="@2"
+        tmux_cc_window_id="@2"
     )
 
     all_sessions = state.get_all_sessions()
@@ -175,7 +175,7 @@ def test_rename_session(temp_state_dir):
         session_name="old-name",
         repo_path="/repo",
         session_path="/repo/.worktrees/old-name",
-        tmux_window_id="@1",
+        tmux_cc_window_id="@1",
     )
 
     assert state.rename_session("old-name", "new-name")
@@ -185,7 +185,7 @@ def test_rename_session(temp_state_dir):
     assert "old-name" not in sessions
     assert "new-name" in sessions
     assert sessions["new-name"]["repo_path"] == "/repo"
-    assert sessions["new-name"]["tmux_window_id"] == "@1"
+    assert sessions["new-name"]["tmux_window_ids"]["claude_code"] == "@1"
 
 
 def test_rename_session_conflict(temp_state_dir):
@@ -498,7 +498,7 @@ def test_find_session_by_tmux_ids(temp_state_dir):
         repo_path="/repo",
         session_path="/repo/.worktrees/feature-x",
         tmux_session_id="$0",
-        tmux_window_id="@1"
+        tmux_cc_window_id="@1"
     )
 
     result = state.find_session_by_tmux_ids("$0", "@1")
@@ -508,3 +508,147 @@ def test_find_session_by_tmux_ids(temp_state_dir):
     assert session.repo_path == "/repo"
 
     assert state.find_session_by_tmux_ids("$999", "@999") is None
+
+
+# --- Session ID tests ---
+
+def test_add_session_assigns_id(temp_state_dir):
+    """Test that add_session auto-assigns incrementing IDs."""
+    state.add_session(
+        session_name="sess-a",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/a",
+    )
+    state.add_session(
+        session_name="sess-b",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/b",
+    )
+    state.add_session(
+        session_name="sess-c",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/c",
+    )
+
+    loaded = state_store._load_raw()
+    assert loaded["sessions"]["sess-a"]["id"] == 1
+    assert loaded["sessions"]["sess-b"]["id"] == 2
+    assert loaded["sessions"]["sess-c"]["id"] == 3
+    assert loaded["next_id"] == 4
+
+
+def test_migration_backfills_id(temp_state_dir):
+    """Test that legacy sessions without id get sequential IDs on load."""
+    legacy_state = {
+        "sessions": {
+            "fox": {
+                "repo_path": "/repo",
+                "session_path": "/repo/.worktrees/fox",
+                "is_worktree": True,
+                "tmux_window_id": "@1",
+            },
+            "bear": {
+                "repo_path": "/repo",
+                "session_path": "/repo",
+                "is_worktree": False,
+                "tmux_window_id": "@2",
+            },
+        }
+    }
+    state_file = temp_state_dir / "state.json"
+    with open(state_file, 'w') as f:
+        json.dump(legacy_state, f)
+
+    loaded = state_store._load_raw()
+    assert loaded["sessions"]["fox"]["id"] == 1
+    assert loaded["sessions"]["bear"]["id"] == 2
+    assert loaded["next_id"] == 3
+
+
+def test_rename_preserves_id(temp_state_dir):
+    """Test that renaming a session preserves its id."""
+    state.add_session(
+        session_name="old-name",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/old-name",
+    )
+
+    loaded = state_store._load_raw()
+    original_id = loaded["sessions"]["old-name"]["id"]
+
+    assert state.rename_session("old-name", "new-name")
+
+    loaded = state_store._load_raw()
+    assert loaded["sessions"]["new-name"]["id"] == original_id
+
+
+# --- Window ID lifecycle tests ---
+
+def test_clear_tmux_window_ids(temp_state_dir):
+    """Test that clear_tmux_window_ids sets both IDs to None."""
+    state.add_session(
+        session_name="fox",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/fox",
+        tmux_cc_window_id="@9",
+        tmux_bash_window_id="@10",
+    )
+
+    assert state.clear_tmux_window_ids("fox")
+
+    sess = state.get_session("fox")
+    assert sess.tmux_cc_window_id is None
+    assert sess.tmux_bash_window_id is None
+
+
+def test_clear_tmux_window_ids_not_found(temp_state_dir):
+    """Test that clear_tmux_window_ids returns False for missing session."""
+    assert not state.clear_tmux_window_ids("nonexistent")
+
+
+def test_add_session_with_bash_window_id(temp_state_dir):
+    """Test adding a session with both window IDs stores and retrieves correctly."""
+    state.add_session(
+        session_name="fox",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/fox",
+        tmux_cc_window_id="@5",
+        tmux_bash_window_id="@6",
+    )
+
+    sess = state.get_session("fox")
+    assert sess.tmux_cc_window_id == "@5"
+    assert sess.tmux_bash_window_id == "@6"
+
+
+def test_session_to_dict_nested_window_ids(temp_state_dir):
+    """Test Session.to_dict uses nested dict format for window IDs."""
+    sess = state.WorktreeSession(
+        name="test",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/test",
+        tmux_cc_window_id="@9",
+        tmux_bash_window_id="@10",
+    )
+    d = sess.to_dict()
+    assert d["tmux_window_ids"] == {
+        "claude_code": "@9",
+        "bash_terminal": "@10",
+    }
+    assert "tmux_window_id" not in d
+
+
+def test_update_tmux_ids_with_bash(temp_state_dir):
+    """Test updating both CC and bash window IDs."""
+    state.add_session(
+        session_name="fox",
+        repo_path="/repo",
+        session_path="/repo/.worktrees/fox",
+        tmux_cc_window_id="@1",
+    )
+
+    state.update_tmux_ids("fox", tmux_cc_window_id="@5", tmux_bash_window_id="@6")
+
+    sess = state.get_session("fox")
+    assert sess.tmux_cc_window_id == "@5"
+    assert sess.tmux_bash_window_id == "@6"

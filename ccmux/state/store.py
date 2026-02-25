@@ -54,6 +54,19 @@ def _load_raw() -> dict:
                     data["tmux_session_id"] = old_tmux_id
                 break  # Only one old session ("default") expected
 
+    # Backfill id for sessions that lack it
+    needs_backfill = any(
+        "id" not in sess_data
+        for sess_data in data.get("sessions", {}).values()
+    )
+    if needs_backfill:
+        next_id = data.get("next_id", 1)
+        for sess_data in data["sessions"].values():
+            if "id" not in sess_data:
+                sess_data["id"] = next_id
+                next_id += 1
+        data["next_id"] = next_id
+
     return data
 
 
@@ -71,7 +84,8 @@ def add_session(
     repo_path: str,
     session_path: str,
     tmux_session_id: Optional[str] = None,
-    tmux_window_id: Optional[str] = None,
+    tmux_cc_window_id: Optional[str] = None,
+    tmux_bash_window_id: Optional[str] = None,
     is_worktree: bool = True,
     claude_session_id: Optional[str] = None,
 ):
@@ -81,11 +95,18 @@ def add_session(
     if tmux_session_id:
         state["tmux_session_id"] = tmux_session_id
 
+    session_id = state.get("next_id", 1)
+    state["next_id"] = session_id + 1
+
     sess_data = {
         "repo_path": repo_path,
         "session_path": session_path,
         "is_worktree": is_worktree,
-        "tmux_window_id": tmux_window_id,
+        "tmux_window_ids": {
+            "claude_code": tmux_cc_window_id,
+            "bash_terminal": tmux_bash_window_id,
+        },
+        "id": session_id,
     }
     if claude_session_id:
         sess_data["claude_session_id"] = claude_session_id
@@ -109,7 +130,8 @@ def remove_session(session_name: str):
 def update_tmux_ids(
     session_name: str,
     tmux_session_id: Optional[str] = None,
-    tmux_window_id: Optional[str] = None,
+    tmux_cc_window_id: Optional[str] = None,
+    tmux_bash_window_id: Optional[str] = None,
 ):
     """Update tmux IDs for a session."""
     state = _load_raw()
@@ -119,10 +141,29 @@ def update_tmux_ids(
 
     sessions = state.get("sessions", {})
     if session_name in sessions:
-        if tmux_window_id:
-            sessions[session_name]["tmux_window_id"] = tmux_window_id
+        if tmux_cc_window_id or tmux_bash_window_id:
+            window_ids = sessions[session_name].get("tmux_window_ids", {})
+            if tmux_cc_window_id:
+                window_ids["claude_code"] = tmux_cc_window_id
+            if tmux_bash_window_id:
+                window_ids["bash_terminal"] = tmux_bash_window_id
+            sessions[session_name]["tmux_window_ids"] = window_ids
 
     _save_raw(state)
+
+
+def clear_tmux_window_ids(session_name: str) -> bool:
+    """Clear both window IDs for a session. Returns True if found."""
+    state = _load_raw()
+    sessions = state.get("sessions", {})
+    if session_name not in sessions:
+        return False
+    sessions[session_name]["tmux_window_ids"] = {
+        "claude_code": None,
+        "bash_terminal": None,
+    }
+    _save_raw(state)
+    return True
 
 
 def get_session(session_name: str) -> Optional[Session]:
@@ -164,7 +205,7 @@ def find_session_by_tmux_ids(tmux_session_id: str, tmux_window_id: str) -> Optio
 
     for name, data in state.get("sessions", {}).items():
         sess = Session.from_dict(name, data)
-        if sess.tmux_window_id == tmux_window_id:
+        if sess.tmux_cc_window_id == tmux_window_id:
             return (name, sess)
 
     return None

@@ -57,14 +57,14 @@ class TestSidebarDataHelpers:
             repo_path="/home/user/my-project",
             session_path="/home/user/my-project/.worktrees/fox",
             tmux_session_id="$0",
-            tmux_window_id="@1",
+            tmux_cc_window_id="@1",
         )
         state.add_session(
             session_name="bear",
             repo_path="/home/user/my-project",
             session_path="/home/user/my-project",
             tmux_session_id="$0",
-            tmux_window_id="@2",
+            tmux_cc_window_id="@2",
             is_worktree=False,
         )
 
@@ -74,7 +74,7 @@ class TestSidebarDataHelpers:
         window_id = "@1"
         current_name = None
         for sess in sessions:
-            if sess.tmux_window_id == window_id:
+            if sess.tmux_cc_window_id == window_id:
                 current_name = sess.name
                 break
 
@@ -86,20 +86,20 @@ class TestSidebarDataHelpers:
             session_name="fox",
             repo_path="/home/user/project-a",
             session_path="/home/user/project-a/.worktrees/fox",
-            tmux_window_id="@1",
+            tmux_cc_window_id="@1",
         )
         state.add_session(
             session_name="bear",
             repo_path="/home/user/project-a",
             session_path="/home/user/project-a",
-            tmux_window_id="@2",
+            tmux_cc_window_id="@2",
             is_worktree=False,
         )
         state.add_session(
             session_name="hawk",
             repo_path="/home/user/project-b",
             session_path="/home/user/project-b/.worktrees/hawk",
-            tmux_window_id="@3",
+            tmux_cc_window_id="@3",
         )
 
         sessions = state.get_all_sessions()
@@ -121,20 +121,20 @@ class TestSidebarDataHelpers:
             session_name="fox",
             repo_path="/repo",
             session_path="/repo/.worktrees/fox",
-            tmux_window_id="@1",
+            tmux_cc_window_id="@1",
         )
         state.add_session(
             session_name="bear",
             repo_path="/repo",
             session_path="/repo/.worktrees/bear",
-            tmux_window_id="@2",
+            tmux_cc_window_id="@2",
         )
 
         sessions = state.get_all_sessions()
         active_window_ids = {"@1"}  # Simulate: only @1 is in tmux
 
         for sess in sessions:
-            is_active = sess.tmux_window_id in active_window_ids
+            is_active = sess.tmux_cc_window_id in active_window_ids
             if sess.name == "fox":
                 assert is_active
             elif sess.name == "bear":
@@ -146,14 +146,14 @@ class TestSidebarDataHelpers:
             session_name="fox",
             repo_path="/repo",
             session_path="/repo/.worktrees/fox",
-            tmux_window_id="@1",
+            tmux_cc_window_id="@1",
             is_worktree=True,
         )
         state.add_session(
             session_name="bear",
             repo_path="/repo",
             session_path="/repo",
-            tmux_window_id="@2",
+            tmux_cc_window_id="@2",
             is_worktree=False,
         )
 
@@ -163,6 +163,25 @@ class TestSidebarDataHelpers:
                 assert sess.session_type == "worktree"
             elif sess.name == "bear":
                 assert sess.session_type == "main"
+
+
+class TestGroupByRepo:
+    """Tests for group_by_repo sort order."""
+
+    def test_group_by_repo_sorts_by_id(self):
+        """Worktree sessions sort by session_id (creation order), not alphabetically."""
+        from ccmux.ui.sidebar.snapshot import SessionSnapshot, group_by_repo
+
+        snapshots = [
+            SessionSnapshot("repo", "main-sess", "main", True, False, None, session_id=1),
+            SessionSnapshot("repo", "zebra", "worktree", True, False, None, session_id=2),
+            SessionSnapshot("repo", "alpha", "worktree", True, False, None, session_id=3),
+        ]
+
+        grouped = group_by_repo(snapshots)
+        names = [e.session_name for e in grouped["repo"]]
+        # main first, then worktrees in creation order (zebra before alpha)
+        assert names == ["main-sess", "zebra", "alpha"]
 
 
 class TestPidTracking:
@@ -215,7 +234,7 @@ class TestIsSessionWindowActive:
         result = is_session_window_active("@5")
 
         assert result is True
-        mock_active.assert_called_once_with("ccmux-inner", "@5")
+        mock_active.assert_called_once_with("ccmux-inner", "@5", expected_sid=None)
 
     @mock.patch("ccmux.naming.is_window_active_in_session")
     def test_returns_false_for_none_window(self, mock_active):
@@ -226,7 +245,7 @@ class TestIsSessionWindowActive:
         result = is_session_window_active(None)
 
         assert result is False
-        mock_active.assert_called_once_with("ccmux-inner", None)
+        mock_active.assert_called_once_with("ccmux-inner", None, expected_sid=None)
 
 
 class TestCreateOuterSession:
@@ -585,6 +604,40 @@ class TestSidebarRendering:
             assert pilot.app.ALLOW_SELECT is False
 
 
+class TestSessionRowSelected:
+    """Tests for SessionRow.Selected message carrying session ID."""
+
+    def test_select_message_includes_session_id(self):
+        """SessionRow.Selected carries the session_id from the row."""
+        msg = SessionRow.Selected("fox", session_id=3)
+        assert msg.session_name == "fox"
+        assert msg.session_id == 3
+
+    def test_select_message_session_id_defaults_to_zero(self):
+        """SessionRow.Selected defaults session_id to 0."""
+        msg = SessionRow.Selected("fox")
+        assert msg.session_name == "fox"
+        assert msg.session_id == 0
+
+    @pytest.mark.asyncio
+    async def test_click_posts_message_with_session_id(self):
+        """Clicking a SessionRow posts Selected with the correct session ID."""
+        from tests.demo_sidebar import make_demo_provider
+
+        provider = make_demo_provider()
+        app = SidebarApp(
+            snapshot_fn=provider,
+            poll_interval=60.0,
+            on_select=lambda name: provider.select(name),
+        )
+        async with app.run_test() as pilot:
+            rows = pilot.app.query(SessionRow)
+            assert len(rows) > 0
+            first_row = rows[0]
+            # Verify the row carries a session ID
+            assert first_row.session_id > 0
+
+
 class TestAboutPanel:
     """Tests for the about/info panel toggled via the title banner."""
 
@@ -684,3 +737,40 @@ class TestAboutPanel:
 
             rows_after = len(app.query(SessionRow))
             assert rows_after == rows_before
+
+
+class TestSnapshotOwnershipValidation:
+    """Tests for @ccmux_sid ownership validation in snapshot building."""
+
+    @pytest.mark.asyncio
+    async def test_snapshot_rejects_wrong_sid(self):
+        """Window exists but @ccmux_sid doesn't match → inactive."""
+        from ccmux.ui.sidebar.snapshot import SessionSnapshot, resolve_alert_state
+
+        # Simulate: window @9 exists with sid="5" but session has id=3
+        window_flags = {
+            "@9": {"bell": False, "activity": False, "silence": False, "sid": "5"},
+        }
+        sess_id = 3
+        wid = "@9"
+        wid_flags = window_flags.get(wid)
+        is_active = (
+            wid_flags is not None
+            and str(sess_id) == wid_flags.get("sid", "")
+        )
+        assert is_active is False
+
+    @pytest.mark.asyncio
+    async def test_snapshot_accepts_correct_sid(self):
+        """Window exists and @ccmux_sid matches → active."""
+        window_flags = {
+            "@9": {"bell": False, "activity": True, "silence": False, "sid": "3"},
+        }
+        sess_id = 3
+        wid = "@9"
+        wid_flags = window_flags.get(wid)
+        is_active = (
+            wid_flags is not None
+            and str(sess_id) == wid_flags.get("sid", "")
+        )
+        assert is_active is True

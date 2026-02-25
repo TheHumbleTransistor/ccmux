@@ -84,6 +84,8 @@ if [ -n "$WIN" ]; then
         tmux new-window -t "{BASH_SESSION}" -n "$WIN" -c "$DIR" \
             "export CCMUX_SESSION=$WIN; export COLORTERM=truecolor; while true; do \\$SHELL; done" 2>/dev/null
         tmux set-option -w -t "{BASH_SESSION}:$WIN" window-style 'bg=#1e1e1e' 2>/dev/null
+        SID=$(tmux display-message -t "{INNER_SESSION}" -p '#{{@ccmux_sid}}' 2>/dev/null)
+        [ -n "$SID" ] && tmux set-option -w -t "{BASH_SESSION}:$WIN" @ccmux_sid "$SID" 2>/dev/null
         tmux select-window -t "{BASH_SESSION}:$WIN" 2>/dev/null
     fi
 fi
@@ -157,8 +159,8 @@ def kill_outer_session() -> bool:
 # Bash window management
 # ---------------------------------------------------------------------------
 
-def create_bash_window(session_name: str, working_dir: str) -> None:
-    """Create a window in the bash session for a session."""
+def create_bash_window(session_name: str, working_dir: str) -> str | None:
+    """Create a window in the bash session for a session. Returns window ID or None."""
     bash_cmd = (
         f"export CCMUX_SESSION={session_name}; "
         f"export COLORTERM=truecolor; "
@@ -166,22 +168,24 @@ def create_bash_window(session_name: str, working_dir: str) -> None:
     )
     try:
         if not tmux_session_exists(BASH_SESSION):
-            _create_bash_session(BASH_SESSION, session_name, working_dir, bash_cmd)
+            window_id = _create_bash_session(BASH_SESSION, session_name, working_dir, bash_cmd)
         else:
             if session_name in get_tmux_windows(BASH_SESSION):
-                return
-            create_tmux_window(BASH_SESSION, session_name, working_dir, bash_cmd)
+                return None
+            window_id = create_tmux_window(BASH_SESSION, session_name, working_dir, bash_cmd)
         set_window_option(f"{BASH_SESSION}:{session_name}", "window-style", "bg=#1e1e1e")
+        return window_id
     except Exception:
-        pass
+        return None
 
 
-def _create_bash_session(bash: str, session_name: str, working_dir: str, bash_cmd: str) -> None:
-    """Create a new bash tmux session with status off and mouse on."""
-    create_tmux_session(bash, session_name, working_dir, bash_cmd)
+def _create_bash_session(bash: str, session_name: str, working_dir: str, bash_cmd: str) -> str | None:
+    """Create a new bash tmux session with status off and mouse on. Returns window ID."""
+    window_id = create_tmux_session(bash, session_name, working_dir, bash_cmd)
     set_session_option(bash, "status", "off")
     set_session_option(bash, "mouse", "on")
     set_session_option(bash, "window-size", "latest")
+    return window_id
 
 
 # ---------------------------------------------------------------------------

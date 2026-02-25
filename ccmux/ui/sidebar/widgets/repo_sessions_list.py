@@ -36,5 +36,6 @@ class RepoSessionsList(Vertical):
                 short_sha=entry.short_sha,
                 lines_added=entry.lines_added,
                 lines_removed=entry.lines_removed,
+                session_id=entry.session_id,
                 id=f"sess-{entry.session_name}",
             )

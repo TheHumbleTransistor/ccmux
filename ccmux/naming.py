@@ -52,9 +52,11 @@ def generate_animal_name() -> str:
     return random.choice(ANIMALS)
 
 
-def is_session_window_active(tmux_window_id: Optional[str]) -> bool:
+def is_session_window_active(
+    tmux_window_id: Optional[str], expected_sid: Optional[int] = None,
+) -> bool:
     """Check if a session window is active (checks inner session)."""
-    return is_window_active_in_session(INNER_SESSION, tmux_window_id)
+    return is_window_active_in_session(INNER_SESSION, tmux_window_id, expected_sid=expected_sid)
 
 
 def detect_current_ccmux_session() -> Optional[tuple[str, "state.Session"]]:

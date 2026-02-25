@@ -14,6 +14,7 @@ from textual.containers import Vertical
 from textual.geometry import Size
 from textual.widgets import Static
 
+from ccmux import state
 from ccmux.naming import INNER_SESSION
 from ccmux.ui.sidebar import snapshot
 from ccmux.ui.sidebar.snapshot import SessionSnapshot
@@ -274,7 +275,14 @@ class SidebarApp(App):
             await self._refresh_sessions(caller="select")
             return
 
-        target = f"{INNER_SESSION}:{message.session_name}"
+        # Look up window ID from state for precise targeting; fall back to name.
+        sess = await asyncio.to_thread(state.get_session, message.session_name)
+        cc_window_id = sess.tmux_cc_window_id if sess else None
+        if cc_window_id:
+            target = cc_window_id
+        else:
+            target = f"{INNER_SESSION}:{message.session_name}"
+        name_target = f"{INNER_SESSION}:{message.session_name}"
 
         # Try switching directly first — works when the window still exists.
         try:
@@ -300,10 +308,10 @@ class SidebarApp(App):
                         result.stderr.decode(errors="replace").strip(),
                     )
                     return
-                # Retry select-window after activation
+                # Retry select-window after activation (use name — activate creates a new window)
                 await asyncio.to_thread(
                     subprocess.run,
-                    ["tmux", "select-window", "-t", target],
+                    ["tmux", "select-window", "-t", name_target],
                     check=True,
                     capture_output=True,
                 )

@@ -10,8 +10,10 @@ class Session:
     name: str
     repo_path: str
     session_path: str
-    tmux_window_id: Optional[str] = None
+    tmux_cc_window_id: Optional[str] = None
+    tmux_bash_window_id: Optional[str] = None
     claude_session_id: Optional[str] = None
+    id: int = 0
 
     @property
     def is_worktree(self) -> bool:
@@ -26,7 +28,11 @@ class Session:
             "repo_path": self.repo_path,
             "session_path": self.session_path,
             "is_worktree": self.is_worktree,
-            "tmux_window_id": self.tmux_window_id,
+            "tmux_window_ids": {
+                "claude_code": self.tmux_cc_window_id,
+                "bash_terminal": self.tmux_bash_window_id,
+            },
+            "id": self.id,
         }
         if self.claude_session_id:
             d["claude_session_id"] = self.claude_session_id
@@ -35,12 +41,15 @@ class Session:
     @classmethod
     def from_dict(cls, name: str, data: dict) -> "Session":
         """Factory — returns WorktreeSession or MainRepoSession."""
+        window_ids = data.get("tmux_window_ids", {})
         kwargs = dict(
             name=name,
             repo_path=data["repo_path"],
             session_path=data.get("session_path") or data.get("instance_path"),
-            tmux_window_id=data.get("tmux_window_id"),
+            tmux_cc_window_id=window_ids.get("claude_code"),
+            tmux_bash_window_id=window_ids.get("bash_terminal"),
             claude_session_id=data.get("claude_session_id"),
+            id=data.get("id", 0),
         )
         if data.get("is_worktree", True):
             return WorktreeSession(**kwargs)

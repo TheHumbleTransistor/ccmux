@@ -18,6 +18,7 @@ class SessionSnapshot:
     is_active: bool
     is_current: bool
     alert_state: str | None
+    session_id: int = 0
     branch: str | None = None
     short_sha: str = ""
     lines_added: int = 0
@@ -30,7 +31,7 @@ def group_by_repo(snapshot: list[SessionSnapshot]) -> dict[str, list[SessionSnap
     for entry in snapshot:
         repos.setdefault(entry.repo_name, []).append(entry)
     for entries in repos.values():
-        entries.sort(key=lambda e: (e.session_type != "main", e.session_name))
+        entries.sort(key=lambda e: (e.session_type != "main", e.session_id))
     return repos
 
 
@@ -67,16 +68,31 @@ async def get_current_session_name() -> str | None:
     window_id = await get_current_window_id()
     if not window_id:
         return None
+    # Also read @ccmux_sid from the current window for ownership validation
+    current_sid: str | None = None
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            ["tmux", "display-message", "-t", INNER_SESSION, "-p", "#{@ccmux_sid}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        current_sid = result.stdout.strip() or None
+    except subprocess.CalledProcessError:
+        pass
     sessions = state.get_all_sessions()
     for sess in sessions:
-        if sess.tmux_window_id == window_id:
+        if sess.tmux_cc_window_id == window_id:
+            if current_sid and str(sess.id) != current_sid:
+                continue
             return sess.name
     return None
 
 
-async def get_tmux_window_flags() -> dict[str, dict[str, bool]]:
-    """Get window IDs and their bell/activity/silence flags from inner session."""
-    fmt = "#{window_id}|#{@ccmux_bell}|#{window_activity_flag}|#{window_silence_flag}"
+async def get_tmux_window_flags() -> dict[str, dict]:
+    """Get window IDs and their bell/activity/silence flags + sid from inner session."""
+    fmt = "#{window_id}|#{@ccmux_bell}|#{window_activity_flag}|#{window_silence_flag}|#{@ccmux_sid}"
     try:
         result = await asyncio.to_thread(
             subprocess.run,
@@ -85,17 +101,18 @@ async def get_tmux_window_flags() -> dict[str, dict[str, bool]]:
             text=True,
             check=True,
         )
-        flags: dict[str, dict[str, bool]] = {}
+        flags: dict[str, dict] = {}
         for line in result.stdout.strip().split("\n"):
             if not line:
                 continue
             parts = line.split("|")
-            if len(parts) >= 4:
+            if len(parts) >= 5:
                 wid = parts[0]
                 flags[wid] = {
                     "bell": parts[1] == "1",
                     "activity": parts[2] == "1",
                     "silence": parts[3] == "1",
+                    "sid": parts[4],
                 }
         return flags
     except subprocess.CalledProcessError:
@@ -180,11 +197,15 @@ async def build_snapshot() -> list[SessionSnapshot]:
     snapshot = []
     for sess, (branch, short_sha, added, removed) in zip(sessions, git_infos):
         repo_name = Path(sess.repo_path).name
-        wid = sess.tmux_window_id
-        is_active = wid in window_flags
+        wid = sess.tmux_cc_window_id
+        wid_flags = window_flags.get(wid)
+        is_active = (
+            wid_flags is not None
+            and str(sess.id) == wid_flags.get("sid", "")
+        )
         is_current = sess.name == current_session
         sess_type = sess.session_type
-        alert_state = resolve_alert_state(window_flags.get(wid))
+        alert_state = resolve_alert_state(wid_flags) if is_active else None
         snapshot.append(SessionSnapshot(
             repo_name=repo_name,
             session_name=sess.name,
@@ -192,6 +213,7 @@ async def build_snapshot() -> list[SessionSnapshot]:
             is_active=is_active,
             is_current=is_current,
             alert_state=alert_state,
+            session_id=sess.id,
             branch=branch,
             short_sha=short_sha,
             lines_added=added,
