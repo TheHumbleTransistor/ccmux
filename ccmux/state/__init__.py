@@ -13,8 +13,8 @@ from ccmux.state.store import (
     update_tmux_ids,
     clear_tmux_window_ids,
     update_session,
-    get_state_version,
-    set_state_version,
+    get_tmux_session_version,
+    set_tmux_session_version,
     STATE_DIR,
     STATE_FILE,
 )

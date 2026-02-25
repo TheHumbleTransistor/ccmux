@@ -16,7 +16,7 @@ from typing import Optional
 
 from rich.prompt import Confirm, Prompt
 
-from ccmux import state
+from ccmux import __version__, state
 from ccmux.exceptions import SessionExistsError
 from ccmux.config import run_post_create
 from ccmux.display import console, display_session_table, show_session_info
@@ -423,8 +423,7 @@ def _save_new_session_state(
     tag_window_with_session_id(cc_window_id, name)
     tag_window_with_session_id(bash_window_id, name)
 
-    from ccmux import __version__
-    state.set_state_version(__version__)
+    state.set_tmux_session_version(__version__)
 
 
 # ---------------------------------------------------------------------------

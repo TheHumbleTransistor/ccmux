@@ -261,15 +261,15 @@ def find_main_repo_session(repo_path: str) -> Optional[Session]:
     return None
 
 
-def get_state_version() -> Optional[str]:
-    """Return the ccmux_version stored in state, or None if not set."""
-    return _load_raw().get("ccmux_version")
+def get_tmux_session_version() -> Optional[str]:
+    """Return the tmux_session_version stored in state, or None if not set."""
+    return _load_raw().get("tmux_session_version")
 
 
-def set_state_version(version: str) -> None:
+def set_tmux_session_version(version: str) -> None:
     """Stamp the current ccmux version into state and save."""
     state = _load_raw()
-    state["ccmux_version"] = version
+    state["tmux_session_version"] = version
     _save_raw(state)
 
 
