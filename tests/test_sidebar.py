@@ -306,6 +306,85 @@ class TestStickyBlockedState:
             assert status == "blocked"
 
 
+class TestPostSelectionActivityDebounce:
+    """Tests for the post-selection debounce that prevents misleading activity from changing status."""
+
+    def _make_app(self):
+        app = SidebarApp(snapshot_fn=lambda: [], poll_interval=60.0)
+        return app
+
+    def _snap(self, name="fox", is_active=True, alert_state=None, activity_ts=0.0):
+        from ccmux.ui.sidebar.snapshot import SessionSnapshot
+        return SessionSnapshot(
+            repo_name="repo", session_name=name, session_type="worktree",
+            is_active=is_active, is_current=False, alert_state=alert_state,
+            session_id=1, activity_ts=activity_ts,
+        )
+
+    def test_post_selection_activity_does_not_clear_blocked(self):
+        """Activity from window focus should not clear blocked status after click."""
+        import time
+        app = self._make_app()
+        # Bell fires — session becomes blocked
+        app._compute_session_state(self._snap(alert_state="bell"))
+        assert "fox" in app._blocked_sessions
+
+        # Simulate clicking the blocked row
+        click_time = time.time()
+        app._post_selection_debounce["fox"] = click_time
+
+        # Activity arrives with timestamp *before* debounce cutoff (misleading window-focus activity)
+        status, has_alert = app._compute_session_state(
+            self._snap(alert_state="activity", activity_ts=click_time + 0.1),
+        )
+        assert status == "blocked"
+        assert "fox" in app._blocked_sessions
+
+    def test_real_activity_clears_blocked_after_debounce(self):
+        """Activity with timestamp after debounce window should clear blocked status."""
+        import time
+        app = self._make_app()
+        # Bell fires — session becomes blocked
+        app._compute_session_state(self._snap(alert_state="bell"))
+        assert "fox" in app._blocked_sessions
+
+        # Simulate clicking the blocked row
+        click_time = time.time() - 1.0  # click happened 1 second ago
+        app._post_selection_debounce["fox"] = click_time
+
+        # Activity arrives with timestamp well after the debounce cutoff
+        status, has_alert = app._compute_session_state(
+            self._snap(alert_state="activity", activity_ts=click_time + 1.0),
+        )
+        assert status == "active"
+        assert "fox" not in app._blocked_sessions
+        # Debounce entry should be cleaned up
+        assert "fox" not in app._post_selection_debounce
+
+    def test_activity_without_debounce_clears_normally(self):
+        """Activity on a blocked session with no debounce entry clears blocked status normally."""
+        app = self._make_app()
+        # Bell fires — session becomes blocked
+        app._compute_session_state(self._snap(alert_state="bell"))
+        assert "fox" in app._blocked_sessions
+
+        # No debounce entry (no click happened) — activity clears normally
+        status, has_alert = app._compute_session_state(
+            self._snap(alert_state="activity", activity_ts=9999999999.0),
+        )
+        assert status == "active"
+        assert "fox" not in app._blocked_sessions
+
+    def test_activity_without_click_not_debounced(self):
+        """Activity on a session with no debounce entry is not affected."""
+        app = self._make_app()
+        # Session is idle (no click happened) — activity should set active
+        status, has_alert = app._compute_session_state(
+            self._snap(alert_state="activity", activity_ts=0.0),
+        )
+        assert status == "active"
+
+
 class TestPidTracking:
     """Tests for PID file management."""
 
