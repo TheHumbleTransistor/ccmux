@@ -48,7 +48,7 @@ def apply_claude_inner_session_config(session_name: str) -> bool:
         ("visual-activity", "off"),
         ("visual-silence", "off"),
         ("visual-bell", "off"),
-        ("activity-action", "none"),
+        ("activity-action", "any"),
         ("silence-action", "none"),
         ("bell-action", "any"),
     ]
