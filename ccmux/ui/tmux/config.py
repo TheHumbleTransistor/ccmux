@@ -37,19 +37,16 @@ def apply_claude_inner_session_config(session_name: str) -> bool:
         ("window-size", "latest"),
     ]
 
-    # Window options for activity/silence monitoring (per-session defaults)
+    # Window options for activity monitoring (per-session defaults)
     window_options = [
         ("monitor-activity", "on"),
-        ("monitor-silence", "5"),
     ]
 
     # Session options for alert behavior
     session_options_extra = [
         ("visual-activity", "off"),
-        ("visual-silence", "off"),
         ("visual-bell", "off"),
         ("activity-action", "any"),
-        ("silence-action", "none"),
         ("bell-action", "any"),
     ]
 

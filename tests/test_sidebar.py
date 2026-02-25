@@ -184,6 +184,44 @@ class TestGroupByRepo:
         assert names == ["main-sess", "zebra", "alpha"]
 
 
+class TestResolveAlertState:
+    """Tests for resolve_alert_state priority logic."""
+
+    def test_none_flags(self):
+        """None flags → no alert."""
+        from ccmux.ui.sidebar.snapshot import resolve_alert_state
+        assert resolve_alert_state(None) is None
+
+    def test_empty_flags(self):
+        """Empty dict → no alert."""
+        from ccmux.ui.sidebar.snapshot import resolve_alert_state
+        assert resolve_alert_state({}) is None
+
+    def test_recently_active_only(self):
+        """recently_active=True → activity alert."""
+        from ccmux.ui.sidebar.snapshot import resolve_alert_state
+        flags = {"bell": False, "recently_active": True, "sid": "1"}
+        assert resolve_alert_state(flags) == "activity"
+
+    def test_bell_only(self):
+        """bell=True → bell alert."""
+        from ccmux.ui.sidebar.snapshot import resolve_alert_state
+        flags = {"bell": True, "recently_active": False, "sid": "1"}
+        assert resolve_alert_state(flags) == "bell"
+
+    def test_bell_and_recently_active(self):
+        """Both bell and recently_active → bell wins."""
+        from ccmux.ui.sidebar.snapshot import resolve_alert_state
+        flags = {"bell": True, "recently_active": True, "sid": "1"}
+        assert resolve_alert_state(flags) == "bell"
+
+    def test_neither(self):
+        """Neither bell nor recently_active → no alert."""
+        from ccmux.ui.sidebar.snapshot import resolve_alert_state
+        flags = {"bell": False, "recently_active": False, "sid": "1"}
+        assert resolve_alert_state(flags) is None
+
+
 class TestPidTracking:
     """Tests for PID file management."""
 
@@ -758,7 +796,7 @@ class TestSnapshotOwnershipValidation:
 
         # Simulate: window @9 exists with sid="5" but session has id=3
         window_flags = {
-            "@9": {"bell": False, "activity": False, "silence": False, "sid": "5"},
+            "@9": {"bell": False, "recently_active": False, "sid": "5"},
         }
         sess_id = 3
         wid = "@9"
@@ -773,7 +811,7 @@ class TestSnapshotOwnershipValidation:
     async def test_snapshot_accepts_correct_sid(self):
         """Window exists and @ccmux_sid matches → active."""
         window_flags = {
-            "@9": {"bell": False, "activity": True, "silence": False, "sid": "3"},
+            "@9": {"bell": False, "recently_active": True, "sid": "3"},
         }
         sess_id = 3
         wid = "@9"

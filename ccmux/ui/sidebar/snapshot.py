@@ -1,13 +1,19 @@
 """Sidebar data layer — snapshot building and tmux queries (no Textual imports)."""
 
 import asyncio
+import logging
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from ccmux import state
 from ccmux.naming import INNER_SESSION
+
+_log = logging.getLogger("ccmux.sidebar")
+
+ACTIVITY_TIMEOUT = 5  # seconds since last output to consider "recently active"
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,15 +41,13 @@ def group_by_repo(snapshot: list[SessionSnapshot]) -> dict[str, list[SessionSnap
     return repos
 
 
-def resolve_alert_state(flags: dict[str, bool] | None) -> str | None:
-    """Determine alert state from window flags (bell > silence-reset > activity)."""
+def resolve_alert_state(flags: dict | None) -> str | None:
+    """Determine alert state from window flags (bell > activity)."""
     if not flags:
         return None
     if flags.get("bell"):
         return "bell"
-    if flags.get("silence"):
-        return None  # silence overrides activity
-    if flags.get("activity"):
+    if flags.get("recently_active"):
         return "activity"
     return None
 
@@ -91,8 +95,8 @@ async def get_current_session_name() -> str | None:
 
 
 async def get_tmux_window_flags() -> dict[str, dict]:
-    """Get window IDs and their bell/activity/silence flags + sid from inner session."""
-    fmt = "#{window_id}|#{window_bell_flag}|#{window_activity_flag}|#{window_silence_flag}|#{@ccmux_sid}"
+    """Get window IDs and their bell/activity timestamp + sid from inner session."""
+    fmt = "#{window_id}|#{window_bell_flag}|#{window_activity}|#{@ccmux_sid}"
     try:
         result = await asyncio.to_thread(
             subprocess.run,
@@ -101,18 +105,19 @@ async def get_tmux_window_flags() -> dict[str, dict]:
             text=True,
             check=True,
         )
+        now = time.time()
         flags: dict[str, dict] = {}
         for line in result.stdout.strip().split("\n"):
             if not line:
                 continue
             parts = line.split("|")
-            if len(parts) >= 5:
+            if len(parts) >= 4:
                 wid = parts[0]
+                activity_ts = int(parts[2]) if parts[2].isdigit() else 0
                 flags[wid] = {
                     "bell": parts[1] == "1",
-                    "activity": parts[2] == "1",
-                    "silence": parts[3] == "1",
-                    "sid": parts[4],
+                    "recently_active": (now - activity_ts) < ACTIVITY_TIMEOUT,
+                    "sid": parts[3],
                 }
         return flags
     except subprocess.CalledProcessError:
@@ -193,6 +198,7 @@ async def build_snapshot() -> list[SessionSnapshot]:
     window_flags = results[0]
     current_session = results[1]
     git_infos = results[2:]
+    _log.debug("window_flags: %s", window_flags)
 
     snapshot = []
     for sess, (branch, short_sha, added, removed) in zip(sessions, git_infos):
