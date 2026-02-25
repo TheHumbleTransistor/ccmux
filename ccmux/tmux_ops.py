@@ -81,8 +81,15 @@ def get_tmux_windows(session_name: str) -> list[str]:
         return []
 
 
-def is_window_active_in_session(session_name: str, tmux_window_id: Optional[str]) -> bool:
-    """Check if a tmux window ID exists in a specific session."""
+def is_window_active_in_session(
+    session_name: str, tmux_window_id: Optional[str],
+    expected_sid: Optional[int] = None,
+) -> bool:
+    """Check if a tmux window ID exists in a specific session.
+
+    When expected_sid is provided, also verifies that the window's @ccmux_sid
+    user option matches, guarding against recycled window IDs.
+    """
     if not tmux_window_id or not tmux_session_exists(session_name):
         return False
     try:
@@ -93,9 +100,17 @@ def is_window_active_in_session(session_name: str, tmux_window_id: Optional[str]
             check=True,
         )
         window_ids = result.stdout.strip().split("\n") if result.stdout.strip() else []
-        return tmux_window_id in window_ids
+        if tmux_window_id not in window_ids:
+            return False
     except subprocess.CalledProcessError:
         return False
+
+    if expected_sid is not None:
+        actual_sid = get_window_user_option(tmux_window_id, "ccmux_sid")
+        if actual_sid != str(expected_sid):
+            return False
+
+    return True
 
 
 def kill_tmux_session(name: str) -> bool:
@@ -235,6 +250,31 @@ def set_window_option(target: str, option: str, value: str) -> bool:
         return True
     except subprocess.CalledProcessError:
         return False
+
+
+def set_window_user_option(target: str, option: str, value: str) -> bool:
+    """Set a @-prefixed user window option via `tmux set -w`."""
+    try:
+        subprocess.run(
+            ["tmux", "set-option", "-w", "-t", target, f"@{option}", value],
+            check=True, capture_output=True,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def get_window_user_option(target: str, option: str) -> Optional[str]:
+    """Read a @-prefixed user window option via `tmux display`."""
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-t", target, "-p", f"#{{@{option}}}"],
+            capture_output=True, text=True, check=True,
+        )
+        val = result.stdout.strip()
+        return val if val else None
+    except subprocess.CalledProcessError:
+        return None
 
 
 def create_session_simple(name: str, cmd: str) -> bool:

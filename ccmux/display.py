@@ -66,10 +66,10 @@ def _build_session_row(sess) -> dict:
 
     tmux_window_name = ""
     status = "[dim]\u25cb Inactive[/dim]"
-    is_active = is_session_window_active(sess.tmux_window_id)
+    is_active = is_session_window_active(sess.tmux_cc_window_id)
 
     if is_active:
-        tmux_window_name = _get_window_display_name(sess.tmux_window_id)
+        tmux_window_name = _get_window_display_name(sess.tmux_cc_window_id)
         status = "[green]\u25cf Active[/green]"
 
     return {

@@ -5,7 +5,7 @@ import random
 from ccmux.ui.sidebar.snapshot import SessionSnapshot
 
 # Static session metadata:
-#   (session_name, repo, session_type, branch, short_sha, +lines, -lines, session_id, tmux_window_id)
+#   (session_name, repo, session_type, branch, short_sha, +lines, -lines, session_id, tmux_cc_window_id)
 _SESSION_META = [
     ("main",      "my-project", "main",     "main",             "a1b2c3d", 15,   3, 1, "@100"),
     ("feat-auth", "my-project", "worktree", "feat/auth-system", "e4f5a6b", 47,  12, 2, "@101"),
@@ -78,7 +78,7 @@ class DemoProvider:
             sessions.append(SessionSnapshot(
                 repo, name, stype, True,
                 name == self._current, self._states[name][0],
-                session_id=sid, tmux_window_id=wid, branch=branch, short_sha=sha,
+                session_id=sid, tmux_cc_window_id=wid, branch=branch, short_sha=sha,
                 lines_added=added, lines_removed=removed,
             ))
 

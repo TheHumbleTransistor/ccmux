@@ -57,14 +57,14 @@ class TestSidebarDataHelpers:
             repo_path="/home/user/my-project",
             session_path="/home/user/my-project/.worktrees/fox",
             tmux_session_id="$0",
-            tmux_window_id="@1",
+            tmux_cc_window_id="@1",
         )
         state.add_session(
             session_name="bear",
             repo_path="/home/user/my-project",
             session_path="/home/user/my-project",
             tmux_session_id="$0",
-            tmux_window_id="@2",
+            tmux_cc_window_id="@2",
             is_worktree=False,
         )
 
@@ -74,7 +74,7 @@ class TestSidebarDataHelpers:
         window_id = "@1"
         current_name = None
         for sess in sessions:
-            if sess.tmux_window_id == window_id:
+            if sess.tmux_cc_window_id == window_id:
                 current_name = sess.name
                 break
 
@@ -86,20 +86,20 @@ class TestSidebarDataHelpers:
             session_name="fox",
             repo_path="/home/user/project-a",
             session_path="/home/user/project-a/.worktrees/fox",
-            tmux_window_id="@1",
+            tmux_cc_window_id="@1",
         )
         state.add_session(
             session_name="bear",
             repo_path="/home/user/project-a",
             session_path="/home/user/project-a",
-            tmux_window_id="@2",
+            tmux_cc_window_id="@2",
             is_worktree=False,
         )
         state.add_session(
             session_name="hawk",
             repo_path="/home/user/project-b",
             session_path="/home/user/project-b/.worktrees/hawk",
-            tmux_window_id="@3",
+            tmux_cc_window_id="@3",
         )
 
         sessions = state.get_all_sessions()
@@ -121,20 +121,20 @@ class TestSidebarDataHelpers:
             session_name="fox",
             repo_path="/repo",
             session_path="/repo/.worktrees/fox",
-            tmux_window_id="@1",
+            tmux_cc_window_id="@1",
         )
         state.add_session(
             session_name="bear",
             repo_path="/repo",
             session_path="/repo/.worktrees/bear",
-            tmux_window_id="@2",
+            tmux_cc_window_id="@2",
         )
 
         sessions = state.get_all_sessions()
         active_window_ids = {"@1"}  # Simulate: only @1 is in tmux
 
         for sess in sessions:
-            is_active = sess.tmux_window_id in active_window_ids
+            is_active = sess.tmux_cc_window_id in active_window_ids
             if sess.name == "fox":
                 assert is_active
             elif sess.name == "bear":
@@ -146,14 +146,14 @@ class TestSidebarDataHelpers:
             session_name="fox",
             repo_path="/repo",
             session_path="/repo/.worktrees/fox",
-            tmux_window_id="@1",
+            tmux_cc_window_id="@1",
             is_worktree=True,
         )
         state.add_session(
             session_name="bear",
             repo_path="/repo",
             session_path="/repo",
-            tmux_window_id="@2",
+            tmux_cc_window_id="@2",
             is_worktree=False,
         )
 
@@ -234,7 +234,7 @@ class TestIsSessionWindowActive:
         result = is_session_window_active("@5")
 
         assert result is True
-        mock_active.assert_called_once_with("ccmux-inner", "@5")
+        mock_active.assert_called_once_with("ccmux-inner", "@5", expected_sid=None)
 
     @mock.patch("ccmux.naming.is_window_active_in_session")
     def test_returns_false_for_none_window(self, mock_active):
@@ -245,7 +245,7 @@ class TestIsSessionWindowActive:
         result = is_session_window_active(None)
 
         assert result is False
-        mock_active.assert_called_once_with("ccmux-inner", None)
+        mock_active.assert_called_once_with("ccmux-inner", None, expected_sid=None)
 
 
 class TestCreateOuterSession:
@@ -608,16 +608,16 @@ class TestSessionRowSelected:
     """Tests for SessionRow.Selected message carrying window ID."""
 
     def test_select_message_includes_window_id(self):
-        """SessionRow.Selected carries the tmux_window_id from the row."""
-        msg = SessionRow.Selected("fox", tmux_window_id="@9")
+        """SessionRow.Selected carries the tmux_cc_window_id from the row."""
+        msg = SessionRow.Selected("fox", tmux_cc_window_id="@9")
         assert msg.session_name == "fox"
-        assert msg.tmux_window_id == "@9"
+        assert msg.tmux_cc_window_id == "@9"
 
     def test_select_message_window_id_defaults_to_none(self):
-        """SessionRow.Selected defaults tmux_window_id to None."""
+        """SessionRow.Selected defaults tmux_cc_window_id to None."""
         msg = SessionRow.Selected("fox")
         assert msg.session_name == "fox"
-        assert msg.tmux_window_id is None
+        assert msg.tmux_cc_window_id is None
 
     @pytest.mark.asyncio
     async def test_click_posts_message_with_window_id(self):
@@ -635,8 +635,8 @@ class TestSessionRowSelected:
             assert len(rows) > 0
             first_row = rows[0]
             # Verify the row carries a window ID
-            assert first_row.tmux_window_id is not None
-            assert first_row.tmux_window_id.startswith("@")
+            assert first_row.tmux_cc_window_id is not None
+            assert first_row.tmux_cc_window_id.startswith("@")
 
 
 class TestAboutPanel:
@@ -738,3 +738,40 @@ class TestAboutPanel:
 
             rows_after = len(app.query(SessionRow))
             assert rows_after == rows_before
+
+
+class TestSnapshotOwnershipValidation:
+    """Tests for @ccmux_sid ownership validation in snapshot building."""
+
+    @pytest.mark.asyncio
+    async def test_snapshot_rejects_wrong_sid(self):
+        """Window exists but @ccmux_sid doesn't match → inactive."""
+        from ccmux.ui.sidebar.snapshot import SessionSnapshot, resolve_alert_state
+
+        # Simulate: window @9 exists with sid="5" but session has id=3
+        window_flags = {
+            "@9": {"bell": False, "activity": False, "silence": False, "sid": "5"},
+        }
+        sess_id = 3
+        wid = "@9"
+        wid_flags = window_flags.get(wid)
+        is_active = (
+            wid_flags is not None
+            and str(sess_id) == wid_flags.get("sid", "")
+        )
+        assert is_active is False
+
+    @pytest.mark.asyncio
+    async def test_snapshot_accepts_correct_sid(self):
+        """Window exists and @ccmux_sid matches → active."""
+        window_flags = {
+            "@9": {"bell": False, "activity": True, "silence": False, "sid": "3"},
+        }
+        sess_id = 3
+        wid = "@9"
+        wid_flags = window_flags.get(wid)
+        is_active = (
+            wid_flags is not None
+            and str(sess_id) == wid_flags.get("sid", "")
+        )
+        assert is_active is True

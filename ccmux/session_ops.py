@@ -55,6 +55,7 @@ from ccmux.tmux_ops import (
     list_clients,
     rename_tmux_window,
     select_window,
+    set_window_user_option,
     tmux_session_exists,
 )
 from ccmux.ui.tmux import apply_claude_inner_session_config, apply_server_global_config
@@ -87,44 +88,66 @@ def build_activate_command(name: str, path: str, claude_session_id: str) -> str:
 
 def create_session_window(
     name: str, path: str, launch_cmd: str, is_first: bool,
-) -> Optional[str]:
+) -> tuple[Optional[str], Optional[str]]:
     """Create a tmux window for a session, creating the tmux session if first.
 
-    Returns the new tmux window ID, or None on failure.
+    Returns (cc_window_id, bash_window_id).
     """
     if is_first:
-        window_id = create_tmux_session(INNER_SESSION, name, path, launch_cmd)
-        if window_id:
+        cc_window_id = create_tmux_session(INNER_SESSION, name, path, launch_cmd)
+        bash_window_id = None
+        if cc_window_id:
             apply_server_global_config()
-            create_bash_window(name, path)
+            bash_window_id = create_bash_window(name, path)
             if apply_claude_inner_session_config(INNER_SESSION):
                 console.print(f"  [green]\u2713[/green] Applied ccmux tmux configuration")
             else:
                 console.print(f"  [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
-        return window_id
+        return cc_window_id, bash_window_id
     else:
-        window_id = create_tmux_window(INNER_SESSION, name, path, launch_cmd)
-        if window_id:
-            create_bash_window(name, path)
-        return window_id
+        cc_window_id = create_tmux_window(INNER_SESSION, name, path, launch_cmd)
+        bash_window_id = None
+        if cc_window_id:
+            bash_window_id = create_bash_window(name, path)
+        return cc_window_id, bash_window_id
+
+
+def tag_window_with_session_id(window_id: Optional[str], session_name: str) -> None:
+    """Tag a tmux window with @ccmux_sid = session's stable integer ID."""
+    if not window_id:
+        return
+    sess = state.get_session(session_name)
+    if sess:
+        set_window_user_option(window_id, "ccmux_sid", str(sess.id))
 
 
 def update_session_tmux_state(
-    name: str, claude_session_id: str, window_id: Optional[str] = None,
+    name: str, claude_session_id: str,
+    cc_window_id: Optional[str] = None,
+    bash_window_id: Optional[str] = None,
 ) -> None:
-    """Update tmux IDs and claude_session_id in state."""
+    """Update tmux IDs and claude_session_id in state, then tag both windows."""
     session_id = get_session_id(INNER_SESSION)
-    if session_id and window_id:
-        state.update_tmux_ids(name, session_id, window_id)
+    if session_id and cc_window_id:
+        state.update_tmux_ids(name, session_id, cc_window_id, bash_window_id)
     state.update_session(name, claude_session_id=claude_session_id)
+    tag_window_with_session_id(cc_window_id, name)
+    tag_window_with_session_id(bash_window_id, name)
 
 
-def kill_session_windows(name: str, tmux_window_id: Optional[str]) -> bool:
+def kill_session_windows(
+    name: str,
+    tmux_cc_window_id: Optional[str],
+    tmux_bash_window_id: Optional[str] = None,
+) -> bool:
     """Kill a session's inner window and bash window. Returns True if inner killed."""
     killed = False
-    if tmux_window_id:
-        killed = kill_tmux_window(tmux_window_id)
-    kill_tmux_window(f"{BASH_SESSION}:{name}")
+    if tmux_cc_window_id:
+        killed = kill_tmux_window(tmux_cc_window_id)
+    if tmux_bash_window_id:
+        kill_tmux_window(tmux_bash_window_id)
+    else:
+        kill_tmux_window(f"{BASH_SESSION}:{name}")
     return killed
 
 
@@ -132,7 +155,7 @@ def partition_sessions_by_active(sessions: list) -> tuple[list, list]:
     """Split sessions into (active, inactive) lists."""
     active, inactive = [], []
     for sess in sessions:
-        if is_session_window_active(sess.tmux_window_id):
+        if is_session_window_active(sess.tmux_cc_window_id):
             active.append(sess)
         else:
             inactive.append(sess)
@@ -280,10 +303,10 @@ def _reactivate_single_orphan(sess) -> None:
     orphan_session_id = str(uuid.uuid4())
     cmd = build_launch_command(name, path, orphan_session_id, f"{sess_type} session: {name}")
 
-    window_id = create_tmux_window(INNER_SESSION, name, path, cmd)
-    if window_id:
-        create_bash_window(name, path)
-        update_session_tmux_state(name, orphan_session_id, window_id)
+    cc_window_id = create_tmux_window(INNER_SESSION, name, path, cmd)
+    if cc_window_id:
+        bash_window_id = create_bash_window(name, path)
+        update_session_tmux_state(name, orphan_session_id, cc_window_id, bash_window_id)
         console.print(f"  [green]\u2713[/green] Reactivated '{name}'")
     else:
         console.print(f"  [yellow]\u26a0[/yellow] Could not reactivate '{name}'")
@@ -312,9 +335,9 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool
     claude_session_id = str(uuid.uuid4())
     launch_cmd = build_launch_command(name, str(session_path), claude_session_id, f"{session_type} session: {name}")
 
-    window_id = _create_new_session_window(name, str(session_path), launch_cmd, is_first)
+    cc_window_id, bash_window_id = _create_new_session_window(name, str(session_path), launch_cmd, is_first)
 
-    _save_new_session_state(name, repo_root, session_path, create_as_worktree, claude_session_id, window_id)
+    _save_new_session_state(name, repo_root, session_path, create_as_worktree, claude_session_id, cc_window_id, bash_window_id)
 
     notify_sidebars()
     if is_first:
@@ -338,15 +361,15 @@ def _print_creation_info(name: str, repo_root: Path, create_as_worktree: bool, s
         console.print(f"  Path:      {session_path}")
 
 
-def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: bool) -> Optional[str]:
-    """Create the tmux window for a new session."""
+def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: bool) -> tuple[Optional[str], Optional[str]]:
+    """Create the tmux window for a new session. Returns (cc_window_id, bash_window_id)."""
     if is_first:
-        window_id = create_tmux_session(INNER_SESSION, name, path, launch_cmd)
-        if window_id is None:
+        cc_window_id = create_tmux_session(INNER_SESSION, name, path, launch_cmd)
+        if cc_window_id is None:
             console.print(f"[red]Error creating tmux session[/red]", style="bold")
             sys.exit(1)
         apply_server_global_config()
-        create_bash_window(name, path)
+        bash_window_id = create_bash_window(name, path)
         console.print(f"  [green]\u2713[/green] Created tmux session '{INNER_SESSION}' with window '{name}'")
         if apply_claude_inner_session_config(INNER_SESSION):
             console.print(f"  [green]\u2713[/green] Applied ccmux tmux configuration")
@@ -354,20 +377,24 @@ def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: 
             console.print(f"  [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
         create_outer_session()
     else:
-        window_id = create_tmux_window(INNER_SESSION, name, path, launch_cmd)
-        if window_id is None:
+        cc_window_id = create_tmux_window(INNER_SESSION, name, path, launch_cmd)
+        if cc_window_id is None:
             console.print(f"[red]Error creating tmux window[/red]", style="bold")
             sys.exit(1)
-        create_bash_window(name, path)
+        bash_window_id = create_bash_window(name, path)
         select_window(INNER_SESSION, name)
         console.print(f"  [green]\u2713[/green] Created new window '{name}'")
 
     console.print(f"  [green]\u2713[/green] Launched Claude Code in tmux window '{name}'")
-    return window_id
+    return cc_window_id, bash_window_id
 
 
-def _save_new_session_state(name: str, repo_root: Path, session_path: Path, is_worktree: bool, claude_session_id: str, window_id: Optional[str]) -> None:
-    """Save session state after creation."""
+def _save_new_session_state(
+    name: str, repo_root: Path, session_path: Path, is_worktree: bool,
+    claude_session_id: str, cc_window_id: Optional[str],
+    bash_window_id: Optional[str] = None,
+) -> None:
+    """Save session state after creation, then tag both windows with @ccmux_sid."""
     tmux_session_id = get_session_id(INNER_SESSION)
 
     state.add_session(
@@ -375,10 +402,13 @@ def _save_new_session_state(name: str, repo_root: Path, session_path: Path, is_w
         repo_path=str(repo_root),
         session_path=str(session_path),
         tmux_session_id=tmux_session_id,
-        tmux_window_id=window_id,
+        tmux_cc_window_id=cc_window_id,
+        tmux_bash_window_id=bash_window_id,
         is_worktree=is_worktree,
         claude_session_id=claude_session_id,
     )
+    tag_window_with_session_id(cc_window_id, name)
+    tag_window_with_session_id(bash_window_id, name)
 
 
 # ---------------------------------------------------------------------------
@@ -437,7 +467,7 @@ def _rename_active_worktree(old_name: str, new_name: str, session_data) -> None:
     old_path = Path(session_data.session_path)
     repo_path = Path(session_data.repo_path)
     new_path = old_path.parent / new_name
-    tmux_window_id = session_data.tmux_window_id
+    tmux_cc_window_id = session_data.tmux_cc_window_id
 
     console.print(f"\n[bold yellow]Session '{old_name}' is active.[/bold yellow]")
     console.print("Renaming will restart Claude Code with its conversation resumed in the new directory.")
@@ -460,16 +490,16 @@ def _rename_active_worktree(old_name: str, new_name: str, session_data) -> None:
         sys.exit(1)
     state.update_session(new_name, session_path=str(new_path))
 
-    new_window_id = _create_renamed_window(new_name, new_path, session_data, migrated)
+    new_cc_window_id = _create_renamed_window(new_name, new_path, session_data, migrated)
 
-    create_bash_window(new_name, str(new_path))
+    new_bash_window_id = create_bash_window(new_name, str(new_path))
 
-    if new_window_id:
+    if new_cc_window_id:
         update_session_tmux_state(new_name,
                                    session_data.claude_session_id if migrated else str(uuid.uuid4()),
-                                   new_window_id)
+                                   new_cc_window_id, new_bash_window_id)
 
-    _kill_old_rename_windows(old_name, tmux_window_id, new_name, new_window_id)
+    _kill_old_rename_windows(old_name, tmux_cc_window_id, new_name, new_cc_window_id)
 
 
 def _migrate_session_data(session_data, old_path: Path, new_path: Path) -> bool:
@@ -558,8 +588,8 @@ def _rename_main_repo_session(old_name: str, new_name: str, session_data, is_act
         sys.exit(1)
 
     if is_active:
-        tmux_window_id = session_data.tmux_window_id
-        if rename_tmux_window(tmux_window_id, new_name):
+        tmux_cc_window_id = session_data.tmux_cc_window_id
+        if rename_tmux_window(tmux_cc_window_id, new_name):
             console.print(f"  [green]\u2713[/green] Renamed tmux window")
         else:
             console.print(f"  [yellow]\u26a0[/yellow] Could not rename tmux window")
@@ -583,8 +613,8 @@ def do_session_rename(old: Optional[str] = None, new: Optional[str] = None) -> N
         return
 
     is_wt = session_data.is_worktree
-    tmux_window_id = session_data.tmux_window_id
-    is_active = tmux_window_id and is_session_window_active(tmux_window_id)
+    tmux_cc_window_id = session_data.tmux_cc_window_id
+    is_active = tmux_cc_window_id and is_session_window_active(tmux_cc_window_id)
 
     if is_wt:
         if is_active:
@@ -646,8 +676,8 @@ def _remove_all_sessions(sessions: list, yes: bool) -> None:
     removed = 0
     for sess in sessions:
         is_active = sess in active
-        if is_active and sess.tmux_window_id:
-            if kill_tmux_window(sess.tmux_window_id):
+        if is_active and sess.tmux_cc_window_id:
+            if kill_tmux_window(sess.tmux_cc_window_id):
                 console.print(f"  [green]\u2713[/green] Deactivated '{sess.name}'")
             else:
                 console.print(f"  [yellow]Window '{sess.name}' already closed[/yellow]")
@@ -695,7 +725,7 @@ def _remove_single_session(name: str, sessions: list, yes: bool) -> None:
             return
 
     if is_active:
-        kill_session_windows(name, session.tmux_window_id)
+        kill_session_windows(name, session.tmux_cc_window_id, session.tmux_bash_window_id)
         console.print(f"  [green]\u2713[/green] Deactivated '{name}'")
 
     _delete_session_worktree(session)
@@ -774,13 +804,14 @@ def _deactivate_all_sessions(active_sessions: list, yes: bool) -> None:
 
     deactivated = 0
     for sess in active_sessions:
-        if kill_session_windows(sess.name, sess.tmux_window_id):
+        if kill_session_windows(sess.name, sess.tmux_cc_window_id, sess.tmux_bash_window_id):
             console.print(f"  [green]\u2713[/green] Deactivated '{sess.name}'")
             deactivated += 1
         else:
             console.print(f"  [yellow]Window '{sess.name}' not found or already closed[/yellow]")
             # Still kill the bash window
             kill_tmux_window(f"{BASH_SESSION}:{sess.name}")
+        state.clear_tmux_window_ids(sess.name)
 
     notify_sidebars()
     console.print(f"\n[bold green]Success![/bold green] Deactivated {deactivated} session(s).")
@@ -799,10 +830,11 @@ def _deactivate_single_session(name: str, sessions: list, active_sessions: list)
 
     console.print(f"\n[bold yellow]Deactivating session '{name}'[/bold yellow]")
 
-    if kill_session_windows(name, session.tmux_window_id):
+    if kill_session_windows(name, session.tmux_cc_window_id, session.tmux_bash_window_id):
         console.print(f"  [green]\u2713[/green] Deactivated '{name}'")
     else:
         console.print(f"  [yellow]Window '{name}' not found or already closed[/yellow]")
+    state.clear_tmux_window_ids(name)
 
     notify_sidebars()
     console.print(f"\n[bold green]Success![/bold green] Session '{name}' deactivated.")
@@ -861,18 +893,20 @@ def _activate_all(yes: bool = False) -> None:
     activated = 0
 
     for i, sess in enumerate(inactive):
+        if sess.tmux_cc_window_id:
+            state.clear_tmux_window_ids(sess.name)
         is_first = not inner_exists and i == 0
         claude_session_id = str(uuid.uuid4())
         launch_cmd = build_activate_command(sess.name, sess.session_path, claude_session_id)
 
-        window_id = create_session_window(sess.name, sess.session_path, launch_cmd, is_first)
-        if window_id:
+        cc_window_id, bash_window_id = create_session_window(sess.name, sess.session_path, launch_cmd, is_first)
+        if cc_window_id:
             if is_first:
                 inner_exists = True
                 console.print(f"  [green]\u2713[/green] Created tmux session and activated '{sess.name}'")
             else:
                 console.print(f"  [green]\u2713[/green] Activated '{sess.name}'")
-            update_session_tmux_state(sess.name, claude_session_id, window_id)
+            update_session_tmux_state(sess.name, claude_session_id, cc_window_id, bash_window_id)
             activated += 1
         else:
             console.print(f"  [red]Error activating '{sess.name}'[/red]")
@@ -896,10 +930,13 @@ def _activate_single(name: str, yes: bool = False) -> None:
         console.print(f"List sessions with: [cyan]ccmux list[/cyan]")
         sys.exit(1)
 
-    if is_session_window_active(session.tmux_window_id):
+    if is_session_window_active(session.tmux_cc_window_id):
         ensure_outer_session()
         console.print(f"[yellow]Session '{name}' already has an active tmux window.[/yellow]")
         return
+
+    if session.tmux_cc_window_id:
+        state.clear_tmux_window_ids(name)
 
     console.print(f"\n[bold cyan]Activating Claude Code session:[/bold cyan] {name}")
     console.print(f"  Session: {session.session_path}")
@@ -908,9 +945,9 @@ def _activate_single(name: str, yes: bool = False) -> None:
     claude_session_id = str(uuid.uuid4())
     launch_cmd = build_activate_command(name, session.session_path, claude_session_id)
 
-    window_id = create_session_window(name, session.session_path, launch_cmd, is_first)
+    cc_window_id, bash_window_id = create_session_window(name, session.session_path, launch_cmd, is_first)
 
-    if window_id is None:
+    if cc_window_id is None:
         console.print(f"[red]Error activating Claude Code[/red]", style="bold")
         sys.exit(1)
 
@@ -920,7 +957,7 @@ def _activate_single(name: str, yes: bool = False) -> None:
         select_window(INNER_SESSION, name)
         console.print(f"  [green]\u2713[/green] Activated '{name}'")
 
-    update_session_tmux_state(name, claude_session_id, window_id)
+    update_session_tmux_state(name, claude_session_id, cc_window_id, bash_window_id)
 
     ensure_outer_session()
     notify_sidebars()
@@ -947,7 +984,7 @@ def do_session_kill(yes: bool = False) -> None:
 
     active = [
         sess for sess in sessions
-        if is_session_window_active(sess.tmux_window_id)
+        if is_session_window_active(sess.tmux_cc_window_id)
     ]
 
     if not active and not tmux_session_exists(OUTER_SESSION):
@@ -1020,9 +1057,9 @@ def _try_cwd_match() -> bool:
 
     session_name, session_data = found
     is_active = (
-        session_data.tmux_window_id
+        session_data.tmux_cc_window_id
         and tmux_session_exists(INNER_SESSION)
-        and is_session_window_active(session_data.tmux_window_id)
+        and is_session_window_active(session_data.tmux_cc_window_id)
     )
 
     if not is_active:

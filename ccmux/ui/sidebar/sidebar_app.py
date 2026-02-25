@@ -275,8 +275,8 @@ class SidebarApp(App):
             return
 
         # Use window ID when available for precise targeting; fall back to name.
-        if message.tmux_window_id:
-            target = message.tmux_window_id
+        if message.tmux_cc_window_id:
+            target = message.tmux_cc_window_id
         else:
             target = f"{INNER_SESSION}:{message.session_name}"
         name_target = f"{INNER_SESSION}:{message.session_name}"
