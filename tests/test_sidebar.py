@@ -446,22 +446,24 @@ class TestInstallInnerHook:
         # Verify set_hook was called on the INNER session
         assert mock_set_hook.call_count == 3
 
-        # Verify all hooks target the inner session
+        # Verify hooks use run-shell without @ccmux_bell management
         bell_call = mock_set_hook.call_args_list[0]
         assert bell_call[0][0] == "ccmux-inner"
         assert bell_call[0][1] == "alert-bell"
-        assert "-t '#{window_id}'" in bell_call[0][2]
+        assert "run-shell" in bell_call[0][2]
+        assert "@ccmux_bell" not in bell_call[0][2]
 
         select_call = mock_set_hook.call_args_list[1]
         assert select_call[0][0] == "ccmux-inner"
         assert select_call[0][1] == "after-select-window"
-        assert "-t '#{window_id}'" in select_call[0][2]
+        assert "run-shell" in select_call[0][2]
+        assert "@ccmux_bell" not in select_call[0][2]
 
         activity_call = mock_set_hook.call_args_list[2]
         assert activity_call[0][0] == "ccmux-inner"
         assert activity_call[0][1] == "alert-activity"
-        assert "@ccmux_bell" in activity_call[0][2]
         assert "run-shell" in activity_call[0][2]
+        assert "@ccmux_bell" not in activity_call[0][2]
 
     @mock.patch("ccmux.session_layout.unset_hook")
     def test_uninstall_removes_hook(self, mock_unset_hook, tmp_path, monkeypatch):

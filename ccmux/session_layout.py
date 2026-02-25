@@ -67,12 +67,11 @@ def install_inner_hook() -> None:
     script_path.chmod(0o755)
 
     set_hook(INNER_SESSION, "alert-bell",
-             f"set -w -t '#{{window_id}}' @ccmux_bell 1 ; run-shell '{script_path}'")
+             f"run-shell '{script_path}'")
     set_hook(INNER_SESSION, "after-select-window",
-             f"set -w -t '#{{window_id}}' @ccmux_bell 0 ; run-shell '{script_path}'")
+             f"run-shell '{script_path}'")
     set_hook(INNER_SESSION, "alert-activity",
-             f"if-shell -F '#{{&&:#{{@ccmux_bell}},#{{window_active}}}}' "
-             f"'set -w @ccmux_bell 0' ; run-shell '{script_path}'")
+             f"run-shell '{script_path}'")
 
 
 def _build_hook_script() -> str:

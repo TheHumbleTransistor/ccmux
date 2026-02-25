@@ -92,7 +92,7 @@ async def get_current_session_name() -> str | None:
 
 async def get_tmux_window_flags() -> dict[str, dict]:
     """Get window IDs and their bell/activity/silence flags + sid from inner session."""
-    fmt = "#{window_id}|#{@ccmux_bell}|#{window_activity_flag}|#{window_silence_flag}|#{@ccmux_sid}"
+    fmt = "#{window_id}|#{window_bell_flag}|#{window_activity_flag}|#{window_silence_flag}|#{@ccmux_sid}"
     try:
         result = await asyncio.to_thread(
             subprocess.run,

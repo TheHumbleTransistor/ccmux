@@ -327,13 +327,3 @@ class SidebarApp(App):
             )
         except subprocess.CalledProcessError:
             pass
-        # Clear bell flag on the tmux window (needed when re-selecting the current window)
-        try:
-            await asyncio.to_thread(
-                subprocess.run,
-                ["tmux", "set", "-w", "-t", target, "@ccmux_bell", "0"],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError:
-            pass
