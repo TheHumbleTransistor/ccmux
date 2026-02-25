@@ -21,7 +21,7 @@ from ccmux.ui.sidebar import snapshot
 from ccmux.ui.sidebar.snapshot import DerivedSessionState, SessionSnapshot
 from ccmux.ui.sidebar.widgets import SessionRow, RepoSessionsList, TitleBanner, AboutPanel
 
-POLL_INTERVAL = 5.0
+POLL_INTERVAL = 1.0
 DEMO_POLL_INTERVAL = 1.0
 POST_SELECTION_ACTIVITY_DEBOUNCE = 0.5  # seconds to ignore misleading activity caused by returning focus to the Claude Code window
 
