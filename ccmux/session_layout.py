@@ -72,7 +72,7 @@ def install_inner_hook() -> None:
              f"set -w -t '#{{window_id}}' @ccmux_bell 0 ; run-shell '{script_path}'")
     set_hook(INNER_SESSION, "alert-activity",
              f"if-shell -F '#{{&&:#{{@ccmux_bell}},#{{window_active}}}}' "
-             f"'set -w @ccmux_bell 0 ; run-shell \"{script_path}\"'")
+             f"'set -w @ccmux_bell 0' ; run-shell '{script_path}'")
 
 
 def _build_hook_script() -> str:

@@ -442,6 +442,7 @@ class TestInstallInnerHook:
         assert activity_call[0][0] == "ccmux-inner"
         assert activity_call[0][1] == "alert-activity"
         assert "@ccmux_bell" in activity_call[0][2]
+        assert "run-shell" in activity_call[0][2]
 
     @mock.patch("ccmux.session_layout.unset_hook")
     def test_uninstall_removes_hook(self, mock_unset_hook, tmp_path, monkeypatch):
