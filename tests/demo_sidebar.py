@@ -82,21 +82,40 @@ class DemoProvider:
     def __init__(self) -> None:
         self._tick = 0
         self._current = "main"
+        self._dismissed_bells: set[str] = set()
+        self._last_phase_alerts: dict[str, str | None] = {}
 
     def select(self, session_name: str) -> None:
         """Set the current session (called on click)."""
         self._current = session_name
+        # Dismiss any bell on the selected session (mirrors real tmux bell-clear)
+        self._dismissed_bells.add(session_name)
 
     async def __call__(self) -> list[SessionSnapshot]:
         """Build the snapshot for the current tick, then advance."""
         pos = self._tick % _TOTAL_TICKS
+        phase_kwargs = {}
         for duration, kwargs in _PHASES:
             if pos < duration:
-                snap = _base_sessions(current=self._current, **kwargs)
+                phase_kwargs = kwargs
                 break
             pos -= duration
-        else:
-            snap = _base_sessions(current=self._current)
+
+        # When the phase's alerts change, reset dismissed bells
+        phase_alerts = phase_kwargs.get("alerts", {})
+        if phase_alerts != self._last_phase_alerts:
+            self._dismissed_bells.clear()
+            self._last_phase_alerts = phase_alerts
+
+        # Suppress bells the user has dismissed by clicking
+        if self._dismissed_bells:
+            alerts = dict(phase_alerts)
+            for name in self._dismissed_bells:
+                if alerts.get(name) == "bell":
+                    alerts[name] = None
+            phase_kwargs = {**phase_kwargs, "alerts": alerts}
+
+        snap = _base_sessions(current=self._current, **phase_kwargs)
         self._tick += 1
         return snap
 
