@@ -8,6 +8,7 @@ from ccmux.ui.sidebar.process_id import (  # noqa: F401
     write_pid_file,
 )
 from ccmux.ui.sidebar.widgets import (  # noqa: F401
+    AboutPanel,
     SessionRow,
     RepoHeader,
     RepoSessionsList,

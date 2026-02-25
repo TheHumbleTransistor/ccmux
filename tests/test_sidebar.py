@@ -16,6 +16,7 @@ from textual.widgets import Static
 
 from ccmux.ui import (
     SidebarApp,
+    AboutPanel,
     SessionRow,
     RepoHeader,
     write_pid_file,
@@ -515,7 +516,7 @@ class TestSidebarRendering:
         async with demo_app.run_test() as pilot:
             # Verify initial state — title and sessions are present
             app = pilot.app
-            title = app.query_one("#title", Static)
+            title = app.query_one("#title")
             assert title.display is True
 
             # Find and click a SessionRow
@@ -524,7 +525,7 @@ class TestSidebarRendering:
             await pilot.click(SessionRow)
 
             # After click, all structural widgets must still be mounted and visible
-            title = app.query_one("#title", Static)
+            title = app.query_one("#title")
             assert title.display is True
             assert len(app.query(SessionRow)) > 0
 
@@ -534,10 +535,12 @@ class TestSidebarRendering:
         async with demo_app.run_test() as pilot:
             app = pilot.app
 
-            # Click the title
+            # Click the title — now toggles about panel on
+            await pilot.click("#title")
+            # Click again to toggle back to session list
             await pilot.click("#title")
 
-            title = app.query_one("#title", Static)
+            title = app.query_one("#title")
             assert title.display is True
 
             # Click a RepoHeader
@@ -545,7 +548,7 @@ class TestSidebarRendering:
             if len(repo_headers) > 0:
                 await pilot.click(RepoHeader)
                 # Verify everything still intact
-                assert app.query_one("#title", Static).display is True
+                assert app.query_one("#title").display is True
                 assert len(app.query(SessionRow)) > 0
 
     @pytest.mark.asyncio
@@ -554,7 +557,8 @@ class TestSidebarRendering:
         async with demo_app.run_test(size=(80, 40)) as pilot:
             app = pilot.app
 
-            # Click title, then each SessionRow
+            # Click title twice (toggle about on then off), then each SessionRow
+            await pilot.click("#title")
             await pilot.click("#title")
 
             rows = app.query(SessionRow)
@@ -562,7 +566,7 @@ class TestSidebarRendering:
                 await pilot.click(f"#{row.id}")
 
             # All structural widgets must survive rapid clicking
-            assert app.query_one("#title", Static).display is True
+            assert app.query_one("#title").display is True
             assert app.query_one("#instance-list") is not None
             assert len(app.query(SessionRow)) > 0
 
@@ -572,3 +576,104 @@ class TestSidebarRendering:
         assert SidebarApp.ALLOW_SELECT is False
         async with demo_app.run_test() as pilot:
             assert pilot.app.ALLOW_SELECT is False
+
+
+class TestAboutPanel:
+    """Tests for the about/info panel toggled via the title banner."""
+
+    @pytest.fixture
+    def demo_app(self):
+        from tests.demo_sidebar import make_demo_provider
+
+        return SidebarApp(
+            snapshot_fn=make_demo_provider(),
+            poll_interval=1.0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_about_panel_hidden_by_default(self, demo_app):
+        """About panel should be mounted but not displayed initially."""
+        async with demo_app.run_test() as pilot:
+            app = pilot.app
+            about = app.query_one("#about-panel")
+            assert about.display is False
+            assert app.query_one("#instance-list").display is True
+
+    @pytest.mark.asyncio
+    async def test_title_click_shows_about(self, demo_app):
+        """Clicking title shows about panel and hides session list."""
+        async with demo_app.run_test() as pilot:
+            app = pilot.app
+            await pilot.click("#title")
+
+            assert app.query_one("#about-panel").display is True
+            assert app.query_one("#instance-list").display is False
+
+    @pytest.mark.asyncio
+    async def test_title_click_toggles_back(self, demo_app):
+        """Clicking title again hides about panel and shows sessions."""
+        async with demo_app.run_test() as pilot:
+            app = pilot.app
+            await pilot.click("#title")
+            await pilot.click("#title")
+
+            assert app.query_one("#about-panel").display is False
+            assert app.query_one("#instance-list").display is True
+
+    @pytest.mark.asyncio
+    async def test_escape_closes_about(self, demo_app):
+        """Pressing Escape closes the about panel."""
+        async with demo_app.run_test() as pilot:
+            app = pilot.app
+            await pilot.click("#title")
+            assert app.query_one("#about-panel").display is True
+
+            await pilot.press("escape")
+            assert app.query_one("#about-panel").display is False
+            assert app.query_one("#instance-list").display is True
+
+    @pytest.mark.asyncio
+    async def test_escape_noop_when_about_not_shown(self, demo_app):
+        """Pressing Escape when about panel is hidden does nothing."""
+        async with demo_app.run_test() as pilot:
+            app = pilot.app
+            await pilot.press("escape")
+
+            # Session list still visible, about still hidden
+            assert app.query_one("#about-panel").display is False
+            assert app.query_one("#instance-list").display is True
+
+    @pytest.mark.asyncio
+    async def test_about_panel_contains_version(self, demo_app):
+        """About panel should contain the version string."""
+        from ccmux import __version__
+        from ccmux.ui.sidebar.widgets.about_panel import ABOUT_TEXT
+
+        assert __version__ in ABOUT_TEXT
+
+    @pytest.mark.asyncio
+    async def test_back_button_closes_about(self, demo_app):
+        """Clicking the back button in the about panel closes it."""
+        async with demo_app.run_test() as pilot:
+            app = pilot.app
+            await pilot.click("#title")
+            assert app.query_one("#about-panel").display is True
+
+            await pilot.click("#about-back")
+            assert app.query_one("#about-panel").display is False
+            assert app.query_one("#instance-list").display is True
+
+    @pytest.mark.asyncio
+    async def test_sessions_survive_about_toggle(self, demo_app):
+        """Sessions remain mounted after toggling about panel on and off."""
+        async with demo_app.run_test() as pilot:
+            app = pilot.app
+            rows_before = len(app.query(SessionRow))
+            assert rows_before > 0
+
+            # Toggle on, then off
+            await pilot.click("#title")
+            await pilot.click("#title")
+
+            rows_after = len(app.query(SessionRow))
+            assert rows_after == rows_before
