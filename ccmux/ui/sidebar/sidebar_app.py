@@ -5,6 +5,7 @@ import logging
 import os
 import signal
 import subprocess
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from ccmux.ui.sidebar.widgets import SessionRow, RepoSessionsList, TitleBanner, 
 
 POLL_INTERVAL = 5.0
 DEMO_POLL_INTERVAL = 1.0
+POST_SELECTION_ACTIVITY_DEBOUNCE = 0.5  # seconds to ignore misleading activity caused by returning focus to the Claude Code window
 
 # --- Logging ---
 _LOG_DIR = Path.home() / ".ccmux"
@@ -61,6 +63,7 @@ class SidebarApp(App):
         self._last_derived: list[DerivedSessionState] | None = None
         self._blocked_sessions: set[str] = set()
         self._blocker_alerted_sessions: set[str] = set()
+        self._post_selection_debounce: dict[str, float] = {}
         self._refresh_lock = asyncio.Lock()
         self._session_list: Vertical | None = None
         self._about_visible = False
@@ -194,8 +197,17 @@ class SidebarApp(App):
             self._blocked_sessions.add(name)
             self._blocker_alerted_sessions.add(name)
         elif raw_alert == "activity":
-            self._blocked_sessions.discard(name)
-            self._blocker_alerted_sessions.discard(name)
+            # If we recently clicked this row, ignore misleading activity
+            # caused by returning focus to the Claude Code window.
+            debounce_ts = self._post_selection_debounce.get(name)
+            if debounce_ts is not None:
+                if entry.activity_ts < debounce_ts + POST_SELECTION_ACTIVITY_DEBOUNCE:
+                    raw_alert = None
+                else:
+                    del self._post_selection_debounce[name]
+            if raw_alert == "activity":
+                self._blocked_sessions.discard(name)
+                self._blocker_alerted_sessions.discard(name)
         # raw_alert is None → sticky state persists (key for blocked persistence)
 
         if raw_alert == "activity":
@@ -308,6 +320,10 @@ class SidebarApp(App):
 
     async def on_session_row_selected(self, message: SessionRow.Selected) -> None:
         """Switch to the clicked session's tmux window and clear blocker alert."""
+        # Record debounce timestamp so that misleading tmux activity from
+        # returning focus to the Claude Code window doesn't change session status.
+        self._post_selection_debounce[message.session_name] = time.time()
+
         # Clear blocker alert (row background) but keep blocked status (red circle)
         self._blocker_alerted_sessions.discard(message.session_name)
         try:

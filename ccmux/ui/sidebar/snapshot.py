@@ -29,6 +29,7 @@ class SessionSnapshot:
     short_sha: str = ""
     lines_added: int = 0
     lines_removed: int = 0
+    activity_ts: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +132,7 @@ async def get_tmux_window_flags() -> dict[str, dict]:
                     "bell": parts[1] == "1",
                     "recently_active": (now - activity_ts) < ACTIVITY_TIMEOUT,
                     "sid": parts[3],
+                    "activity_ts": float(activity_ts),
                 }
         return flags
     except subprocess.CalledProcessError:
@@ -225,6 +227,7 @@ async def build_snapshot() -> list[SessionSnapshot]:
         is_current = sess.name == current_session
         sess_type = sess.session_type
         alert_state = resolve_alert_state(wid_flags) if is_active else None
+        activity_ts = wid_flags.get("activity_ts", 0.0) if wid_flags else 0.0
         snapshot.append(SessionSnapshot(
             repo_name=repo_name,
             session_name=sess.name,
@@ -237,5 +240,6 @@ async def build_snapshot() -> list[SessionSnapshot]:
             short_sha=short_sha,
             lines_added=added,
             lines_removed=removed,
+            activity_ts=activity_ts,
         ))
     return snapshot
