@@ -22,3 +22,7 @@ When working on GitHub issues, follow this process exactly:
 - `ccmux/cli.py` is responsible for **catching exceptions** and presenting user-facing error messages via `console.print()` + `sys.exit()`
 - This keeps business logic testable and decoupled from presentation
 
+# Code Style
+
+## Imports
+- Avoid lazy imports — place all imports at the top of the file

@@ -261,6 +261,18 @@ def find_main_repo_session(repo_path: str) -> Optional[Session]:
     return None
 
 
+def get_tmux_session_version() -> Optional[str]:
+    """Return the tmux_session_version stored in state, or None if not set."""
+    return _load_raw().get("tmux_session_version")
+
+
+def set_tmux_session_version(version: str) -> None:
+    """Stamp the current ccmux version into state and save."""
+    state = _load_raw()
+    state["tmux_session_version"] = version
+    _save_raw(state)
+
+
 def find_session_by_path(path: str) -> Optional[tuple[str, Session]]:
     """Find session whose session_path is a prefix of the given path.
     Returns the most specific (longest) match: (session_name, Session) or None.

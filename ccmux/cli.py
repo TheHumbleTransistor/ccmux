@@ -7,8 +7,13 @@ from typing import Annotated, Optional
 
 import cyclopts
 from cyclopts import Parameter
+from rich.prompt import Confirm
 
+from ccmux import __version__
+from ccmux.display import console
 from ccmux.exceptions import SessionExistsError
+from ccmux.naming import BASH_SESSION, INNER_SESSION, OUTER_SESSION
+from ccmux.session_layout import do_debug_sidebar
 from ccmux.session_ops import (
     do_attach,
     do_detach,
@@ -21,10 +26,10 @@ from ccmux.session_ops import (
     do_session_remove,
     do_session_rename,
     do_session_which,
+    stale_sessions_running,
 )
-from ccmux import __version__
-from ccmux.session_layout import do_debug_sidebar
-from ccmux.display import console
+from ccmux.state import get_tmux_session_version
+from ccmux.tmux_ops import check_tmux_installed, kill_all_ccmux_sessions
 
 app = cyclopts.App(
     name="ccmux",
@@ -149,8 +154,6 @@ def check_claude_installed() -> bool:
 
 def main():
     """Main entry point for the CLI."""
-    from ccmux.tmux_ops import check_tmux_installed
-
     if not check_tmux_installed():
         console.print("[red]Error:[/red] tmux is not installed or not found on PATH.", style="bold")
         console.print("\nInstall tmux for your platform:")
@@ -166,6 +169,38 @@ def main():
         console.print("  npm install -g @anthropic-ai/claude-code")
         console.print("\nFor more info: https://docs.anthropic.com/en/docs/claude-code")
         sys.exit(1)
+
+    if stale_sessions_running():
+        stored = get_tmux_session_version()
+        console.print()
+        if stored:
+            console.print(
+                f"[yellow bold]ccmux upgraded:[/yellow bold] "
+                f"{stored} → {__version__}"
+            )
+        else:
+            console.print(
+                f"[yellow bold]ccmux upgrade detected[/yellow bold] "
+                f"(now {__version__})"
+            )
+        console.print(
+            "Running tmux sessions use outdated hooks and may behave unexpectedly."
+        )
+        console.print(
+            "Killing them is safe — sessions will be recreated on "
+            "[bold]ccmux new[/bold] / [bold]ccmux activate[/bold].\n"
+        )
+
+        if Confirm.ask("Kill stale ccmux tmux sessions?", default=True):
+            kill_all_ccmux_sessions(OUTER_SESSION, OUTER_SESSION, INNER_SESSION, BASH_SESSION)
+            console.print(
+                "[green]Done.[/green] Run [bold]ccmux new[/bold] or "
+                "[bold]ccmux activate[/bold] to start fresh."
+            )
+        else:
+            console.print(
+                "[dim]Keeping existing sessions — behavior may be degraded.[/dim]"
+            )
 
     try:
         app()
