@@ -44,7 +44,7 @@ def apply_claude_inner_session_config(session_name: str) -> bool:
 
     # Session options for alert behavior
     session_options_extra = [
-        ("visual-activity", "off"),
+        ("visual-activity", "on"),
         ("visual-bell", "off"),
         ("activity-action", "any"),
         ("bell-action", "any"),
@@ -106,6 +106,7 @@ def apply_outer_session_config(session_name: str) -> bool:
         ("set-titles", "on"),
         ("set-titles-string", display_title),
         ("window-size", "latest"),
+        ("bell-action", "none"),
     ]
     try:
         for key, val in options:
