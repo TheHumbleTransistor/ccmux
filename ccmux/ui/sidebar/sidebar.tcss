@@ -94,11 +94,9 @@ SessionRow.bell:hover {
 }
 
 SessionRow.activity {
-    background: #005f00;
 }
 
 SessionRow.activity:hover {
-    background: #3a573d;
 }
 
 /* Red phase of flash (default when current+bell) */
