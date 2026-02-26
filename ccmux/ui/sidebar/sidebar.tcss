@@ -120,7 +120,7 @@ SessionRow:hover {
 }
 
 SessionRow.current {
-    background: white;
+    background: #d7af5f;
     color: #1e1e1e;
     text-style: bold;
 }
@@ -157,7 +157,7 @@ SessionRow.current.blocker-alert {
 
 /* Alternate phase of flash (matches normal current background) */
 SessionRow.current.blocker-alert.blocker-alert-flash {
-    background: #e0e0e0;
+    background: #d7af5f;
 }
 
 /* RepoHeader */
