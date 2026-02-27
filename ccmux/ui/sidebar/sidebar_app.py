@@ -263,7 +263,7 @@ class SidebarApp(App):
                 new_widgets = [Static("  No sessions")]
             else:
                 grouped = snapshot.group_by_repo(derived)
-                display_names = snapshot.build_repo_display_names(grouped.keys())
+                display_names = snapshot.build_repo_display_names(grouped)
                 new_widgets = [
                     RepoSessionsList(display_names[repo_path], entries, id=f"repo-group-{idx}")
                     for idx, (repo_path, entries) in enumerate(grouped.items())

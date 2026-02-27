@@ -6,7 +6,6 @@ import re
 import subprocess
 import time
 from collections import Counter
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,22 +57,28 @@ def group_by_repo(
     return repos
 
 
-def build_repo_display_names(repo_paths: Iterable[str]) -> dict[str, str]:
-    """Map repo paths to display names, disambiguating collisions with (2), (3), etc."""
-    paths = list(repo_paths)
+def build_repo_display_names(
+    grouped: dict[str, list[DerivedSessionState]],
+) -> dict[str, str]:
+    """Map repo paths to display names, disambiguating collisions with (2), (3), etc.
+
+    Older repos (lower session IDs) keep the clean name; newer repos get a suffix.
+    """
+    paths = list(grouped)
     names = {p: Path(p).name for p in paths}
     name_counts = Counter(names.values())
-    # For names that appear more than once, disambiguate by sorting paths alphabetically
+    # Sort by minimum session_id so older repos keep the clean name
+    paths_sorted = sorted(grouped, key=lambda p: min(d.snapshot.session_id for d in grouped[p]))
     seen: dict[str, int] = {}
     display: dict[str, str] = {}
-    for p in sorted(paths):
+    for p in paths_sorted:
         base = names[p]
         if name_counts[base] == 1:
-            display[p] = base
+            display[p] = f"{base}/"
         else:
             idx = seen.get(base, 0)
             seen[base] = idx + 1
-            display[p] = base if idx == 0 else f"{base} ({idx + 1})"
+            display[p] = f"{base}/" if idx == 0 else f"{base}/ ({idx + 1})"
     return display
 
 

@@ -188,62 +188,108 @@ class TestGroupByRepo:
         assert names == ["main-sess", "zebra", "alpha"]
 
 
+def _mock_grouped(path_to_ids: dict[str, list[int]]) -> dict:
+    """Build a grouped dict mapping repo paths to lists of mock DerivedSessionState."""
+    from ccmux.ui.sidebar.snapshot import DerivedSessionState, SessionSnapshot
+
+    grouped: dict[str, list] = {}
+    for path, ids in path_to_ids.items():
+        grouped[path] = [
+            DerivedSessionState(
+                snapshot=SessionSnapshot(
+                    repo_name=path.rsplit("/", 1)[-1],
+                    repo_path=path,
+                    session_name=f"sess-{sid}",
+                    session_type="main",
+                    is_active=True,
+                    is_current=False,
+                    alert_state=None,
+                    session_id=sid,
+                ),
+                status="idle",
+                has_blocker_alert=False,
+            )
+            for sid in ids
+        ]
+    return grouped
+
+
 class TestBuildRepoDisplayNames:
     """Tests for build_repo_display_names disambiguation."""
 
     def test_unique_names_unchanged(self):
-        """Unique directory names are returned as-is."""
+        """Unique directory names include trailing slash."""
         from ccmux.ui.sidebar.snapshot import build_repo_display_names
 
-        result = build_repo_display_names(["/home/user/project-a", "/home/user/project-b"])
+        grouped = _mock_grouped({
+            "/home/user/project-a": [1],
+            "/home/user/project-b": [2],
+        })
+        result = build_repo_display_names(grouped)
         assert result == {
-            "/home/user/project-a": "project-a",
-            "/home/user/project-b": "project-b",
+            "/home/user/project-a": "project-a/",
+            "/home/user/project-b": "project-b/",
         }
 
-    def test_duplicate_names_disambiguated(self):
-        """Same directory name from different parents gets (2), (3), etc."""
+    def test_duplicate_names_disambiguated_by_session_id(self):
+        """Older repo (lower session ID) keeps clean name; newer gets suffix."""
         from ccmux.ui.sidebar.snapshot import build_repo_display_names
 
-        result = build_repo_display_names([
-            "/home/user/work/my-app",
-            "/home/user/projects/my-app",
-        ])
-        # Alphabetically: /home/user/projects/my-app < /home/user/work/my-app
-        assert result["/home/user/projects/my-app"] == "my-app"
-        assert result["/home/user/work/my-app"] == "my-app (2)"
+        grouped = _mock_grouped({
+            "/home/user/work/my-app": [5],
+            "/home/user/projects/my-app": [10],
+        })
+        result = build_repo_display_names(grouped)
+        assert result["/home/user/work/my-app"] == "my-app/"
+        assert result["/home/user/projects/my-app"] == "my-app/ (2)"
 
-    def test_three_duplicates(self):
-        """Three paths with the same name get bare, (2), (3)."""
+    def test_three_duplicates_ordered_by_session_id(self):
+        """Three paths with the same name — ordered by minimum session ID."""
         from ccmux.ui.sidebar.snapshot import build_repo_display_names
 
-        result = build_repo_display_names([
-            "/z/my-app",
-            "/a/my-app",
-            "/m/my-app",
-        ])
-        assert result["/a/my-app"] == "my-app"
-        assert result["/m/my-app"] == "my-app (2)"
-        assert result["/z/my-app"] == "my-app (3)"
+        grouped = _mock_grouped({
+            "/z/my-app": [3],
+            "/a/my-app": [7],
+            "/m/my-app": [1],
+        })
+        result = build_repo_display_names(grouped)
+        # /m has min session_id=1, /z has 3, /a has 7
+        assert result["/m/my-app"] == "my-app/"
+        assert result["/z/my-app"] == "my-app/ (2)"
+        assert result["/a/my-app"] == "my-app/ (3)"
 
     def test_empty_input(self):
         """Empty input returns empty dict."""
         from ccmux.ui.sidebar.snapshot import build_repo_display_names
 
-        assert build_repo_display_names([]) == {}
+        assert build_repo_display_names({}) == {}
 
     def test_mixed_unique_and_duplicate(self):
         """Mix of unique and duplicate names."""
         from ccmux.ui.sidebar.snapshot import build_repo_display_names
 
-        result = build_repo_display_names([
-            "/a/unique-repo",
-            "/b/shared-name",
-            "/c/shared-name",
-        ])
-        assert result["/a/unique-repo"] == "unique-repo"
-        assert result["/b/shared-name"] == "shared-name"
-        assert result["/c/shared-name"] == "shared-name (2)"
+        grouped = _mock_grouped({
+            "/a/unique-repo": [5],
+            "/b/shared-name": [1],
+            "/c/shared-name": [10],
+        })
+        result = build_repo_display_names(grouped)
+        assert result["/a/unique-repo"] == "unique-repo/"
+        assert result["/b/shared-name"] == "shared-name/"
+        assert result["/c/shared-name"] == "shared-name/ (2)"
+
+    def test_multiple_sessions_uses_minimum_id(self):
+        """When a repo has multiple sessions, the minimum session ID determines order."""
+        from ccmux.ui.sidebar.snapshot import build_repo_display_names
+
+        grouped = _mock_grouped({
+            "/x/my-app": [10, 20],
+            "/y/my-app": [5, 30],
+        })
+        result = build_repo_display_names(grouped)
+        # /y has min session_id=5, /x has min session_id=10
+        assert result["/y/my-app"] == "my-app/"
+        assert result["/x/my-app"] == "my-app/ (2)"
 
 
 class TestResolveAlertState:
