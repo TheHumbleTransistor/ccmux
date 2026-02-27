@@ -15,6 +15,9 @@ from ccmux.tmux_ops import (
     tmux_session_exists,
 )
 
+# Worktree directory (relative to repo root)
+WORKTREES_DIR_NAME = Path(".ccmux") / "worktrees"
+
 # Tmux session names (constants — no more parameterized naming)
 INNER_SESSION = "ccmux-inner"
 BASH_SESSION = "ccmux-bash"

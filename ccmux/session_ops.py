@@ -48,6 +48,7 @@ from ccmux.naming import (
     BASH_SESSION,
     INNER_SESSION,
     OUTER_SESSION,
+    WORKTREES_DIR_NAME,
     detect_current_ccmux_session,
     detect_current_ccmux_session_any,
     generate_animal_name,
@@ -280,7 +281,7 @@ def session_name_exists(name: str, repo_root: Path) -> bool:
     """Check if a session name is already in use (session state or worktree on disk)."""
     if state.get_session(name):
         return True
-    test_path = repo_root / ".worktrees" / name
+    test_path = repo_root / WORKTREES_DIR_NAME / name
     return worktree_exists(test_path, repo_root)
 
 
@@ -355,8 +356,8 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool
     name = _generate_session_name(repo_root, create_as_worktree, name)
 
     if create_as_worktree:
-        session_path = repo_root / ".worktrees" / name
-        (repo_root / ".worktrees").mkdir(exist_ok=True)
+        session_path = repo_root / WORKTREES_DIR_NAME / name
+        (repo_root / WORKTREES_DIR_NAME).mkdir(parents=True, exist_ok=True)
     else:
         session_path = repo_root
 

@@ -47,7 +47,7 @@ def test_add_session(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.ccmux/worktrees/feature-x",
         tmux_session_id="$0",
         tmux_cc_window_id="@1"
     )
@@ -57,7 +57,7 @@ def test_add_session(temp_state_dir):
 
     sess = loaded["sessions"]["feature-x"]
     assert sess["repo_path"] == "/repo"
-    assert sess["session_path"] == "/repo/.worktrees/feature-x"
+    assert sess["session_path"] == "/repo/.ccmux/worktrees/feature-x"
     assert sess["tmux_window_ids"]["claude_code"] == "@1"
     assert loaded["tmux_session_id"] == "$0"
 
@@ -67,7 +67,7 @@ def test_remove_session(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.worktrees/feature-x"
+        session_path="/repo/.ccmux/worktrees/feature-x"
     )
 
     state.remove_session("feature-x")
@@ -81,12 +81,12 @@ def test_remove_session_keeps_other_sessions(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.worktrees/feature-x"
+        session_path="/repo/.ccmux/worktrees/feature-x"
     )
     state.add_session(
         session_name="feature-y",
         repo_path="/repo",
-        session_path="/repo/.worktrees/feature-y"
+        session_path="/repo/.ccmux/worktrees/feature-y"
     )
 
     state.remove_session("feature-x")
@@ -101,7 +101,7 @@ def test_update_tmux_ids(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.ccmux/worktrees/feature-x",
         tmux_session_id="$0",
         tmux_cc_window_id="@1"
     )
@@ -122,7 +122,7 @@ def test_get_session(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.worktrees/feature-x"
+        session_path="/repo/.ccmux/worktrees/feature-x"
     )
 
     session = state.get_session("feature-x")
@@ -137,13 +137,13 @@ def test_get_all_sessions(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo1",
-        session_path="/repo1/.worktrees/feature-x",
+        session_path="/repo1/.ccmux/worktrees/feature-x",
         tmux_cc_window_id="@1"
     )
     state.add_session(
         session_name="feature-y",
         repo_path="/repo2",
-        session_path="/repo2/.worktrees/feature-y",
+        session_path="/repo2/.ccmux/worktrees/feature-y",
         tmux_cc_window_id="@2"
     )
 
@@ -158,7 +158,7 @@ def test_update_session(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.ccmux/worktrees/feature-x",
     )
 
     assert state.update_session("feature-x", session_path="/new/path")
@@ -174,7 +174,7 @@ def test_rename_session(temp_state_dir):
     state.add_session(
         session_name="old-name",
         repo_path="/repo",
-        session_path="/repo/.worktrees/old-name",
+        session_path="/repo/.ccmux/worktrees/old-name",
         tmux_cc_window_id="@1",
     )
 
@@ -193,12 +193,12 @@ def test_rename_session_conflict(temp_state_dir):
     state.add_session(
         session_name="sess-a",
         repo_path="/repo",
-        session_path="/repo/.worktrees/a",
+        session_path="/repo/.ccmux/worktrees/a",
     )
     state.add_session(
         session_name="sess-b",
         repo_path="/repo",
-        session_path="/repo/.worktrees/b",
+        session_path="/repo/.ccmux/worktrees/b",
     )
 
     assert not state.rename_session("sess-a", "sess-b")
@@ -209,7 +209,7 @@ def test_rename_session_not_found(temp_state_dir):
     state.add_session(
         session_name="sess-a",
         repo_path="/repo",
-        session_path="/repo/.worktrees/a",
+        session_path="/repo/.ccmux/worktrees/a",
     )
 
     assert not state.rename_session("non-existent", "new-name")
@@ -230,10 +230,10 @@ def test_session_from_dict_worktree(temp_state_dir):
     """Test Session.from_dict creates WorktreeSession."""
     sess = state.Session.from_dict("test", {
         "repo_path": "/repo",
-        "session_path": "/repo/.worktrees/test",
+        "session_path": "/repo/.ccmux/worktrees/test",
         "is_worktree": True,
     })
-    assert sess.session_path == "/repo/.worktrees/test"
+    assert sess.session_path == "/repo/.ccmux/worktrees/test"
     assert sess.is_worktree is True
     assert isinstance(sess, state.WorktreeSession)
 
@@ -254,10 +254,10 @@ def test_session_from_dict_compat_instance_path(temp_state_dir):
     """Test Session.from_dict reads legacy instance_path field."""
     sess = state.Session.from_dict("test", {
         "repo_path": "/repo",
-        "instance_path": "/repo/.worktrees/test",
+        "instance_path": "/repo/.ccmux/worktrees/test",
         "is_worktree": True,
     })
-    assert sess.session_path == "/repo/.worktrees/test"
+    assert sess.session_path == "/repo/.ccmux/worktrees/test"
 
 
 def test_find_main_repo_session(temp_state_dir):
@@ -271,7 +271,7 @@ def test_find_main_repo_session(temp_state_dir):
     state.add_session(
         session_name="wt-sess",
         repo_path="/repo",
-        session_path="/repo/.worktrees/wt-sess",
+        session_path="/repo/.ccmux/worktrees/wt-sess",
         is_worktree=True,
     )
 
@@ -290,10 +290,10 @@ def test_find_session_by_path_exact(temp_state_dir):
     state.add_session(
         session_name="fox",
         repo_path="/repo",
-        session_path="/repo/.worktrees/fox",
+        session_path="/repo/.ccmux/worktrees/fox",
         is_worktree=True,
     )
-    result = state.find_session_by_path("/repo/.worktrees/fox")
+    result = state.find_session_by_path("/repo/.ccmux/worktrees/fox")
     assert result is not None
     assert result[0] == "fox"
 
@@ -303,10 +303,10 @@ def test_find_session_by_path_subdirectory(temp_state_dir):
     state.add_session(
         session_name="fox",
         repo_path="/repo",
-        session_path="/repo/.worktrees/fox",
+        session_path="/repo/.ccmux/worktrees/fox",
         is_worktree=True,
     )
-    result = state.find_session_by_path("/repo/.worktrees/fox/src/main.py")
+    result = state.find_session_by_path("/repo/.ccmux/worktrees/fox/src/main.py")
     assert result is not None
     assert result[0] == "fox"
 
@@ -322,10 +322,10 @@ def test_find_session_by_path_longest_prefix(temp_state_dir):
     state.add_session(
         session_name="fox",
         repo_path="/repo",
-        session_path="/repo/.worktrees/fox",
+        session_path="/repo/.ccmux/worktrees/fox",
         is_worktree=True,
     )
-    result = state.find_session_by_path("/repo/.worktrees/fox/src")
+    result = state.find_session_by_path("/repo/.ccmux/worktrees/fox/src")
     assert result is not None
     assert result[0] == "fox"
 
@@ -335,7 +335,7 @@ def test_find_session_by_path_no_match(temp_state_dir):
     state.add_session(
         session_name="fox",
         repo_path="/repo",
-        session_path="/repo/.worktrees/fox",
+        session_path="/repo/.ccmux/worktrees/fox",
         is_worktree=True,
     )
     result = state.find_session_by_path("/other/path")
@@ -361,7 +361,7 @@ def test_add_session_with_claude_session_id(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.ccmux/worktrees/feature-x",
         claude_session_id="abc-123",
     )
 
@@ -375,7 +375,7 @@ def test_add_session_without_claude_session_id(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.ccmux/worktrees/feature-x",
     )
 
     loaded = state_store._load_raw()
@@ -387,7 +387,7 @@ def test_claude_session_id_from_dict_present(temp_state_dir):
     """Test Session.from_dict picks up claude_session_id when present."""
     sess = state.Session.from_dict("test", {
         "repo_path": "/repo",
-        "session_path": "/repo/.worktrees/test",
+        "session_path": "/repo/.ccmux/worktrees/test",
         "is_worktree": True,
         "claude_session_id": "sess-456",
     })
@@ -398,7 +398,7 @@ def test_claude_session_id_from_dict_missing(temp_state_dir):
     """Test Session.from_dict defaults claude_session_id to None for legacy data."""
     sess = state.Session.from_dict("test", {
         "repo_path": "/repo",
-        "session_path": "/repo/.worktrees/test",
+        "session_path": "/repo/.ccmux/worktrees/test",
         "is_worktree": True,
     })
     assert sess.claude_session_id is None
@@ -409,7 +409,7 @@ def test_claude_session_id_to_dict(temp_state_dir):
     sess = state.WorktreeSession(
         name="test",
         repo_path="/repo",
-        session_path="/repo/.worktrees/test",
+        session_path="/repo/.ccmux/worktrees/test",
         claude_session_id="sess-789",
     )
     d = sess.to_dict()
@@ -421,7 +421,7 @@ def test_claude_session_id_to_dict_none(temp_state_dir):
     sess = state.WorktreeSession(
         name="test",
         repo_path="/repo",
-        session_path="/repo/.worktrees/test",
+        session_path="/repo/.ccmux/worktrees/test",
     )
     d = sess.to_dict()
     assert "claude_session_id" not in d
@@ -432,7 +432,7 @@ def test_update_session_claude_session_id(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.ccmux/worktrees/feature-x",
     )
 
     state.update_session("feature-x", claude_session_id="new-sess-id")
@@ -447,7 +447,7 @@ def test_rename_preserves_claude_session_id(temp_state_dir):
     state.add_session(
         session_name="old-name",
         repo_path="/repo",
-        session_path="/repo/.worktrees/old-name",
+        session_path="/repo/.ccmux/worktrees/old-name",
         claude_session_id="preserved-id",
     )
 
@@ -471,7 +471,7 @@ def test_migrate_old_nested_format(temp_state_dir):
                 "instances": {
                     "fox": {
                         "repo_path": "/repo",
-                        "instance_path": "/repo/.worktrees/fox",
+                        "instance_path": "/repo/.ccmux/worktrees/fox",
                         "is_worktree": True,
                         "tmux_window_id": "@1",
                     }
@@ -487,7 +487,7 @@ def test_migrate_old_nested_format(temp_state_dir):
     # Should be flattened: fox at top-level sessions, no "default" key
     assert "default" not in loaded["sessions"]
     assert "fox" in loaded["sessions"]
-    assert loaded["sessions"]["fox"]["session_path"] == "/repo/.worktrees/fox"
+    assert loaded["sessions"]["fox"]["session_path"] == "/repo/.ccmux/worktrees/fox"
     assert loaded["tmux_session_id"] == "$0"
 
 
@@ -496,7 +496,7 @@ def test_find_session_by_tmux_ids(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.worktrees/feature-x",
+        session_path="/repo/.ccmux/worktrees/feature-x",
         tmux_session_id="$0",
         tmux_cc_window_id="@1"
     )
@@ -517,17 +517,17 @@ def test_add_session_assigns_id(temp_state_dir):
     state.add_session(
         session_name="sess-a",
         repo_path="/repo",
-        session_path="/repo/.worktrees/a",
+        session_path="/repo/.ccmux/worktrees/a",
     )
     state.add_session(
         session_name="sess-b",
         repo_path="/repo",
-        session_path="/repo/.worktrees/b",
+        session_path="/repo/.ccmux/worktrees/b",
     )
     state.add_session(
         session_name="sess-c",
         repo_path="/repo",
-        session_path="/repo/.worktrees/c",
+        session_path="/repo/.ccmux/worktrees/c",
     )
 
     loaded = state_store._load_raw()
@@ -543,7 +543,7 @@ def test_migration_backfills_id(temp_state_dir):
         "sessions": {
             "fox": {
                 "repo_path": "/repo",
-                "session_path": "/repo/.worktrees/fox",
+                "session_path": "/repo/.ccmux/worktrees/fox",
                 "is_worktree": True,
                 "tmux_window_id": "@1",
             },
@@ -570,7 +570,7 @@ def test_rename_preserves_id(temp_state_dir):
     state.add_session(
         session_name="old-name",
         repo_path="/repo",
-        session_path="/repo/.worktrees/old-name",
+        session_path="/repo/.ccmux/worktrees/old-name",
     )
 
     loaded = state_store._load_raw()
@@ -589,7 +589,7 @@ def test_clear_tmux_window_ids(temp_state_dir):
     state.add_session(
         session_name="fox",
         repo_path="/repo",
-        session_path="/repo/.worktrees/fox",
+        session_path="/repo/.ccmux/worktrees/fox",
         tmux_cc_window_id="@9",
         tmux_bash_window_id="@10",
     )
@@ -611,7 +611,7 @@ def test_add_session_with_bash_window_id(temp_state_dir):
     state.add_session(
         session_name="fox",
         repo_path="/repo",
-        session_path="/repo/.worktrees/fox",
+        session_path="/repo/.ccmux/worktrees/fox",
         tmux_cc_window_id="@5",
         tmux_bash_window_id="@6",
     )
@@ -626,7 +626,7 @@ def test_session_to_dict_nested_window_ids(temp_state_dir):
     sess = state.WorktreeSession(
         name="test",
         repo_path="/repo",
-        session_path="/repo/.worktrees/test",
+        session_path="/repo/.ccmux/worktrees/test",
         tmux_cc_window_id="@9",
         tmux_bash_window_id="@10",
     )
@@ -643,7 +643,7 @@ def test_update_tmux_ids_with_bash(temp_state_dir):
     state.add_session(
         session_name="fox",
         repo_path="/repo",
-        session_path="/repo/.worktrees/fox",
+        session_path="/repo/.ccmux/worktrees/fox",
         tmux_cc_window_id="@1",
     )
 

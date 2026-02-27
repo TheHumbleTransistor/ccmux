@@ -46,7 +46,7 @@ def test_version_coexists_with_sessions(temp_state_dir):
     state.add_session(
         session_name="fox",
         repo_path="/repo",
-        session_path="/repo/.worktrees/fox",
+        session_path="/repo/.ccmux/worktrees/fox",
     )
     state.set_tmux_session_version("1.0.0")
 
@@ -62,7 +62,7 @@ def test_version_survives_session_add_remove(temp_state_dir):
     state.add_session(
         session_name="fox",
         repo_path="/repo",
-        session_path="/repo/.worktrees/fox",
+        session_path="/repo/.ccmux/worktrees/fox",
     )
     state.remove_session("fox")
     assert state.get_tmux_session_version() == "1.0.0"
