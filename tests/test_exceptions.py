@@ -81,6 +81,11 @@ class TestNotInGitRepoError:
         assert str(e) == "Not inside a git repository."
         assert e.exit_code == 1
 
+    def test_message_with_path(self):
+        e = NotInGitRepoError("/tmp")
+        assert str(e) == "Not inside a git repository: /tmp"
+        assert e.exit_code == 1
+
 
 class TestDefaultBranchError:
     def test_message(self):

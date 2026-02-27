@@ -53,13 +53,14 @@ def session_which() -> None:
 
 @app.command(name="new")
 def session_new(
-    name: Optional[str] = None,
+    path: Optional[str] = None,
     *,
+    name: Annotated[Optional[str], Parameter(name=["-n", "--name"])] = None,
     worktree: Annotated[bool, Parameter(name=["-w", "--worktree"])] = False,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
     """Create a new Claude Code session in main repo or as a git worktree."""
-    do_session_new(name=name, worktree=worktree, yes=yes)
+    do_session_new(name=name, worktree=worktree, yes=yes, path=path)
 
 
 @app.command(name="list")
