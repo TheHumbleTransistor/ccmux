@@ -76,7 +76,7 @@ class DemoProvider:
         sessions = []
         for name, repo, stype, branch, sha, added, removed, sid in _SESSION_META:
             sessions.append(SessionSnapshot(
-                repo, name, stype, True,
+                repo, f"/fake/{repo}", name, stype, True,
                 name == self._current, self._states[name][0],
                 session_id=sid, branch=branch, short_sha=sha,
                 lines_added=added, lines_removed=removed,

@@ -173,9 +173,9 @@ class TestGroupByRepo:
         from ccmux.ui.sidebar.snapshot import SessionSnapshot, DerivedSessionState, group_by_repo
 
         snapshots = [
-            SessionSnapshot("repo", "main-sess", "main", True, False, None, session_id=1),
-            SessionSnapshot("repo", "zebra", "worktree", True, False, None, session_id=2),
-            SessionSnapshot("repo", "alpha", "worktree", True, False, None, session_id=3),
+            SessionSnapshot("repo", "/fake/repo", "main-sess", "main", True, False, None, session_id=1),
+            SessionSnapshot("repo", "/fake/repo", "zebra", "worktree", True, False, None, session_id=2),
+            SessionSnapshot("repo", "/fake/repo", "alpha", "worktree", True, False, None, session_id=3),
         ]
         derived = [
             DerivedSessionState(snapshot=s, status="idle", has_blocker_alert=False)
@@ -183,9 +183,67 @@ class TestGroupByRepo:
         ]
 
         grouped = group_by_repo(derived)
-        names = [d.snapshot.session_name for d in grouped["repo"]]
+        names = [d.snapshot.session_name for d in grouped["/fake/repo"]]
         # main first, then worktrees in creation order (zebra before alpha)
         assert names == ["main-sess", "zebra", "alpha"]
+
+
+class TestBuildRepoDisplayNames:
+    """Tests for build_repo_display_names disambiguation."""
+
+    def test_unique_names_unchanged(self):
+        """Unique directory names are returned as-is."""
+        from ccmux.ui.sidebar.snapshot import build_repo_display_names
+
+        result = build_repo_display_names(["/home/user/project-a", "/home/user/project-b"])
+        assert result == {
+            "/home/user/project-a": "project-a",
+            "/home/user/project-b": "project-b",
+        }
+
+    def test_duplicate_names_disambiguated(self):
+        """Same directory name from different parents gets (2), (3), etc."""
+        from ccmux.ui.sidebar.snapshot import build_repo_display_names
+
+        result = build_repo_display_names([
+            "/home/user/work/my-app",
+            "/home/user/projects/my-app",
+        ])
+        # Alphabetically: /home/user/projects/my-app < /home/user/work/my-app
+        assert result["/home/user/projects/my-app"] == "my-app"
+        assert result["/home/user/work/my-app"] == "my-app (2)"
+
+    def test_three_duplicates(self):
+        """Three paths with the same name get bare, (2), (3)."""
+        from ccmux.ui.sidebar.snapshot import build_repo_display_names
+
+        result = build_repo_display_names([
+            "/z/my-app",
+            "/a/my-app",
+            "/m/my-app",
+        ])
+        assert result["/a/my-app"] == "my-app"
+        assert result["/m/my-app"] == "my-app (2)"
+        assert result["/z/my-app"] == "my-app (3)"
+
+    def test_empty_input(self):
+        """Empty input returns empty dict."""
+        from ccmux.ui.sidebar.snapshot import build_repo_display_names
+
+        assert build_repo_display_names([]) == {}
+
+    def test_mixed_unique_and_duplicate(self):
+        """Mix of unique and duplicate names."""
+        from ccmux.ui.sidebar.snapshot import build_repo_display_names
+
+        result = build_repo_display_names([
+            "/a/unique-repo",
+            "/b/shared-name",
+            "/c/shared-name",
+        ])
+        assert result["/a/unique-repo"] == "unique-repo"
+        assert result["/b/shared-name"] == "shared-name"
+        assert result["/c/shared-name"] == "shared-name (2)"
 
 
 class TestResolveAlertState:
@@ -238,7 +296,8 @@ class TestStickyBlockedState:
     def _snap(self, name="fox", is_active=True, alert_state=None):
         from ccmux.ui.sidebar.snapshot import SessionSnapshot
         return SessionSnapshot(
-            repo_name="repo", session_name=name, session_type="worktree",
+            repo_name="repo", repo_path="/fake/repo", session_name=name,
+            session_type="worktree",
             is_active=is_active, is_current=False, alert_state=alert_state,
             session_id=1,
         )
@@ -316,7 +375,8 @@ class TestPostSelectionActivityDebounce:
     def _snap(self, name="fox", is_active=True, alert_state=None, activity_ts=0.0):
         from ccmux.ui.sidebar.snapshot import SessionSnapshot
         return SessionSnapshot(
-            repo_name="repo", session_name=name, session_type="worktree",
+            repo_name="repo", repo_path="/fake/repo", session_name=name,
+            session_type="worktree",
             is_active=is_active, is_current=False, alert_state=alert_state,
             session_id=1, activity_ts=activity_ts,
         )
