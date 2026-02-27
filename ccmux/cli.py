@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code Multiplexer CLI - Manage multiple Claude Code sessions."""
+"""Claude Code Multiplexer CLI - Manage Claude Code sessions in a shared workspace."""
 
 import shutil
 import sys
@@ -13,7 +13,6 @@ from ccmux import __version__
 from ccmux.display import console
 from ccmux.exceptions import CcmuxError, NoSessionsFound
 from ccmux.naming import BASH_SESSION, INNER_SESSION, OUTER_SESSION
-from ccmux.session_layout import do_debug_sidebar
 from ccmux.session_ops import (
     do_attach,
     do_detach,
@@ -34,7 +33,7 @@ from ccmux.tmux_ops import check_tmux_installed, kill_all_ccmux_sessions
 app = cyclopts.App(
     name="ccmux",
     version=__version__,
-    help="Claude Code Multiplexer - Manage multiple Claude Code sessions.",
+    help="Claude Code Multiplexer - Manage Claude Code sessions in a shared workspace.",
 )
 
 
@@ -65,7 +64,7 @@ def session_new(
 
 @app.command(name="list")
 def session_list() -> None:
-    """List all sessions and their tmux session status."""
+    """List all sessions in the workspace."""
     do_session_list()
 
 
@@ -74,13 +73,13 @@ def session_rename(
     old: Optional[str] = None,
     new: Optional[str] = None,
 ) -> None:
-    """Rename a ccmux session."""
+    """Rename a session."""
     do_session_rename(old=old, new=new)
 
 
 @app.command(name="attach")
 def attach() -> None:
-    """Attach to the ccmux tmux session."""
+    """Attach to the workspace. (connects to the ccmux terminal UI via tmux)"""
     do_attach()
 
 
@@ -90,7 +89,7 @@ def session_activate(
     *,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
-    """Activate Claude Code in a session (useful if tmux window was closed)."""
+    """Activate Claude Code in a session (useful if its window was closed)."""
     do_session_activate(name=name, yes=yes)
 
 
@@ -100,7 +99,7 @@ def session_deactivate(
     *,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
-    """Deactivate Claude Code session(s) by killing tmux window (keeps session)."""
+    """Deactivate Claude Code session(s) by closing their windows (keeps session data)."""
     do_session_deactivate(name=name, yes=yes)
 
 
@@ -109,7 +108,7 @@ def session_kill(
     *,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
-    """Kill the entire ccmux session."""
+    """Deactivate all sessions and shut down the workspace."""
     do_session_kill(yes=yes)
 
 
@@ -129,14 +128,9 @@ def detach(
     *,
     all_clients: Annotated[bool, Parameter(name=["-a", "--all"], negative="")] = False,
 ) -> None:
-    """Detach the ccmux tmux session."""
+    """Detach from the workspace. (leaves it running in the background)"""
     do_detach(all_clients=all_clients)
 
-
-@app.command(name="debug")
-def debug_sidebar() -> None:
-    """Launch a debug session to isolate sidebar rendering issues."""
-    do_debug_sidebar()
 
 
 def check_claude_installed() -> bool:
@@ -176,14 +170,14 @@ def main():
                 f"(now {__version__})"
             )
         console.print(
-            "Running tmux sessions use outdated hooks and may behave unexpectedly."
+            "The running workspace uses outdated hooks and may behave unexpectedly."
         )
         console.print(
             "Killing them is safe — sessions will be recreated on "
             "[bold]ccmux new[/bold] / [bold]ccmux activate[/bold].\n"
         )
 
-        if Confirm.ask("Kill stale ccmux tmux sessions?", default=True):
+        if Confirm.ask("Shut down the stale workspace?", default=True):
             kill_all_ccmux_sessions(OUTER_SESSION, OUTER_SESSION, INNER_SESSION, BASH_SESSION)
             console.print(
                 "[green]Done.[/green] Run [bold]ccmux new[/bold] or "
@@ -191,7 +185,7 @@ def main():
             )
         else:
             console.print(
-                "[dim]Keeping existing sessions — behavior may be degraded.[/dim]"
+                "[dim]Keeping existing workspace — behavior may be degraded.[/dim]"
             )
 
     try:

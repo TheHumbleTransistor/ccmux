@@ -136,7 +136,7 @@ class TestInvalidArgumentError:
 class TestNotInCcmuxSessionError:
     def test_message(self):
         e = NotInCcmuxSessionError()
-        assert str(e) == "Not in a ccmux session."
+        assert str(e) == "Not in a workspace session."
         assert e.exit_code == 1
 
 
@@ -150,20 +150,20 @@ class TestActivationError:
 
 class TestDetachError:
     def test_message(self):
-        e = DetachError("No active ccmux session.")
-        assert str(e) == "No active ccmux session."
-        assert e.reason == "No active ccmux session."
+        e = DetachError("No active workspace to detach from.")
+        assert str(e) == "No active workspace to detach from."
+        assert e.reason == "No active workspace to detach from."
         assert e.exit_code == 1
 
 
 class TestAttachError:
     def test_without_hint(self):
-        e = AttachError("No ccmux session found.")
-        assert str(e) == "No ccmux session found."
+        e = AttachError("No workspace found.")
+        assert str(e) == "No workspace found."
         assert e.hint == ""
 
     def test_with_hint(self):
-        e = AttachError("No ccmux session found.", "Create a session with: ccmux new")
+        e = AttachError("No workspace found.", "Create a session with: ccmux new")
         assert e.hint == "Create a session with: ccmux new"
         assert e.exit_code == 1
 
@@ -257,7 +257,7 @@ class TestCliExceptionHandling:
 
     def test_attach_error_with_hint(self):
         code, mock_console = self._run_main_with_exception(
-            AttachError("No ccmux session found.", "Create a session with: ccmux new")
+            AttachError("No workspace found.", "Create a session with: ccmux new")
         )
         assert code == 1
         mock_console.print.assert_any_call("  Create a session with: ccmux new")

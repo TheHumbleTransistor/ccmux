@@ -28,7 +28,7 @@ def display_session_table() -> None:
     table.add_column("Type", style="green")
     table.add_column("Branch")
     table.add_column("Status", style="bold")
-    table.add_column("Tmux Window", style="blue")
+    table.add_column("Window", style="blue")
     table.add_column("Path", style="dim")
 
     active_count = 0
