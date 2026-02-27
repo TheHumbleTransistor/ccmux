@@ -34,8 +34,10 @@ from ccmux.exceptions import (
     WorktreeError,
 )
 from ccmux.git_ops import (
+    check_for_common_default_branches,
     create_worktree,
     get_default_branch,
+    get_most_recently_used_branch,
     get_repo_root,
     move_worktree,
     remove_worktree,
@@ -251,7 +253,11 @@ def _validate_repo_context() -> tuple[Path, str]:
         raise NotInGitRepoError()
     os.chdir(repo_root)
 
-    default_branch = get_default_branch()
+    default_branch = (
+        get_default_branch()
+        or check_for_common_default_branches()
+        or get_most_recently_used_branch()
+    )
     if default_branch is None:
         raise DefaultBranchError()
     return repo_root, default_branch
