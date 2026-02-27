@@ -24,7 +24,7 @@ class RepoSessionsList(Vertical):
         self.sessions = sessions
 
     def compose(self) -> ComposeResult:
-        yield RepoHeader(f"\u25cf {self.repo_name}/")
+        yield RepoHeader(f"\u25cf {self.repo_name}")
         last_idx = len(self.sessions) - 1
         for i, derived in enumerate(self.sessions):
             entry = derived.snapshot

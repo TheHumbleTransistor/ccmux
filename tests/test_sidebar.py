@@ -173,9 +173,9 @@ class TestGroupByRepo:
         from ccmux.ui.sidebar.snapshot import SessionSnapshot, DerivedSessionState, group_by_repo
 
         snapshots = [
-            SessionSnapshot("repo", "main-sess", "main", True, False, None, session_id=1),
-            SessionSnapshot("repo", "zebra", "worktree", True, False, None, session_id=2),
-            SessionSnapshot("repo", "alpha", "worktree", True, False, None, session_id=3),
+            SessionSnapshot("repo", "/fake/repo", "main-sess", "main", True, False, None, session_id=1),
+            SessionSnapshot("repo", "/fake/repo", "zebra", "worktree", True, False, None, session_id=2),
+            SessionSnapshot("repo", "/fake/repo", "alpha", "worktree", True, False, None, session_id=3),
         ]
         derived = [
             DerivedSessionState(snapshot=s, status="idle", has_blocker_alert=False)
@@ -183,9 +183,113 @@ class TestGroupByRepo:
         ]
 
         grouped = group_by_repo(derived)
-        names = [d.snapshot.session_name for d in grouped["repo"]]
+        names = [d.snapshot.session_name for d in grouped["/fake/repo"]]
         # main first, then worktrees in creation order (zebra before alpha)
         assert names == ["main-sess", "zebra", "alpha"]
+
+
+def _mock_grouped(path_to_ids: dict[str, list[int]]) -> dict:
+    """Build a grouped dict mapping repo paths to lists of mock DerivedSessionState."""
+    from ccmux.ui.sidebar.snapshot import DerivedSessionState, SessionSnapshot
+
+    grouped: dict[str, list] = {}
+    for path, ids in path_to_ids.items():
+        grouped[path] = [
+            DerivedSessionState(
+                snapshot=SessionSnapshot(
+                    repo_name=path.rsplit("/", 1)[-1],
+                    repo_path=path,
+                    session_name=f"sess-{sid}",
+                    session_type="main",
+                    is_active=True,
+                    is_current=False,
+                    alert_state=None,
+                    session_id=sid,
+                ),
+                status="idle",
+                has_blocker_alert=False,
+            )
+            for sid in ids
+        ]
+    return grouped
+
+
+class TestBuildRepoDisplayNames:
+    """Tests for build_repo_display_names disambiguation."""
+
+    def test_unique_names_unchanged(self):
+        """Unique directory names include trailing slash."""
+        from ccmux.ui.sidebar.snapshot import build_repo_display_names
+
+        grouped = _mock_grouped({
+            "/home/user/project-a": [1],
+            "/home/user/project-b": [2],
+        })
+        result = build_repo_display_names(grouped)
+        assert result == {
+            "/home/user/project-a": "project-a/",
+            "/home/user/project-b": "project-b/",
+        }
+
+    def test_duplicate_names_disambiguated_by_session_id(self):
+        """Older repo (lower session ID) keeps clean name; newer gets suffix."""
+        from ccmux.ui.sidebar.snapshot import build_repo_display_names
+
+        grouped = _mock_grouped({
+            "/home/user/work/my-app": [5],
+            "/home/user/projects/my-app": [10],
+        })
+        result = build_repo_display_names(grouped)
+        assert result["/home/user/work/my-app"] == "my-app/"
+        assert result["/home/user/projects/my-app"] == "my-app/ (2)"
+
+    def test_three_duplicates_ordered_by_session_id(self):
+        """Three paths with the same name — ordered by minimum session ID."""
+        from ccmux.ui.sidebar.snapshot import build_repo_display_names
+
+        grouped = _mock_grouped({
+            "/z/my-app": [3],
+            "/a/my-app": [7],
+            "/m/my-app": [1],
+        })
+        result = build_repo_display_names(grouped)
+        # /m has min session_id=1, /z has 3, /a has 7
+        assert result["/m/my-app"] == "my-app/"
+        assert result["/z/my-app"] == "my-app/ (2)"
+        assert result["/a/my-app"] == "my-app/ (3)"
+
+    def test_empty_input(self):
+        """Empty input returns empty dict."""
+        from ccmux.ui.sidebar.snapshot import build_repo_display_names
+
+        assert build_repo_display_names({}) == {}
+
+    def test_mixed_unique_and_duplicate(self):
+        """Mix of unique and duplicate names."""
+        from ccmux.ui.sidebar.snapshot import build_repo_display_names
+
+        grouped = _mock_grouped({
+            "/a/unique-repo": [5],
+            "/b/shared-name": [1],
+            "/c/shared-name": [10],
+        })
+        result = build_repo_display_names(grouped)
+        assert result["/a/unique-repo"] == "unique-repo/"
+        assert result["/b/shared-name"] == "shared-name/"
+        assert result["/c/shared-name"] == "shared-name/ (2)"
+
+    def test_multiple_sessions_uses_minimum_id(self):
+        """When a repo has multiple sessions, the minimum session ID determines order."""
+        from ccmux.ui.sidebar.snapshot import build_repo_display_names
+
+        grouped = _mock_grouped({
+            "/x/my-app": [10, 20],
+            "/y/my-app": [5, 30],
+        })
+        result = build_repo_display_names(grouped)
+        # /y has min session_id=5, /x has min session_id=10
+        assert result["/y/my-app"] == "my-app/"
+        assert result["/x/my-app"] == "my-app/ (2)"
 
 
 class TestResolveAlertState:
@@ -238,7 +342,8 @@ class TestStickyBlockedState:
     def _snap(self, name="fox", is_active=True, alert_state=None):
         from ccmux.ui.sidebar.snapshot import SessionSnapshot
         return SessionSnapshot(
-            repo_name="repo", session_name=name, session_type="worktree",
+            repo_name="repo", repo_path="/fake/repo", session_name=name,
+            session_type="worktree",
             is_active=is_active, is_current=False, alert_state=alert_state,
             session_id=1,
         )
@@ -316,7 +421,8 @@ class TestPostSelectionActivityDebounce:
     def _snap(self, name="fox", is_active=True, alert_state=None, activity_ts=0.0):
         from ccmux.ui.sidebar.snapshot import SessionSnapshot
         return SessionSnapshot(
-            repo_name="repo", session_name=name, session_type="worktree",
+            repo_name="repo", repo_path="/fake/repo", session_name=name,
+            session_type="worktree",
             is_active=is_active, is_current=False, alert_state=alert_state,
             session_id=1, activity_ts=activity_ts,
         )

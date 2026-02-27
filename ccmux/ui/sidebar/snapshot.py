@@ -5,6 +5,7 @@ import logging
 import re
 import subprocess
 import time
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,7 @@ ACTIVITY_TIMEOUT = 5  # maximum seconds since last output to consider "recently 
 @dataclass(frozen=True, slots=True)
 class SessionSnapshot:
     repo_name: str
+    repo_path: str
     session_name: str
     session_type: str
     is_active: bool
@@ -44,15 +46,40 @@ class DerivedSessionState:
 def group_by_repo(
     entries: list[DerivedSessionState],
 ) -> dict[str, list[DerivedSessionState]]:
-    """Group derived session entries by repo name."""
+    """Group derived session entries by full repo path."""
     repos: dict[str, list[DerivedSessionState]] = {}
     for entry in entries:
-        repos.setdefault(entry.snapshot.repo_name, []).append(entry)
+        repos.setdefault(entry.snapshot.repo_path, []).append(entry)
     for repo_entries in repos.values():
         repo_entries.sort(
             key=lambda d: (d.snapshot.session_type != "main", d.snapshot.session_id),
         )
     return repos
+
+
+def build_repo_display_names(
+    grouped: dict[str, list[DerivedSessionState]],
+) -> dict[str, str]:
+    """Map repo paths to display names, disambiguating collisions with (2), (3), etc.
+
+    Older repos (lower session IDs) keep the clean name; newer repos get a suffix.
+    """
+    paths = list(grouped)
+    names = {p: Path(p).name for p in paths}
+    name_counts = Counter(names.values())
+    # Sort by minimum session_id so older repos keep the clean name
+    paths_sorted = sorted(grouped, key=lambda p: min(d.snapshot.session_id for d in grouped[p]))
+    seen: dict[str, int] = {}
+    display: dict[str, str] = {}
+    for p in paths_sorted:
+        base = names[p]
+        if name_counts[base] == 1:
+            display[p] = f"{base}/"
+        else:
+            idx = seen.get(base, 0)
+            seen[base] = idx + 1
+            display[p] = f"{base}/" if idx == 0 else f"{base}/ ({idx + 1})"
+    return display
 
 
 def resolve_alert_state(flags: dict | None) -> str | None:
@@ -230,6 +257,7 @@ async def build_snapshot() -> list[SessionSnapshot]:
         activity_ts = wid_flags.get("activity_ts", 0.0) if wid_flags else 0.0
         snapshot.append(SessionSnapshot(
             repo_name=repo_name,
+            repo_path=sess.repo_path,
             session_name=sess.name,
             session_type=sess_type,
             is_active=is_active,

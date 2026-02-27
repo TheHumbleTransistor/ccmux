@@ -263,9 +263,10 @@ class SidebarApp(App):
                 new_widgets = [Static("  No sessions")]
             else:
                 grouped = snapshot.group_by_repo(derived)
+                display_names = snapshot.build_repo_display_names(grouped)
                 new_widgets = [
-                    RepoSessionsList(repo_name, entries, id=f"repo-group-{repo_name}")
-                    for repo_name, entries in grouped.items()
+                    RepoSessionsList(display_names[repo_path], entries, id=f"repo-group-{idx}")
+                    for idx, (repo_path, entries) in enumerate(grouped.items())
                 ]
             await container.remove_children()
             await container.mount(*new_widgets)
@@ -278,11 +279,11 @@ class SidebarApp(App):
         """Update session rows in place if structure is unchanged. Return True on success."""
         if not old_derived or not new_derived:
             return False
-        # Structure check: same (repo, name) pairs in same order
+        # Structure check: same (repo_path, name) pairs in same order
         if [
-            (d.snapshot.repo_name, d.snapshot.session_name) for d in old_derived
+            (d.snapshot.repo_path, d.snapshot.session_name) for d in old_derived
         ] != [
-            (d.snapshot.repo_name, d.snapshot.session_name) for d in new_derived
+            (d.snapshot.repo_path, d.snapshot.session_name) for d in new_derived
         ]:
             return False
         for old_d, new_d in zip(old_derived, new_derived):
