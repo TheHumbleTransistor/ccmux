@@ -45,8 +45,11 @@ class SessionExistsError(CcmuxError):
 class NotInGitRepoError(CcmuxError):
     """The current directory is not inside a git repository."""
 
-    def __init__(self):
-        super().__init__("Not inside a git repository.")
+    def __init__(self, path: str = ""):
+        if path:
+            super().__init__(f"Not inside a git repository: {path}")
+        else:
+            super().__init__("Not inside a git repository.")
 
 
 class DefaultBranchError(CcmuxError):

@@ -246,11 +246,16 @@ def migrate_claude_session(old_path: str, new_path: str, session_id: str) -> boo
 # session_new decomposed
 # ---------------------------------------------------------------------------
 
-def _validate_repo_context() -> tuple[Path, str]:
+def _validate_repo_context(path: Optional[str] = None) -> tuple[Path, str]:
     """Validate git repo and return (repo_root, default_branch). Raises on error."""
+    if path is not None:
+        resolved = Path(path).resolve()
+        if not resolved.is_dir():
+            raise InvalidArgumentError(f"Path is not a directory: {resolved}")
+        os.chdir(resolved)
     repo_root = get_repo_root()
     if repo_root is None:
-        raise NotInGitRepoError()
+        raise NotInGitRepoError(path or "")
     os.chdir(repo_root)
 
     default_branch = (
@@ -348,9 +353,9 @@ def _reactivate_single_orphan(sess) -> None:
         console.print(f"  [yellow]\u26a0[/yellow] Could not reactivate '{name}'")
 
 
-def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool = False) -> None:
+def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool = False, path: Optional[str] = None) -> None:
     """Create a new Claude Code session."""
-    repo_root, default_branch = _validate_repo_context()
+    repo_root, default_branch = _validate_repo_context(path)
     create_as_worktree = _resolve_session_type(repo_root, worktree, yes)
     name = _generate_session_name(repo_root, create_as_worktree, name)
 

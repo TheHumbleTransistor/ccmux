@@ -10,6 +10,11 @@
 
 set -euo pipefail
 
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    printf '\033[1;31merror:\033[0m This script must be run, not sourced. Use: ./scripts/demo-setup.sh\n' >&2
+    return 1
+fi
+
 DEMO_DIR="/tmp/ccmux-demo"
 SESSIONS=(fw-main fw-hot-newness fw-detached cli-main cli-connectivity)
 
@@ -38,7 +43,7 @@ restore_tmux_guard() {
 }
 
 ccmux_new() {
-    # Usage: ccmux_new <name> [--worktree]
+    # Usage: ccmux_new <path> -n <name> [--worktree]
     export_tmux_guard
     ccmux new "$@" -y
     restore_tmux_guard
@@ -270,12 +275,12 @@ create_sessions() {
 
     # 1. fw-main — main branch, clean
     info "Creating session: fw-main"
-    (cd "$fw_repo" && ccmux_new fw-main)
+    ccmux_new "$fw_repo" -n fw-main
     ok "fw-main (main, clean)"
 
     # 2. fw-hot-newness — worktree, feature branch with diffs
     info "Creating session: fw-hot-newness"
-    (cd "$fw_repo" && ccmux_new fw-hot-newness --worktree)
+    ccmux_new "$fw_repo" -n fw-hot-newness --worktree
 
     local wt_hot="$fw_repo/.worktrees/fw-hot-newness"
     git -C "$wt_hot" checkout -b feature/hot_newness --quiet
@@ -317,17 +322,17 @@ TURBO
 
     # 3. fw-detached — worktree, detached HEAD, clean
     info "Creating session: fw-detached"
-    (cd "$fw_repo" && ccmux_new fw-detached --worktree)
+    ccmux_new "$fw_repo" -n fw-detached --worktree
     ok "fw-detached (detached HEAD, clean)"
 
     # 4. cli-main — main branch, clean
     info "Creating session: cli-main"
-    (cd "$cli_repo" && ccmux_new cli-main)
+    ccmux_new "$cli_repo" -n cli-main
     ok "cli-main (main, clean)"
 
     # 5. cli-connectivity — worktree, feature branch with diffs
     info "Creating session: cli-connectivity"
-    (cd "$cli_repo" && ccmux_new cli-connectivity --worktree)
+    ccmux_new "$cli_repo" -n cli-connectivity --worktree
 
     local wt_conn="$cli_repo/.worktrees/cli-connectivity"
     git -C "$wt_conn" checkout -b feature/updated_connectivity --quiet
@@ -398,6 +403,14 @@ main() {
 
     echo
     create_sessions
+
+    # Ensure tmux sessions are alive for immediate attach.
+    # Sessions created during ccmux_new may not survive (TMUX guard
+    # pollutes pane environment), so kill stale state and re-activate.
+    tmux kill-session -t "=ccmux-inner" 2>/dev/null || true
+    tmux kill-session -t "=ccmux-bash" 2>/dev/null || true
+    tmux kill-session -t "=ccmux" 2>/dev/null || true
+    ccmux activate -y
 
     echo
     info "Demo environment ready!"
