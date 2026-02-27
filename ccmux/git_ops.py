@@ -26,7 +26,7 @@ def get_repo_root() -> Optional[Path]:
 
 
 def get_default_branch() -> Optional[str]:
-    """Get the default branch name (main, master, etc.)."""
+    """Get the default branch name from the remote origin."""
     try:
         result = subprocess.run(
             ["git", "remote", "show", "origin"],
@@ -37,6 +37,32 @@ def get_default_branch() -> Optional[str]:
         for line in result.stdout.split("\n"):
             if "HEAD branch:" in line:
                 return line.split(":")[-1].strip()
+    except subprocess.CalledProcessError:
+        pass
+    return None
+
+
+def check_for_common_default_branches() -> Optional[str]:
+    """Check for common default branch names (main, master) locally."""
+    for name in ("main", "master"):
+        if branch_exists(name):
+            return name
+    return None
+
+
+def get_most_recently_used_branch() -> Optional[str]:
+    """Get the branch with the most recent commit."""
+    try:
+        result = subprocess.run(
+            ["git", "for-each-ref", "--sort=-committerdate",
+             "--format=%(refname:short)", "refs/heads/", "--count=1"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        branch = result.stdout.strip()
+        if branch:
+            return branch
     except subprocess.CalledProcessError:
         pass
     return None
