@@ -27,7 +27,7 @@ htmlcov/
 *~
 
 # Runtime worktrees
-.worktrees/
+.ccmux/worktrees/
 
 # OS
 .DS_Store

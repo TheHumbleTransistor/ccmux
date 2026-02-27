@@ -55,7 +55,7 @@ class TestSidebarDataHelpers:
         state.add_session(
             session_name="fox",
             repo_path="/home/user/my-project",
-            session_path="/home/user/my-project/.worktrees/fox",
+            session_path="/home/user/my-project/.ccmux/worktrees/fox",
             tmux_session_id="$0",
             tmux_cc_window_id="@1",
         )
@@ -85,7 +85,7 @@ class TestSidebarDataHelpers:
         state.add_session(
             session_name="fox",
             repo_path="/home/user/project-a",
-            session_path="/home/user/project-a/.worktrees/fox",
+            session_path="/home/user/project-a/.ccmux/worktrees/fox",
             tmux_cc_window_id="@1",
         )
         state.add_session(
@@ -98,7 +98,7 @@ class TestSidebarDataHelpers:
         state.add_session(
             session_name="hawk",
             repo_path="/home/user/project-b",
-            session_path="/home/user/project-b/.worktrees/hawk",
+            session_path="/home/user/project-b/.ccmux/worktrees/hawk",
             tmux_cc_window_id="@3",
         )
 
@@ -120,13 +120,13 @@ class TestSidebarDataHelpers:
         state.add_session(
             session_name="fox",
             repo_path="/repo",
-            session_path="/repo/.worktrees/fox",
+            session_path="/repo/.ccmux/worktrees/fox",
             tmux_cc_window_id="@1",
         )
         state.add_session(
             session_name="bear",
             repo_path="/repo",
-            session_path="/repo/.worktrees/bear",
+            session_path="/repo/.ccmux/worktrees/bear",
             tmux_cc_window_id="@2",
         )
 
@@ -145,7 +145,7 @@ class TestSidebarDataHelpers:
         state.add_session(
             session_name="fox",
             repo_path="/repo",
-            session_path="/repo/.worktrees/fox",
+            session_path="/repo/.ccmux/worktrees/fox",
             tmux_cc_window_id="@1",
             is_worktree=True,
         )

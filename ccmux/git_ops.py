@@ -4,6 +4,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from ccmux.naming import WORKTREES_DIR_NAME
+
 
 def get_repo_root() -> Optional[Path]:
     """Get the main git repository root directory.
@@ -100,11 +102,11 @@ def branch_exists(branch_name: str) -> bool:
 
 
 def get_all_worktrees(repo_root: Path) -> list[dict[str, str]]:
-    """Get all worktrees in the .worktrees directory.
+    """Get all worktrees in the ccmux worktrees directory.
 
     Returns a list of dicts with keys: name, path, branch
     """
-    worktrees_dir = repo_root / ".worktrees"
+    worktrees_dir = repo_root / WORKTREES_DIR_NAME
     if not worktrees_dir.exists():
         return []
 
