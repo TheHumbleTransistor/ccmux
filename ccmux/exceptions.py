@@ -99,7 +99,7 @@ class NotInCcmuxSessionError(CcmuxError):
     """Not currently inside a ccmux session."""
 
     def __init__(self):
-        super().__init__("Not in a ccmux session.")
+        super().__init__("Not in a workspace session.")
 
 
 class ActivationError(CcmuxError):

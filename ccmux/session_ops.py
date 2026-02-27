@@ -91,7 +91,7 @@ def _major_minor(version: str) -> str:
 
 
 def stale_sessions_running() -> bool:
-    """Return True if ccmux tmux sessions are running on an outdated major.minor version."""
+    """Return True if the workspace is running on an outdated major.minor version."""
     if not tmux_session_exists(INNER_SESSION):
         return False
     stored = state.get_tmux_session_version()
@@ -131,9 +131,9 @@ def create_session_window(
             apply_server_global_config()
             bash_window_id = create_bash_window(name, path)
             if apply_claude_inner_session_config(INNER_SESSION):
-                console.print(f"  [green]\u2713[/green] Applied ccmux tmux configuration")
+                console.print(f"  [green]\u2713[/green] Applied workspace configuration")
             else:
-                console.print(f"  [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
+                console.print(f"  [yellow]\u26a0[/yellow] Could not apply workspace configuration (session will use defaults)")
         return cc_window_id, bash_window_id
     else:
         cc_window_id = create_tmux_window(INNER_SESSION, name, path, launch_cmd)
@@ -205,7 +205,7 @@ def auto_attach_if_outside_tmux(yes: bool = False) -> None:
     """Prompt and attach to tmux if not already inside tmux."""
     if "TMUX" not in os.environ:
         console.print()
-        if yes or Confirm.ask("Attach to tmux session now?", default=True):
+        if yes or Confirm.ask("Attach to workspace now?", default=True):
             os.execvp("tmux", ["tmux", "attach", "-t", f"={OUTER_SESSION}"])
 
 
@@ -406,11 +406,11 @@ def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: 
             raise TmuxError("session creation")
         apply_server_global_config()
         bash_window_id = create_bash_window(name, path)
-        console.print(f"  [green]\u2713[/green] Created tmux session '{INNER_SESSION}' with window '{name}'")
+        console.print(f"  [green]\u2713[/green] Created workspace with session '{name}'")
         if apply_claude_inner_session_config(INNER_SESSION):
-            console.print(f"  [green]\u2713[/green] Applied ccmux tmux configuration")
+            console.print(f"  [green]\u2713[/green] Applied workspace configuration")
         else:
-            console.print(f"  [yellow]\u26a0[/yellow] Could not apply tmux configuration (session will use defaults)")
+            console.print(f"  [yellow]\u26a0[/yellow] Could not apply workspace configuration (session will use defaults)")
         create_outer_session()
         state.set_tmux_session_version(__version__)
     else:
@@ -624,7 +624,7 @@ def _rename_main_repo_session(old_name: str, new_name: str, session_data, is_act
 
 
 def do_session_rename(old: Optional[str] = None, new: Optional[str] = None) -> None:
-    """Rename a ccmux session."""
+    """Rename a session."""
     old_name, new_name, session_data = _resolve_rename_args(old, new)
 
     if old_name == new_name:
@@ -724,11 +724,11 @@ def _remove_all_sessions(sessions: list, yes: bool) -> None:
 def _kill_remove_all_sessions() -> None:
     """Kill all tmux sessions after removing all sessions."""
     if kill_tmux_session(OUTER_SESSION):
-        console.print(f"\n[green]\u2713[/green] Killed outer tmux session '{OUTER_SESSION}'")
+        console.print(f"\n[green]\u2713[/green] Stopped workspace UI session '{OUTER_SESSION}'")
     if kill_tmux_session(INNER_SESSION):
-        console.print(f"[green]\u2713[/green] Killed inner tmux session '{INNER_SESSION}'")
+        console.print(f"[green]\u2713[/green] Stopped workspace inner session '{INNER_SESSION}'")
     if kill_tmux_session(BASH_SESSION):
-        console.print(f"[green]\u2713[/green] Killed bash tmux session '{BASH_SESSION}'")
+        console.print(f"[green]\u2713[/green] Stopped workspace bash session '{BASH_SESSION}'")
 
 
 def _remove_single_session(name: str, sessions: list, yes: bool) -> None:
@@ -825,7 +825,7 @@ def do_session_remove(name: Optional[str] = None, yes: bool = False, all_session
         else:
             raise InvalidArgumentError(
                 "No session name provided and could not auto-detect.\n"
-                "  Run from within a ccmux session, or specify a name:\n"
+                "  Run from within a workspace session, or specify a name:\n"
                 "    ccmux remove <name>\n"
                 "  To remove all sessions:\n"
                 "    ccmux remove --all"
@@ -958,7 +958,7 @@ def _activate_all(yes: bool = False) -> None:
         if cc_window_id:
             if is_first:
                 inner_exists = True
-                console.print(f"  [green]\u2713[/green] Created tmux session and activated '{sess.name}'")
+                console.print(f"  [green]\u2713[/green] Created workspace and activated '{sess.name}'")
             else:
                 console.print(f"  [green]\u2713[/green] Activated '{sess.name}'")
             update_session_tmux_state(sess.name, claude_session_id, cc_window_id, bash_window_id)
@@ -983,7 +983,7 @@ def _activate_single(name: str, yes: bool = False) -> None:
 
     if is_session_window_active(session.tmux_cc_window_id):
         ensure_outer_session()
-        console.print(f"[yellow]Session '{name}' already has an active tmux window.[/yellow]")
+        console.print(f"[yellow]Session '{name}' is already active.[/yellow]")
         return
 
     if session.tmux_cc_window_id:
@@ -1002,7 +1002,7 @@ def _activate_single(name: str, yes: bool = False) -> None:
         raise ActivationError(name)
 
     if is_first:
-        console.print(f"  [green]\u2713[/green] Created tmux session and activated '{name}'")
+        console.print(f"  [green]\u2713[/green] Created workspace and activated '{name}'")
     else:
         select_window(INNER_SESSION, name)
         console.print(f"  [green]\u2713[/green] Activated '{name}'")
@@ -1029,7 +1029,7 @@ def do_session_activate(name: Optional[str] = None, yes: bool = False) -> None:
 # ---------------------------------------------------------------------------
 
 def do_session_kill(yes: bool = False) -> None:
-    """Kill the entire ccmux session."""
+    """Deactivate all sessions and shut down the workspace."""
     sessions = state.get_all_sessions()
 
     active = [
@@ -1038,23 +1038,23 @@ def do_session_kill(yes: bool = False) -> None:
     ]
 
     if not active and not tmux_session_exists(OUTER_SESSION):
-        console.print("[yellow]No active ccmux session to kill.[/yellow]")
+        console.print("[yellow]No active workspace to shut down.[/yellow]")
         return
 
     if active:
-        console.print(f"\n[bold red]Killing ccmux session with {len(active)} active session(s):[/bold red]")
+        console.print(f"\n[bold red]Shutting down workspace with {len(active)} active session(s):[/bold red]")
         for sess in active:
             console.print(f"  \u2022 {sess.name}")
     else:
-        console.print("\n[bold red]Killing ccmux session (no active sessions)[/bold red]")
+        console.print("\n[bold red]Shutting down workspace (no active sessions)[/bold red]")
 
     if not yes:
-        if not Confirm.ask("Kill the entire ccmux session?", default=False):
+        if not Confirm.ask("Shut down the workspace?", default=False):
             console.print("[yellow]Cancelled.[/yellow]")
             return
 
     kill_all_ccmux_sessions(OUTER_SESSION, OUTER_SESSION, INNER_SESSION, BASH_SESSION)
-    console.print("\n[bold green]Killed ccmux session.[/bold green]")
+    console.print("\n[bold green]Workspace shut down.[/bold green]")
 
 
 # ---------------------------------------------------------------------------
@@ -1076,7 +1076,7 @@ def do_session_info() -> None:
 
     repo_root = get_repo_root()
     if repo_root is None:
-        console.print("[yellow]Not in a ccmux session or git repository.[/yellow]\n")
+        console.print("[yellow]Not in a workspace session or git repository.[/yellow]\n")
         return None  # signal to cli.py to print help
 
     do_session_new(yes=True)
@@ -1132,29 +1132,29 @@ def _try_cwd_match() -> bool:
 # ---------------------------------------------------------------------------
 
 def do_detach(all_clients: bool = False) -> None:
-    """Detach the ccmux tmux session."""
+    """Detach from the workspace."""
     if not tmux_session_exists(OUTER_SESSION):
-        raise DetachError("No active ccmux session.")
+        raise DetachError("No active workspace to detach from.")
     try:
         if all_clients:
             detach_client(session=OUTER_SESSION)
         else:
             clients = list_clients(OUTER_SESSION)
             if not clients:
-                raise DetachError("No clients attached to ccmux session.")
+                raise DetachError("No clients attached to the workspace.")
             detach_client(client_tty=clients[0])
     except subprocess.CalledProcessError as e:
         raise DetachError(f"Detach failed: {e}") from e
 
 
 def do_attach() -> None:
-    """Attach to the ccmux tmux session."""
+    """Attach to the workspace."""
     sessions = state.get_all_sessions()
     if not sessions:
-        raise AttachError("No ccmux session found.", "Create a session with: ccmux new")
+        raise AttachError("No workspace found.", "Create a session with: ccmux new")
 
     if not tmux_session_exists(INNER_SESSION):
-        raise AttachError("Tmux session no longer exists.", "Activate sessions with: ccmux activate")
+        raise AttachError("Workspace is not running.", "Activate sessions with: ccmux activate")
 
     ensure_outer_session()
     notify_sidebars()
@@ -1170,7 +1170,7 @@ def do_session_which() -> None:
 
 
 def do_session_list() -> None:
-    """List all sessions and their tmux session status."""
+    """List all sessions in the workspace."""
     sessions = state.get_all_sessions()
     if not sessions:
         console.print("\n[yellow]No sessions found.[/yellow]")

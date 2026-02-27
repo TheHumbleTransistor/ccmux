@@ -1,4 +1,4 @@
-"""Session layout management: sidebar hooks, outer session, bash windows, debug."""
+"""Session layout management: sidebar hooks, outer session, bash windows."""
 
 import os
 import signal
@@ -190,36 +190,3 @@ def _create_bash_session(bash: str, session_name: str, working_dir: str, bash_cm
     return window_id
 
 
-# ---------------------------------------------------------------------------
-# Debug sidebar
-# ---------------------------------------------------------------------------
-
-def do_debug_sidebar() -> None:
-    """Launch a debug session to isolate sidebar rendering issues."""
-    session_name = "ccmux-debug"
-    python_exe = sys.executable or "python3"
-
-    if tmux_session_exists(session_name):
-        kill_tmux_session(session_name)
-
-    sidebar_cmd = (
-        f"COLORTERM=truecolor "
-        f"{python_exe} -m ccmux.ui.sidebar --demo ; "
-        f"echo 'Sidebar exited. Press enter to close.' ; read"
-    )
-
-    try:
-        create_session_simple(session_name, sidebar_cmd)
-        apply_outer_session_config(session_name)
-        split_window(f"{session_name}:0.0", "-v", str(BASH_PANE_HEIGHT), "bash")
-        split_window(f"{session_name}:0.0", "-h", "50%", "bash")
-        resize_pane(f"{session_name}:0.0", SIDEBAR_WIDTH)
-        select_pane(f"{session_name}:0.1")
-    except Exception as exc:
-        console.print(
-            f"[red]Error:[/red] Failed to create debug session: {exc}",
-            style="bold",
-        )
-        sys.exit(1)
-
-    os.execvp("tmux", ["tmux", "attach", "-t", f"={session_name}"])
