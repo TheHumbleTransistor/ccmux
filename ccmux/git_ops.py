@@ -13,6 +13,11 @@ def get_repo_root() -> Optional[Path]:
     Uses --git-common-dir to resolve through linked worktrees to the main repo,
     so this always returns the root of the main worktree even when called from
     inside a linked worktree.
+
+    For submodules, --git-common-dir returns a path like
+    ``<parent>/.git/modules/dep`` whose ``.parent`` is inside ``.git/``.
+    We detect this (the directory name is not ``.git``) and fall back to
+    ``--show-toplevel`` which always returns the working-tree root.
     """
     try:
         result = subprocess.run(
@@ -22,7 +27,18 @@ def get_repo_root() -> Optional[Path]:
             check=True,
         )
         git_common_dir = Path(result.stdout.strip())
-        return git_common_dir.parent
+        if git_common_dir.name == ".git":
+            return git_common_dir.parent
+
+        # Submodule: --git-common-dir points inside .git/modules/,
+        # so fall back to --show-toplevel for the real working tree root.
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return Path(result.stdout.strip())
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
@@ -146,7 +162,7 @@ def get_all_worktrees(repo_root: Path) -> list[dict[str, str]]:
 def create_worktree(repo_path: Path, worktree_path: Path, base_ref: str) -> None:
     """Create a detached git worktree from a base ref."""
     subprocess.run(
-        ["git", "worktree", "add", "--detach", str(worktree_path), base_ref],
+        ["git", "-C", str(repo_path), "worktree", "add", "--detach", str(worktree_path), base_ref],
         check=True,
     )
 
