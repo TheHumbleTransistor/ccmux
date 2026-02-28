@@ -247,8 +247,12 @@ def migrate_claude_session(old_path: str, new_path: str, session_id: str) -> boo
 # session_new decomposed
 # ---------------------------------------------------------------------------
 
-def _validate_repo_context(path: Optional[str] = None) -> tuple[Path, str]:
-    """Validate git repo and return (repo_root, default_branch). Raises on error."""
+def _validate_repo_context(path: Optional[str] = None) -> tuple[Path, str, Path]:
+    """Validate git repo and return (repo_root, default_branch, working_dir).
+
+    When *path* is given, *working_dir* is the resolved path (which may be a
+    subdirectory inside the repo).  Otherwise *working_dir* equals *repo_root*.
+    """
     if path is not None:
         resolved = Path(path).resolve()
         if not resolved.is_dir():
@@ -266,7 +270,9 @@ def _validate_repo_context(path: Optional[str] = None) -> tuple[Path, str]:
     )
     if default_branch is None:
         raise DefaultBranchError()
-    return repo_root, default_branch
+
+    working_dir = resolved if path is not None else repo_root
+    return repo_root, default_branch, working_dir
 
 
 def _resolve_session_type(repo_root: Path, worktree: bool, yes: bool) -> bool:
@@ -356,7 +362,7 @@ def _reactivate_single_orphan(sess) -> None:
 
 def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool = False, path: Optional[str] = None) -> None:
     """Create a new Claude Code session."""
-    repo_root, default_branch = _validate_repo_context(path)
+    repo_root, default_branch, working_dir = _validate_repo_context(path)
     create_as_worktree = _resolve_session_type(repo_root, worktree, yes)
     name = _generate_session_name(repo_root, create_as_worktree, name)
 
@@ -364,7 +370,7 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool
         session_path = repo_root / WORKTREES_DIR_NAME / name
         (repo_root / WORKTREES_DIR_NAME).mkdir(parents=True, exist_ok=True)
     else:
-        session_path = repo_root
+        session_path = working_dir
 
     _print_creation_info(name, repo_root, create_as_worktree, session_path, default_branch)
 
