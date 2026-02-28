@@ -366,3 +366,30 @@ def list_clients(session: str) -> list[str]:
         capture_output=True, text=True, check=True,
     )
     return [c for c in result.stdout.strip().split("\n") if c]
+
+
+def list_clients_by_activity(session: str) -> list[str]:
+    """List client TTYs attached to a session, most recently active first.
+
+    Parses ``tmux list-clients -F '#{client_activity}:#{client_tty}'`` and
+    sorts by the activity timestamp (descending) so the first element is the
+    client whose user most recently pressed a key.
+    """
+    result = subprocess.run(
+        ["tmux", "list-clients", "-t", session,
+         "-F", "#{client_activity}:#{client_tty}"],
+        capture_output=True, text=True, check=True,
+    )
+    entries: list[tuple[int, str]] = []
+    for line in result.stdout.strip().split("\n"):
+        if not line:
+            continue
+        # Format is "<epoch>:<tty path>" – split on first colon only
+        parts = line.split(":", 1)
+        if len(parts) == 2:
+            try:
+                entries.append((int(parts[0]), parts[1]))
+            except ValueError:
+                continue
+    entries.sort(key=lambda e: e[0], reverse=True)
+    return [tty for _, tty in entries]

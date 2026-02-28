@@ -76,6 +76,7 @@ from ccmux.tmux_ops import (
     kill_tmux_session,
     kill_tmux_window,
     list_clients,
+    list_clients_by_activity,
     rename_tmux_window,
     select_window,
     set_window_user_option,
@@ -1150,7 +1151,7 @@ def do_detach(all_clients: bool = False) -> None:
         if all_clients:
             detach_client(session=OUTER_SESSION)
         else:
-            clients = list_clients(OUTER_SESSION)
+            clients = list_clients_by_activity(OUTER_SESSION)
             if not clients:
                 raise DetachError("No clients attached to the workspace.")
             detach_client(client_tty=clients[0])
