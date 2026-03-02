@@ -13,6 +13,15 @@ def get_repo_root() -> Optional[Path]:
     Uses --git-common-dir to resolve through linked worktrees to the main repo,
     so this always returns the root of the main worktree even when called from
     inside a linked worktree.
+
+    For submodules, --git-common-dir returns a path like
+    ``<parent>/.git/modules/dep`` (a real directory, not a symlink — git
+    stores submodule data under the parent's ``.git/modules/<name>/``).
+    Its ``.parent`` is inside ``.git/``, so we can't derive the working tree
+    from it.  We fall back to ``git worktree list --porcelain`` whose first
+    entry is always the main worktree — this works even when called from
+    inside a linked worktree of the submodule (where ``--show-toplevel``
+    would incorrectly return the linked worktree's root).
     """
     try:
         result = subprocess.run(
@@ -22,7 +31,24 @@ def get_repo_root() -> Optional[Path]:
             check=True,
         )
         git_common_dir = Path(result.stdout.strip())
-        return git_common_dir.parent
+        if git_common_dir.name == ".git":
+            return git_common_dir.parent
+
+        # Submodule: --git-common-dir points inside .git/modules/,
+        # not to a .git directory we can derive the working tree from.
+        # Use `git worktree list` to find the main worktree root — the
+        # first entry is always the main worktree, even when called from
+        # inside a linked worktree of the submodule.
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        for line in result.stdout.splitlines():
+            if line.startswith("worktree "):
+                return Path(line[9:])
+        return None
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
@@ -146,7 +172,7 @@ def get_all_worktrees(repo_root: Path) -> list[dict[str, str]]:
 def create_worktree(repo_path: Path, worktree_path: Path, base_ref: str) -> None:
     """Create a detached git worktree from a base ref."""
     subprocess.run(
-        ["git", "worktree", "add", "--detach", str(worktree_path), base_ref],
+        ["git", "-C", str(repo_path), "worktree", "add", "--detach", str(worktree_path), base_ref],
         check=True,
     )
 

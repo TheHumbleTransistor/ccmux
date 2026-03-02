@@ -1,12 +1,15 @@
 """Tests for ccmux.git_ops branch detection functions."""
 
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 from ccmux.git_ops import (
     check_for_common_default_branches,
+    create_worktree,
     get_default_branch,
     get_most_recently_used_branch,
+    get_repo_root,
 )
 
 
@@ -80,3 +83,84 @@ class TestGetMostRecentlyUsedBranch:
         """Returns None when no branches exist."""
         mock_run.return_value = _make_completed_process("")
         assert get_most_recently_used_branch() is None
+
+
+class TestGetRepoRoot:
+    """Tests for get_repo_root()."""
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_normal_repo_returns_parent_of_git_dir(self, mock_run):
+        """Normal repo: --git-common-dir ends in .git, return its parent."""
+        mock_run.return_value = _make_completed_process("/home/user/myrepo/.git\n")
+        assert get_repo_root() == Path("/home/user/myrepo")
+        # Only one call needed (no fallback)
+        mock_run.assert_called_once()
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_submodule_uses_worktree_list(self, mock_run):
+        """Submodule: --git-common-dir is inside .git/modules/, use worktree list.
+
+        When inside a submodule, --git-common-dir returns a path like
+        /parent/.git/modules/dep — a real directory (not a symlink) where
+        git stores the submodule's object database, refs, and config.
+        Since we can't derive the working tree from that path, we fall back
+        to ``git worktree list --porcelain`` whose first entry is the main
+        worktree.
+        """
+        mock_run.side_effect = [
+            # First call: --git-common-dir returns a path inside .git/modules/
+            _make_completed_process("/home/user/parent/.git/modules/dep\n"),
+            # Second call: worktree list returns the main worktree first
+            _make_completed_process(
+                "worktree /home/user/parent/dep\nHEAD abc123\nbranch refs/heads/main\n\n"
+            ),
+        ]
+        assert get_repo_root() == Path("/home/user/parent/dep")
+        assert mock_run.call_count == 2
+        # Verify the fallback call uses worktree list
+        assert mock_run.call_args_list[1][0][0] == [
+            "git", "worktree", "list", "--porcelain",
+        ]
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_submodule_worktree_uses_main_worktree(self, mock_run):
+        """Worktree of a submodule: returns the submodule's main worktree root.
+
+        When inside a linked worktree created from a submodule,
+        --git-common-dir still points to .git/modules/dep, and
+        --show-toplevel would incorrectly return the linked worktree's root.
+        ``git worktree list`` always lists the main worktree first, so we
+        get the correct submodule root.
+        """
+        mock_run.side_effect = [
+            # --git-common-dir still points inside .git/modules/
+            _make_completed_process("/home/user/parent/.git/modules/dep\n"),
+            # worktree list: main worktree is first, linked worktree second
+            _make_completed_process(
+                "worktree /home/user/parent/dep\nHEAD abc123\nbranch refs/heads/main\n\n"
+                "worktree /home/user/parent/dep/.ccmux/worktrees/duck\nHEAD abc123\ndetached\n\n"
+            ),
+        ]
+        assert get_repo_root() == Path("/home/user/parent/dep")
+        assert mock_run.call_count == 2
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_returns_none_on_failure(self, mock_run):
+        """Returns None when git command fails."""
+        mock_run.side_effect = subprocess.CalledProcessError(1, "git")
+        assert get_repo_root() is None
+
+
+class TestCreateWorktree:
+    """Tests for create_worktree()."""
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_create_worktree_uses_C_flag(self, mock_run):
+        """create_worktree passes -C repo_path to git."""
+        repo = Path("/home/user/myrepo")
+        wt = Path("/home/user/myrepo/.ccmux/worktrees/duck")
+        create_worktree(repo, wt, "HEAD")
+        mock_run.assert_called_once_with(
+            ["git", "-C", str(repo), "worktree", "add", "--detach", str(wt), "HEAD"],
+            check=True,
+        )
