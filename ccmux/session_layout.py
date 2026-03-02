@@ -2,6 +2,7 @@
 
 import os
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -106,6 +107,62 @@ def uninstall_inner_hook() -> None:
         script_path.unlink(missing_ok=True)
     except OSError:
         pass
+    # Clean up the detach hook and restore default keybinding
+    try:
+        (HOOKS_DIR / "detach-outer.sh").unlink(missing_ok=True)
+    except OSError:
+        pass
+    _restore_detach_key()
+
+
+# ---------------------------------------------------------------------------
+# Detach helper: correct-terminal detach for nested sessions
+# ---------------------------------------------------------------------------
+
+
+def install_detach_hook() -> None:
+    """Install the detach-outer.sh helper script used by the wrapper and keybinding."""
+    HOOKS_DIR.mkdir(parents=True, exist_ok=True)
+    script_path = HOOKS_DIR / "detach-outer.sh"
+    script_content = f"""\
+#!/bin/sh
+OUTER="{OUTER_SESSION}"
+CLIENT=$(tmux list-clients -t "$OUTER" -F '#{{client_activity}}:#{{client_tty}}' 2>/dev/null \\
+    | sort -t: -k1 -rn | head -1 | cut -d: -f2-)
+[ -n "$CLIENT" ] && tmux detach-client -t "$CLIENT"
+"""
+    script_path.write_text(script_content)
+    script_path.chmod(0o755)
+
+
+def _rebind_detach_key() -> None:
+    """Rebind prefix-d in the outer session so it detaches the correct terminal.
+
+    Uses ``if-shell`` to check if the active pane belongs to a ccmux inner
+    or bash session. If so, runs detach-outer.sh; otherwise, falls through
+    to the normal ``detach-client``.
+    """
+    hook_path = HOOKS_DIR / "detach-outer.sh"
+    # The if-shell test checks whether the current session name starts with
+    # "ccmux-inner" or "ccmux-bash" (the nested sessions).
+    subprocess.run(
+        [
+            "tmux", "bind-key", "-T", "prefix", "d",
+            "if-shell",
+            f"tmux display-message -p '#{{session_name}}' | grep -qE '^({INNER_SESSION}|{BASH_SESSION})$'",
+            f"run-shell '{hook_path}'",
+            "detach-client",
+        ],
+        capture_output=True,
+    )
+
+
+def _restore_detach_key() -> None:
+    """Restore prefix-d to the default detach-client behavior."""
+    subprocess.run(
+        ["tmux", "bind-key", "-T", "prefix", "d", "detach-client"],
+        capture_output=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +191,8 @@ def create_outer_session() -> None:
                      f"TMUX= tmux attach -t ={INNER_SESSION}")
         resize_pane(f"{OUTER_SESSION}:0.0", SIDEBAR_WIDTH)
         install_inner_hook()
+        install_detach_hook()
+        _rebind_detach_key()
     except Exception as exc:
         print(
             f"ccmux: failed to create outer session '{OUTER_SESSION}': {exc}",
@@ -147,6 +206,7 @@ def ensure_outer_session() -> None:
         return
     if tmux_session_exists(OUTER_SESSION):
         install_inner_hook()
+        install_detach_hook()
         return
     create_outer_session()
 
