@@ -33,6 +33,10 @@ Before installing ccmux, make sure you have:
 ## Installation
 
 ```bash
+# Recommended
+pipx install ccmux
+
+# Or, if you don't use pipx
 pip install ccmux
 ```
 
