@@ -1069,6 +1069,43 @@ def do_session_kill(yes: bool = False) -> None:
 
 
 # ---------------------------------------------------------------------------
+# reload
+# ---------------------------------------------------------------------------
+
+def do_reload() -> None:
+    """Reload the workspace by killing and recreating the outer session.
+
+    Keeps ccmux-inner and ccmux-bash running so Claude Code sessions
+    and bash terminals are not interrupted.
+    """
+    if not tmux_session_exists(INNER_SESSION):
+        raise TmuxError("reload", "No active workspace to reload (inner session not running).")
+
+    console.print("[bold cyan]Reloading workspace...[/bold cyan]")
+
+    killed = kill_tmux_session(OUTER_SESSION)
+    if killed:
+        console.print("  [green]\u2713[/green] Killed outer session")
+    else:
+        console.print("  [dim]Outer session was not running[/dim]")
+
+    create_outer_session()
+
+    if not tmux_session_exists(OUTER_SESSION):
+        raise TmuxError("reload", "Failed to recreate outer session.")
+
+    console.print("  [green]\u2713[/green] Recreated outer session")
+    notify_sidebars()
+
+    console.print("\n[bold green]Workspace reloaded.[/bold green]")
+
+    if "TMUX" not in os.environ:
+        auto_attach_if_outside_tmux(yes=True)
+    else:
+        console.print(f"Re-attach with: [cyan]ccmux attach[/cyan]")
+
+
+# ---------------------------------------------------------------------------
 # session_info (default command logic)
 # ---------------------------------------------------------------------------
 

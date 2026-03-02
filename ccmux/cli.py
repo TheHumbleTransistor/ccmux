@@ -16,6 +16,7 @@ from ccmux.naming import BASH_SESSION, INNER_SESSION, OUTER_SESSION
 from ccmux.session_ops import (
     do_attach,
     do_detach,
+    do_reload,
     do_session_activate,
     do_session_deactivate,
     do_session_info,
@@ -132,6 +133,11 @@ def detach(
     """Detach from the workspace. (leaves it running in the background)"""
     do_detach(all_clients=all_clients)
 
+
+@app.command(name="reload")
+def reload() -> None:
+    """Reload the workspace UI (kills and recreates the outer tmux session)."""
+    do_reload()
 
 
 def check_claude_installed() -> bool:
