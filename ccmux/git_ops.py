@@ -15,9 +15,13 @@ def get_repo_root() -> Optional[Path]:
     inside a linked worktree.
 
     For submodules, --git-common-dir returns a path like
-    ``<parent>/.git/modules/dep`` whose ``.parent`` is inside ``.git/``.
-    We detect this (the directory name is not ``.git``) and fall back to
-    ``--show-toplevel`` which always returns the working-tree root.
+    ``<parent>/.git/modules/dep`` (a real directory, not a symlink — git
+    stores submodule data under the parent's ``.git/modules/<name>/``).
+    Its ``.parent`` is inside ``.git/``, so we can't derive the working tree
+    from it.  We fall back to ``git worktree list --porcelain`` whose first
+    entry is always the main worktree — this works even when called from
+    inside a linked worktree of the submodule (where ``--show-toplevel``
+    would incorrectly return the linked worktree's root).
     """
     try:
         result = subprocess.run(
@@ -31,14 +35,20 @@ def get_repo_root() -> Optional[Path]:
             return git_common_dir.parent
 
         # Submodule: --git-common-dir points inside .git/modules/,
-        # so fall back to --show-toplevel for the real working tree root.
+        # not to a .git directory we can derive the working tree from.
+        # Use `git worktree list` to find the main worktree root — the
+        # first entry is always the main worktree, even when called from
+        # inside a linked worktree of the submodule.
         result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            ["git", "worktree", "list", "--porcelain"],
             capture_output=True,
             text=True,
             check=True,
         )
-        return Path(result.stdout.strip())
+        for line in result.stdout.splitlines():
+            if line.startswith("worktree "):
+                return Path(line[9:])
+        return None
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
