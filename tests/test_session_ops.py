@@ -6,8 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ccmux.exceptions import InvalidArgumentError
-from ccmux.session_ops import _validate_repo_context, do_session_new
+from ccmux.exceptions import InvalidArgumentError, TmuxError
+from ccmux.naming import OUTER_SESSION
+from ccmux.session_ops import _validate_repo_context, do_reload, do_session_new
 
 
 class TestValidateRepoContext:
@@ -85,3 +86,50 @@ class TestDoSessionNewUsesWorkingDir:
         mock_save_state.assert_called_once()
         save_args = mock_save_state.call_args
         assert save_args[0][2] == working_dir
+
+
+class TestDoReload:
+    """Tests for do_reload()."""
+
+    @patch("ccmux.session_ops.tmux_session_exists", return_value=False)
+    def test_no_inner_session_raises(self, mock_exists):
+        """Raises TmuxError when inner session is not running."""
+        with pytest.raises(TmuxError, match="No active workspace"):
+            do_reload()
+
+    @patch.dict("os.environ", {}, clear=False)
+    @patch("ccmux.session_ops.notify_sidebars")
+    @patch("ccmux.session_ops.create_outer_session")
+    @patch("ccmux.session_ops.kill_tmux_session", return_value=True)
+    @patch("ccmux.session_ops.tmux_session_exists")
+    def test_kills_outer_and_recreates(
+        self, mock_exists, mock_kill, mock_create, mock_notify,
+    ):
+        """Normal reload: kills outer, recreates, notifies sidebars."""
+        mock_exists.side_effect = [True, True]  # inner exists, outer exists after create
+        do_reload()
+        mock_kill.assert_called_once_with(OUTER_SESSION)
+        mock_create.assert_called_once()
+        mock_notify.assert_called_once()
+
+    @patch.dict("os.environ", {}, clear=False)
+    @patch("ccmux.session_ops.notify_sidebars")
+    @patch("ccmux.session_ops.create_outer_session")
+    @patch("ccmux.session_ops.kill_tmux_session", return_value=False)
+    @patch("ccmux.session_ops.tmux_session_exists")
+    def test_outer_already_dead(
+        self, mock_exists, mock_kill, mock_create, mock_notify,
+    ):
+        """Reload works even if outer session was already dead."""
+        mock_exists.side_effect = [True, True]
+        do_reload()
+        mock_create.assert_called_once()
+
+    @patch("ccmux.session_ops.create_outer_session")
+    @patch("ccmux.session_ops.kill_tmux_session", return_value=True)
+    @patch("ccmux.session_ops.tmux_session_exists")
+    def test_create_fails_raises(self, mock_exists, mock_kill, mock_create):
+        """Raises TmuxError if outer session cannot be recreated."""
+        mock_exists.side_effect = [True, False]  # inner exists, outer absent after create
+        with pytest.raises(TmuxError, match="Failed to recreate"):
+            do_reload()
