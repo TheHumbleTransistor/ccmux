@@ -1,7 +1,6 @@
 """Session layout management: sidebar hooks, outer session, bash windows."""
 
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -34,7 +33,6 @@ from ccmux.ui.sidebar.process_id import SIDEBAR_PIDS_DIR
 from ccmux.ui.tmux import apply_outer_session_config, apply_server_global_config
 
 HOOKS_DIR = Path.home() / ".ccmux" / "hooks"
-BIN_DIR = Path.home() / ".ccmux" / "bin"
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +85,7 @@ if [ -n "$WIN" ]; then
         DIR=$(tmux display-message -t "{INNER_SESSION}" -p '#{{pane_current_path}}' 2>/dev/null)
         [ -z "$DIR" ] && DIR="$HOME"
         tmux new-window -t "{BASH_SESSION}" -n "$WIN" -c "$DIR" \
-            "export PATH=\\$HOME/.ccmux/bin:\\$PATH; export CCMUX_SESSION=$WIN; export COLORTERM=truecolor; while true; do \\$SHELL; done" 2>/dev/null
+            "export CCMUX_SESSION=$WIN; export COLORTERM=truecolor; while true; do \\$SHELL; done" 2>/dev/null
         tmux set-option -w -t "{BASH_SESSION}:$WIN" window-style 'bg=#1e1e1e' 2>/dev/null
         SID=$(tmux display-message -t "{INNER_SESSION}" -p '#{{@ccmux_sid}}' 2>/dev/null)
         [ -n "$SID" ] && tmux set-option -w -t "{BASH_SESSION}:$WIN" @ccmux_sid "$SID" 2>/dev/null
@@ -109,12 +107,12 @@ def uninstall_inner_hook() -> None:
         script_path.unlink(missing_ok=True)
     except OSError:
         pass
-    # Also clean up the detach hook and tmux wrapper
-    for path in (HOOKS_DIR / "detach-outer.sh", BIN_DIR / "tmux"):
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
+    # Clean up the detach hook and restore default keybinding
+    try:
+        (HOOKS_DIR / "detach-outer.sh").unlink(missing_ok=True)
+    except OSError:
+        pass
+    _restore_detach_key()
 
 
 # ---------------------------------------------------------------------------
@@ -137,46 +135,6 @@ CLIENT=$(tmux list-clients -t "$OUTER" -F '#{{client_activity}}:#{{client_tty}}'
     script_path.chmod(0o755)
 
 
-def install_tmux_wrapper() -> None:
-    """Install a PATH wrapper that intercepts bare ``tmux detach`` inside ccmux."""
-    real_tmux = shutil.which("tmux")
-    if not real_tmux:
-        return
-    BIN_DIR.mkdir(parents=True, exist_ok=True)
-    wrapper_path = BIN_DIR / "tmux"
-    wrapper_content = f"""\
-#!/bin/sh
-# ccmux tmux wrapper — intercepts bare "tmux detach" when inside ccmux.
-REAL_TMUX="{real_tmux}"
-
-# Only intercept when running inside a ccmux workspace
-if [ -z "$CCMUX_SESSION" ]; then
-    exec "$REAL_TMUX" "$@"
-fi
-
-# Match bare "detach" or "detach-client" with no -t/-s args
-case "$1" in
-    detach|detach-client)
-        shift
-        HAS_TARGET=""
-        for arg in "$@"; do
-            case "$arg" in
-                -t|-s) HAS_TARGET=1 ;;
-            esac
-        done
-        if [ -z "$HAS_TARGET" ]; then
-            exec "$HOME/.ccmux/hooks/detach-outer.sh"
-        fi
-        exec "$REAL_TMUX" detach-client "$@"
-        ;;
-esac
-
-exec "$REAL_TMUX" "$@"
-"""
-    wrapper_path.write_text(wrapper_content)
-    wrapper_path.chmod(0o755)
-
-
 def _rebind_detach_key() -> None:
     """Rebind prefix-d in the outer session so it detaches the correct terminal.
 
@@ -195,6 +153,14 @@ def _rebind_detach_key() -> None:
             f"run-shell '{hook_path}'",
             "detach-client",
         ],
+        capture_output=True,
+    )
+
+
+def _restore_detach_key() -> None:
+    """Restore prefix-d to the default detach-client behavior."""
+    subprocess.run(
+        ["tmux", "bind-key", "-T", "prefix", "d", "detach-client"],
         capture_output=True,
     )
 
@@ -226,7 +192,6 @@ def create_outer_session() -> None:
         resize_pane(f"{OUTER_SESSION}:0.0", SIDEBAR_WIDTH)
         install_inner_hook()
         install_detach_hook()
-        install_tmux_wrapper()
         _rebind_detach_key()
     except Exception as exc:
         print(
@@ -242,7 +207,6 @@ def ensure_outer_session() -> None:
     if tmux_session_exists(OUTER_SESSION):
         install_inner_hook()
         install_detach_hook()
-        install_tmux_wrapper()
         return
     create_outer_session()
 
@@ -260,7 +224,6 @@ def kill_outer_session() -> bool:
 def create_bash_window(session_name: str, working_dir: str) -> str | None:
     """Create a window in the bash session for a session. Returns window ID or None."""
     bash_cmd = (
-        f"export PATH=$HOME/.ccmux/bin:$PATH; "
         f"export CCMUX_SESSION={session_name}; "
         f"export COLORTERM=truecolor; "
         f"while true; do $SHELL; done"
