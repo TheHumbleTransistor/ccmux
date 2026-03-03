@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ccmux import state
+from ccmux.backend import get_backend
 from ccmux.git_ops import get_branch_name
 from ccmux.naming import is_session_window_active
 
@@ -22,9 +23,15 @@ def display_session_table() -> None:
         console.print(f"\n[yellow]No sessions found.[/yellow]")
         return
 
-    table = Table(title="Claude Code Sessions", show_header=True)
+    # Show Backend column only when sessions use more than one backend
+    backend_names = {sess.backend_name for sess in sessions}
+    show_backend_col = len(backend_names) > 1
+
+    table = Table(title="Coding Sessions", show_header=True)
     table.add_column("Repository", style="yellow")
     table.add_column("Session", style="cyan", no_wrap=True)
+    if show_backend_col:
+        table.add_column("Backend", style="magenta")
     table.add_column("Type", style="green")
     table.add_column("Branch")
     table.add_column("Status", style="bold")
@@ -36,18 +43,30 @@ def display_session_table() -> None:
         row = _build_session_row(sess)
         if row["is_active"]:
             active_count += 1
-        table.add_row(
-            row["repo_name"], sess.name, row["session_type"],
-            row["branch"], row["status"], row["tmux_window_name"],
+        cols = [
+            row["repo_name"],
+            sess.name,
+        ]
+        if show_backend_col:
+            backend = get_backend(sess.backend_name)
+            cols.append(backend.display_name)
+        cols += [
+            row["session_type"],
+            row["branch"],
+            row["status"],
+            row["tmux_window_name"],
             str(sess.session_path),
-        )
+        ]
+        table.add_row(*cols)
 
     console.print()
     console.print(table)
     console.print()
 
     total_count = len(sessions)
-    console.print(f"Total: {total_count} sessions, {active_count} active, {total_count - active_count} inactive")
+    console.print(
+        f"Total: {total_count} sessions, {active_count} active, {total_count - active_count} inactive"
+    )
     console.print()
 
 
@@ -89,7 +108,9 @@ def _get_window_display_name(tmux_window_id: Optional[str]) -> str:
     try:
         result = subprocess.run(
             ["tmux", "display-message", "-t", tmux_window_id, "-p", "#{window_name}"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return result.stdout.strip()
     except subprocess.CalledProcessError:
@@ -101,6 +122,7 @@ def show_session_info(session_name: str, session_data) -> None:
     repo_name = Path(session_data.repo_path).name
     session_path = Path(session_data.session_path)
     is_worktree = session_data.is_worktree
+    backend = get_backend(session_data.backend_name)
 
     branch = get_branch_name(str(session_path))
     if branch == "HEAD":
@@ -108,6 +130,9 @@ def show_session_info(session_name: str, session_data) -> None:
 
     console.print(f"\n[bold cyan]Session:[/bold cyan]    {session_name}")
     console.print(f"[bold cyan]Repository:[/bold cyan] {repo_name}")
-    console.print(f"[bold cyan]Type:[/bold cyan]       {'worktree' if is_worktree else 'main repo'}")
+    console.print(f"[bold cyan]Backend:[/bold cyan]    {backend.display_name}")
+    console.print(
+        f"[bold cyan]Type:[/bold cyan]       {'worktree' if is_worktree else 'main repo'}"
+    )
     console.print(f"[bold cyan]Branch:[/bold cyan]     {branch}")
     console.print(f"[bold cyan]Path:[/bold cyan]       {session_path}\n")

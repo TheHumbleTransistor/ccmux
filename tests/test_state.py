@@ -49,7 +49,7 @@ def test_add_session(temp_state_dir):
         repo_path="/repo",
         session_path="/repo/.ccmux/worktrees/feature-x",
         tmux_session_id="$0",
-        tmux_cc_window_id="@1"
+        tmux_cc_window_id="@1",
     )
 
     loaded = state_store._load_raw()
@@ -67,7 +67,7 @@ def test_remove_session(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.ccmux/worktrees/feature-x"
+        session_path="/repo/.ccmux/worktrees/feature-x",
     )
 
     state.remove_session("feature-x")
@@ -81,12 +81,12 @@ def test_remove_session_keeps_other_sessions(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.ccmux/worktrees/feature-x"
+        session_path="/repo/.ccmux/worktrees/feature-x",
     )
     state.add_session(
         session_name="feature-y",
         repo_path="/repo",
-        session_path="/repo/.ccmux/worktrees/feature-y"
+        session_path="/repo/.ccmux/worktrees/feature-y",
     )
 
     state.remove_session("feature-x")
@@ -103,13 +103,11 @@ def test_update_tmux_ids(temp_state_dir):
         repo_path="/repo",
         session_path="/repo/.ccmux/worktrees/feature-x",
         tmux_session_id="$0",
-        tmux_cc_window_id="@1"
+        tmux_cc_window_id="@1",
     )
 
     state.update_tmux_ids(
-        session_name="feature-x",
-        tmux_session_id="$1",
-        tmux_cc_window_id="@2"
+        session_name="feature-x", tmux_session_id="$1", tmux_cc_window_id="@2"
     )
 
     loaded = state_store._load_raw()
@@ -122,7 +120,7 @@ def test_get_session(temp_state_dir):
     state.add_session(
         session_name="feature-x",
         repo_path="/repo",
-        session_path="/repo/.ccmux/worktrees/feature-x"
+        session_path="/repo/.ccmux/worktrees/feature-x",
     )
 
     session = state.get_session("feature-x")
@@ -138,13 +136,13 @@ def test_get_all_sessions(temp_state_dir):
         session_name="feature-x",
         repo_path="/repo1",
         session_path="/repo1/.ccmux/worktrees/feature-x",
-        tmux_cc_window_id="@1"
+        tmux_cc_window_id="@1",
     )
     state.add_session(
         session_name="feature-y",
         repo_path="/repo2",
         session_path="/repo2/.ccmux/worktrees/feature-y",
-        tmux_cc_window_id="@2"
+        tmux_cc_window_id="@2",
     )
 
     all_sessions = state.get_all_sessions()
@@ -228,11 +226,14 @@ def test_corrupted_state_file(temp_state_dir):
 
 def test_session_from_dict_worktree(temp_state_dir):
     """Test Session.from_dict creates WorktreeSession."""
-    sess = state.Session.from_dict("test", {
-        "repo_path": "/repo",
-        "session_path": "/repo/.ccmux/worktrees/test",
-        "is_worktree": True,
-    })
+    sess = state.Session.from_dict(
+        "test",
+        {
+            "repo_path": "/repo",
+            "session_path": "/repo/.ccmux/worktrees/test",
+            "is_worktree": True,
+        },
+    )
     assert sess.session_path == "/repo/.ccmux/worktrees/test"
     assert sess.is_worktree is True
     assert isinstance(sess, state.WorktreeSession)
@@ -240,11 +241,14 @@ def test_session_from_dict_worktree(temp_state_dir):
 
 def test_session_from_dict_main_repo(temp_state_dir):
     """Test Session.from_dict creates MainRepoSession when is_worktree=False."""
-    sess = state.Session.from_dict("main", {
-        "repo_path": "/repo",
-        "session_path": "/repo",
-        "is_worktree": False,
-    })
+    sess = state.Session.from_dict(
+        "main",
+        {
+            "repo_path": "/repo",
+            "session_path": "/repo",
+            "is_worktree": False,
+        },
+    )
     assert sess.is_worktree is False
     assert sess.session_type == "main"
     assert isinstance(sess, state.MainRepoSession)
@@ -252,11 +256,14 @@ def test_session_from_dict_main_repo(temp_state_dir):
 
 def test_session_from_dict_compat_instance_path(temp_state_dir):
     """Test Session.from_dict reads legacy instance_path field."""
-    sess = state.Session.from_dict("test", {
-        "repo_path": "/repo",
-        "instance_path": "/repo/.ccmux/worktrees/test",
-        "is_worktree": True,
-    })
+    sess = state.Session.from_dict(
+        "test",
+        {
+            "repo_path": "/repo",
+            "instance_path": "/repo/.ccmux/worktrees/test",
+            "is_worktree": True,
+        },
+    )
     assert sess.session_path == "/repo/.ccmux/worktrees/test"
 
 
@@ -284,6 +291,7 @@ def test_find_main_repo_session(temp_state_dir):
 
 
 # --- find_session_by_path tests ---
+
 
 def test_find_session_by_path_exact(temp_state_dir):
     """Test exact path match returns the session."""
@@ -356,6 +364,7 @@ def test_find_session_by_path_no_false_prefix(temp_state_dir):
 
 # --- claude_session_id tests ---
 
+
 def test_add_session_with_claude_session_id(temp_state_dir):
     """Test adding a session with claude_session_id."""
     state.add_session(
@@ -385,22 +394,28 @@ def test_add_session_without_claude_session_id(temp_state_dir):
 
 def test_claude_session_id_from_dict_present(temp_state_dir):
     """Test Session.from_dict picks up claude_session_id when present."""
-    sess = state.Session.from_dict("test", {
-        "repo_path": "/repo",
-        "session_path": "/repo/.ccmux/worktrees/test",
-        "is_worktree": True,
-        "claude_session_id": "sess-456",
-    })
+    sess = state.Session.from_dict(
+        "test",
+        {
+            "repo_path": "/repo",
+            "session_path": "/repo/.ccmux/worktrees/test",
+            "is_worktree": True,
+            "claude_session_id": "sess-456",
+        },
+    )
     assert sess.claude_session_id == "sess-456"
 
 
 def test_claude_session_id_from_dict_missing(temp_state_dir):
     """Test Session.from_dict defaults claude_session_id to None for legacy data."""
-    sess = state.Session.from_dict("test", {
-        "repo_path": "/repo",
-        "session_path": "/repo/.ccmux/worktrees/test",
-        "is_worktree": True,
-    })
+    sess = state.Session.from_dict(
+        "test",
+        {
+            "repo_path": "/repo",
+            "session_path": "/repo/.ccmux/worktrees/test",
+            "is_worktree": True,
+        },
+    )
     assert sess.claude_session_id is None
 
 
@@ -462,6 +477,7 @@ def test_rename_preserves_claude_session_id(temp_state_dir):
 
 # --- Migration tests ---
 
+
 def test_migrate_old_nested_format(temp_state_dir):
     """Test that old nested format (sessions.default.instances) is migrated on read."""
     old_state = {
@@ -475,12 +491,12 @@ def test_migrate_old_nested_format(temp_state_dir):
                         "is_worktree": True,
                         "tmux_window_id": "@1",
                     }
-                }
+                },
             }
         }
     }
     state_file = temp_state_dir / "state.json"
-    with open(state_file, 'w') as f:
+    with open(state_file, "w") as f:
         json.dump(old_state, f)
 
     loaded = state_store._load_raw()
@@ -498,7 +514,7 @@ def test_find_session_by_tmux_ids(temp_state_dir):
         repo_path="/repo",
         session_path="/repo/.ccmux/worktrees/feature-x",
         tmux_session_id="$0",
-        tmux_cc_window_id="@1"
+        tmux_cc_window_id="@1",
     )
 
     result = state.find_session_by_tmux_ids("$0", "@1")
@@ -511,6 +527,7 @@ def test_find_session_by_tmux_ids(temp_state_dir):
 
 
 # --- Session ID tests ---
+
 
 def test_add_session_assigns_id(temp_state_dir):
     """Test that add_session auto-assigns incrementing IDs."""
@@ -556,7 +573,7 @@ def test_migration_backfills_id(temp_state_dir):
         }
     }
     state_file = temp_state_dir / "state.json"
-    with open(state_file, 'w') as f:
+    with open(state_file, "w") as f:
         json.dump(legacy_state, f)
 
     loaded = state_store._load_raw()
@@ -583,6 +600,7 @@ def test_rename_preserves_id(temp_state_dir):
 
 
 # --- Window ID lifecycle tests ---
+
 
 def test_clear_tmux_window_ids(temp_state_dir):
     """Test that clear_tmux_window_ids sets both IDs to None."""
@@ -652,3 +670,88 @@ def test_update_tmux_ids_with_bash(temp_state_dir):
     sess = state.get_session("fox")
     assert sess.tmux_cc_window_id == "@5"
     assert sess.tmux_bash_window_id == "@6"
+
+
+# --- Backend field tests ---
+
+
+def test_add_session_default_backend(temp_state_dir):
+    """Test adding a session without backend uses the default (claude)."""
+    state.add_session(
+        session_name="feature-x",
+        repo_path="/repo",
+        session_path="/repo/.ccmux/worktrees/feature-x",
+    )
+
+    loaded = state_store._load_raw()
+    sess = loaded["sessions"]["feature-x"]
+    assert sess["backend"] == "claude"
+
+
+def test_add_session_with_backend(temp_state_dir):
+    """Test adding a session with an explicit backend name."""
+    state.add_session(
+        session_name="feature-x",
+        repo_path="/repo",
+        session_path="/repo/.ccmux/worktrees/feature-x",
+        backend_name="opencode",
+    )
+
+    loaded = state_store._load_raw()
+    sess = loaded["sessions"]["feature-x"]
+    assert sess["backend"] == "opencode"
+
+
+def test_session_from_dict_backend_present(temp_state_dir):
+    """Test Session.from_dict picks up backend when present."""
+    sess = state.Session.from_dict(
+        "test",
+        {
+            "repo_path": "/repo",
+            "session_path": "/repo/.ccmux/worktrees/test",
+            "is_worktree": True,
+            "backend": "opencode",
+        },
+    )
+    assert sess.backend_name == "opencode"
+
+
+def test_session_from_dict_backend_missing_defaults(temp_state_dir):
+    """Test Session.from_dict defaults backend to 'claude' for legacy data."""
+    sess = state.Session.from_dict(
+        "test",
+        {
+            "repo_path": "/repo",
+            "session_path": "/repo/.ccmux/worktrees/test",
+            "is_worktree": True,
+        },
+    )
+    assert sess.backend_name == "claude"
+
+
+def test_session_to_dict_includes_backend(temp_state_dir):
+    """Test Session.to_dict includes the backend field."""
+    sess = state.WorktreeSession(
+        name="test",
+        repo_path="/repo",
+        session_path="/repo/.ccmux/worktrees/test",
+        backend_name="opencode",
+    )
+    d = sess.to_dict()
+    assert d["backend"] == "opencode"
+
+
+def test_rename_preserves_backend(temp_state_dir):
+    """Test that renaming a session preserves backend."""
+    state.add_session(
+        session_name="old-name",
+        repo_path="/repo",
+        session_path="/repo/.ccmux/worktrees/old-name",
+        backend_name="opencode",
+    )
+
+    assert state.rename_session("old-name", "new-name")
+
+    loaded = state_store._load_raw()
+    sessions = loaded["sessions"]
+    assert sessions["new-name"]["backend"] == "opencode"

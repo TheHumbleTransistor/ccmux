@@ -5,6 +5,8 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Static
 
+from ccmux.backend import get_backend
+
 
 class SessionRow(Vertical):
     """A clickable 4-line row showing tree hierarchy, session status, name, and git info."""
@@ -48,6 +50,8 @@ class SessionRow(Vertical):
         lines_added: int = 0,
         lines_removed: int = 0,
         session_id: int = 0,
+        backend_name: str = "claude",
+        show_backend: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -63,6 +67,8 @@ class SessionRow(Vertical):
         self.short_sha = short_sha
         self.lines_added = lines_added
         self.lines_removed = lines_removed
+        self.backend_name = backend_name
+        self.show_backend = show_backend
         self._flash_timer = None
         self._breath_timer = None
         self._breath_frame = 0
@@ -87,7 +93,9 @@ class SessionRow(Vertical):
         elif self.status == "blocked":
             indicator = "[#d70000]\u25cf[/]"  # ● static red
         elif self.status == "active" and self._breath_timer is not None:
-            color = self._BREATH_COLORS[(self._breath_frame + self._breath_offset) % len(self._BREATH_COLORS)]
+            color = self._BREATH_COLORS[
+                (self._breath_frame + self._breath_offset) % len(self._BREATH_COLORS)
+            ]
             indicator = f"[{color}]\u25cf[/]"  # ● animated green
         else:
             indicator = "\u25cf"  # ● grey (idle)
@@ -110,6 +118,14 @@ class SessionRow(Vertical):
         max_ref = 39 - 6
         return ref_text[:max_ref] if max_ref > 0 else ""
 
+    def _format_backend_text(self) -> str:
+        """Build the backend label for display below the branch."""
+        try:
+            backend = get_backend(self.backend_name)
+            return backend.display_name
+        except (ValueError, KeyError):
+            return self.backend_name
+
     def compose(self) -> ComposeResult:
         top, branch_char, tail = self._tree_chars()
         yield Static(top, classes="line1")
@@ -124,6 +140,10 @@ class SessionRow(Vertical):
                 yield Static(f"+{self.lines_added}", classes="additions")
             if self.lines_removed:
                 yield Static(f"-{self.lines_removed}", classes="deletions")
+        if self.show_backend:
+            with Horizontal(classes="line3b"):
+                yield Static(self._tree_prefix(), classes="tree-prefix")
+                yield Static(self._format_backend_text(), classes="backend-label")
         yield Static(tail, classes="line4")
 
     def _toggle_flash(self) -> None:
@@ -172,10 +192,15 @@ class SessionRow(Vertical):
             self.remove_class("blocker-alert")
 
     def update_state(
-        self, is_active: bool, is_current: bool,
-        status: str, has_blocker_alert: bool,
-        branch: str | None = None, short_sha: str = "",
-        lines_added: int = 0, lines_removed: int = 0,
+        self,
+        is_active: bool,
+        is_current: bool,
+        status: str,
+        has_blocker_alert: bool,
+        branch: str | None = None,
+        short_sha: str = "",
+        lines_added: int = 0,
+        lines_removed: int = 0,
     ) -> None:
         """Update mutable display state without rebuilding the widget."""
         if is_active != self.is_active:
@@ -193,8 +218,12 @@ class SessionRow(Vertical):
         if has_blocker_alert != self.has_blocker_alert:
             self.has_blocker_alert = has_blocker_alert
             self._apply_blocker_alert_class(has_blocker_alert)
-        if (branch != self.branch or short_sha != self.short_sha
-                or lines_added != self.lines_added or lines_removed != self.lines_removed):
+        if (
+            branch != self.branch
+            or short_sha != self.short_sha
+            or lines_added != self.lines_added
+            or lines_removed != self.lines_removed
+        ):
             self.branch = branch
             self.short_sha = short_sha
             self.lines_added = lines_added

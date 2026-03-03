@@ -21,8 +21,8 @@ def _wait_for_session(session_name: str, timeout: float = 2.0) -> bool:
     return False
 
 
-def apply_claude_inner_session_config(session_name: str) -> bool:
-    """Apply tmux configuration to the Claude Code inner session via per-session options.
+def apply_inner_session_config(session_name: str) -> bool:
+    """Apply tmux configuration to the coding tool inner session via per-session options.
 
     Does NOT set server-global options (default-terminal, terminal-features)
     to avoid corrupting other tmux sessions on the same server.
@@ -54,12 +54,14 @@ def apply_claude_inner_session_config(session_name: str) -> bool:
         for key, val in options + session_options_extra:
             subprocess.run(
                 ["tmux", "set-option", "-t", session_name, key, val],
-                check=True, capture_output=True,
+                check=True,
+                capture_output=True,
             )
         for key, val in window_options:
             subprocess.run(
                 ["tmux", "set-option", "-w", "-t", session_name, key, val],
-                check=True, capture_output=True,
+                check=True,
+                capture_output=True,
             )
         return True
     except subprocess.CalledProcessError:
@@ -75,7 +77,8 @@ def _terminal_features_contains_rgb() -> bool:
     try:
         result = subprocess.run(
             ["tmux", "show-options", "-g", "-v", "terminal-features"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         if result.returncode != 0:
             return False
@@ -89,13 +92,20 @@ def apply_server_global_config() -> bool:
     try:
         subprocess.run(
             ["tmux", "set-option", "-g", "default-terminal", "tmux-256color"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         if not _terminal_features_contains_rgb():
             subprocess.run(
-                ["tmux", "set-option", "-as", "terminal-features",
-                 ",tmux-256color:RGB"],
-                check=True, capture_output=True,
+                [
+                    "tmux",
+                    "set-option",
+                    "-as",
+                    "terminal-features",
+                    ",tmux-256color:RGB",
+                ],
+                check=True,
+                capture_output=True,
             )
         return True
     except subprocess.CalledProcessError:
@@ -133,7 +143,8 @@ def apply_outer_session_config(session_name: str) -> bool:
         for key, val in options:
             subprocess.run(
                 ["tmux", "set-option", "-t", session_name, key, val],
-                check=True, capture_output=True,
+                check=True,
+                capture_output=True,
             )
         return True
     except subprocess.CalledProcessError:

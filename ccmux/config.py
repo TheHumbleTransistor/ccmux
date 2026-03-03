@@ -13,6 +13,8 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib
 
+from ccmux.backend import DEFAULT_BACKEND_NAME, Backend, get_backend
+
 console = Console()
 
 
@@ -34,6 +36,22 @@ def load_repo_config(repo_root: Path) -> Optional[dict]:
             return tomllib.load(f)
     except Exception as e:
         return None
+
+
+def get_configured_backend(repo_root: Optional[Path] = None) -> Backend:
+    """Return the backend configured in ccmux.toml, or the default.
+
+    Reads ``[backend] name = "..."`` from the repo's ``ccmux.toml``.
+    Falls back to the default backend (claude) when no config exists
+    or the key is absent.
+    """
+    if repo_root is None:
+        return get_backend(DEFAULT_BACKEND_NAME)
+    config = load_repo_config(repo_root)
+    if config is None:
+        return get_backend(DEFAULT_BACKEND_NAME)
+    backend_name = config.get("backend", {}).get("name", DEFAULT_BACKEND_NAME)
+    return get_backend(backend_name)
 
 
 def run_post_create(

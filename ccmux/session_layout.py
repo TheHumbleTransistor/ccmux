@@ -39,6 +39,7 @@ HOOKS_DIR = Path.home() / ".ccmux" / "hooks"
 # Sidebar communication
 # ---------------------------------------------------------------------------
 
+
 def notify_sidebars() -> None:
     """Send SIGUSR1 to all active sidebar processes."""
     if not SIDEBAR_PIDS_DIR.is_dir():
@@ -67,12 +68,9 @@ def install_inner_hook() -> None:
     script_path.write_text(script_content)
     script_path.chmod(0o755)
 
-    set_hook(INNER_SESSION, "alert-bell",
-             f"run-shell '{script_path}'")
-    set_hook(INNER_SESSION, "after-select-window",
-             f"run-shell '{script_path}'")
-    set_hook(INNER_SESSION, "alert-activity",
-             f"run-shell '{script_path}'")
+    set_hook(INNER_SESSION, "alert-bell", f"run-shell '{script_path}'")
+    set_hook(INNER_SESSION, "after-select-window", f"run-shell '{script_path}'")
+    set_hook(INNER_SESSION, "alert-activity", f"run-shell '{script_path}'")
 
 
 def _build_hook_script() -> str:
@@ -147,7 +145,11 @@ def _rebind_detach_key() -> None:
     # "ccmux-inner" or "ccmux-bash" (the nested sessions).
     subprocess.run(
         [
-            "tmux", "bind-key", "-T", "prefix", "d",
+            "tmux",
+            "bind-key",
+            "-T",
+            "prefix",
+            "d",
             "if-shell",
             f"tmux display-message -p '#{{session_name}}' | grep -qE '^({INNER_SESSION}|{BASH_SESSION})$'",
             f"run-shell '{hook_path}'",
@@ -169,6 +171,7 @@ def _restore_detach_key() -> None:
 # Outer session management
 # ---------------------------------------------------------------------------
 
+
 def create_outer_session() -> None:
     """Create the outer tmux session with sidebar, inner client, and bash pane."""
     if tmux_session_exists(OUTER_SESSION) or not tmux_session_exists(INNER_SESSION):
@@ -185,10 +188,18 @@ def create_outer_session() -> None:
         apply_server_global_config()
         apply_outer_session_config(OUTER_SESSION)
         if tmux_session_exists(BASH_SESSION):
-            split_window(f"{OUTER_SESSION}:0.0", "-v", str(BASH_PANE_HEIGHT),
-                         f"TMUX= tmux attach -t ={BASH_SESSION}")
-        split_window(f"{OUTER_SESSION}:0.0", "-h", "50%",
-                     f"TMUX= tmux attach -t ={INNER_SESSION}")
+            split_window(
+                f"{OUTER_SESSION}:0.0",
+                "-v",
+                str(BASH_PANE_HEIGHT),
+                f"/bin/sh -c 'unset TMUX; exec tmux attach -t ={BASH_SESSION}'",
+            )
+        split_window(
+            f"{OUTER_SESSION}:0.0",
+            "-h",
+            "50%",
+            f"/bin/sh -c 'unset TMUX; exec tmux attach -t ={INNER_SESSION}'",
+        )
         resize_pane(f"{OUTER_SESSION}:0.0", SIDEBAR_WIDTH)
         install_inner_hook()
         install_detach_hook()
@@ -221,6 +232,7 @@ def kill_outer_session() -> bool:
 # Bash window management
 # ---------------------------------------------------------------------------
 
+
 def create_bash_window(session_name: str, working_dir: str) -> str | None:
     """Create a window in the bash session for a session. Returns window ID or None."""
     bash_cmd = (
@@ -230,23 +242,29 @@ def create_bash_window(session_name: str, working_dir: str) -> str | None:
     )
     try:
         if not tmux_session_exists(BASH_SESSION):
-            window_id = _create_bash_session(BASH_SESSION, session_name, working_dir, bash_cmd)
+            window_id = _create_bash_session(
+                BASH_SESSION, session_name, working_dir, bash_cmd
+            )
         else:
             if session_name in get_tmux_windows(BASH_SESSION):
                 return None
-            window_id = create_tmux_window(BASH_SESSION, session_name, working_dir, bash_cmd)
-        set_window_option(f"{BASH_SESSION}:{session_name}", "window-style", "bg=#1e1e1e")
+            window_id = create_tmux_window(
+                BASH_SESSION, session_name, working_dir, bash_cmd
+            )
+        set_window_option(
+            f"{BASH_SESSION}:{session_name}", "window-style", "bg=#1e1e1e"
+        )
         return window_id
     except Exception:
         return None
 
 
-def _create_bash_session(bash: str, session_name: str, working_dir: str, bash_cmd: str) -> str | None:
+def _create_bash_session(
+    bash: str, session_name: str, working_dir: str, bash_cmd: str
+) -> str | None:
     """Create a new bash tmux session with status off and mouse on. Returns window ID."""
     window_id = create_tmux_session(bash, session_name, working_dir, bash_cmd)
     set_session_option(bash, "status", "off")
     set_session_option(bash, "mouse", "on")
     set_session_option(bash, "window-size", "latest")
     return window_id
-
-

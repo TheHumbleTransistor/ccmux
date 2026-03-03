@@ -29,6 +29,9 @@ htmlcov/
 # Runtime worktrees
 .ccmux/worktrees/
 
+# Project-local config (user-specific backend choice)
+ccmux.toml
+
 # OS
 .DS_Store
 Thumbs.db

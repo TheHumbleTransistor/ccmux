@@ -32,6 +32,7 @@ class SessionSnapshot:
     lines_added: int = 0
     lines_removed: int = 0
     activity_ts: float = 0.0
+    backend_name: str = "claude"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +69,9 @@ def build_repo_display_names(
     names = {p: Path(p).name for p in paths}
     name_counts = Counter(names.values())
     # Sort by minimum session_id so older repos keep the clean name
-    paths_sorted = sorted(grouped, key=lambda p: min(d.snapshot.session_id for d in grouped[p]))
+    paths_sorted = sorted(
+        grouped, key=lambda p: min(d.snapshot.session_id for d in grouped[p])
+    )
     seen: dict[str, int] = {}
     display: dict[str, str] = {}
     for p in paths_sorted:
@@ -179,7 +182,9 @@ async def get_git_info(session_path: str) -> tuple[str | None, str, int, int]:
             asyncio.to_thread(
                 subprocess.run,
                 ["git", "-C", session_path, "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True, check=True,
+                capture_output=True,
+                text=True,
+                check=True,
             ),
             timeout=5,
         )
@@ -193,7 +198,9 @@ async def get_git_info(session_path: str) -> tuple[str | None, str, int, int]:
             asyncio.to_thread(
                 subprocess.run,
                 ["git", "-C", session_path, "rev-parse", "--short", "HEAD"],
-                capture_output=True, text=True, check=True,
+                capture_output=True,
+                text=True,
+                check=True,
             ),
             timeout=5,
         )
@@ -207,7 +214,9 @@ async def get_git_info(session_path: str) -> tuple[str | None, str, int, int]:
             asyncio.to_thread(
                 subprocess.run,
                 ["git", "-C", session_path, "diff", "HEAD", "--shortstat"],
-                capture_output=True, text=True, check=True,
+                capture_output=True,
+                text=True,
+                check=True,
             ),
             timeout=5,
         )
@@ -235,7 +244,9 @@ async def build_snapshot() -> list[SessionSnapshot]:
     git_tasks = [get_git_info(sess.session_path) for sess in sessions]
 
     results = await asyncio.gather(
-        window_flags_task, current_session_task, *git_tasks,
+        window_flags_task,
+        current_session_task,
+        *git_tasks,
     )
     window_flags = results[0]
     current_session = results[1]
@@ -247,27 +258,27 @@ async def build_snapshot() -> list[SessionSnapshot]:
         repo_name = Path(sess.repo_path).name
         wid = sess.tmux_cc_window_id
         wid_flags = window_flags.get(wid)
-        is_active = (
-            wid_flags is not None
-            and str(sess.id) == wid_flags.get("sid", "")
-        )
+        is_active = wid_flags is not None and str(sess.id) == wid_flags.get("sid", "")
         is_current = sess.name == current_session
         sess_type = sess.session_type
         alert_state = resolve_alert_state(wid_flags) if is_active else None
         activity_ts = wid_flags.get("activity_ts", 0.0) if wid_flags else 0.0
-        snapshot.append(SessionSnapshot(
-            repo_name=repo_name,
-            repo_path=sess.repo_path,
-            session_name=sess.name,
-            session_type=sess_type,
-            is_active=is_active,
-            is_current=is_current,
-            alert_state=alert_state,
-            session_id=sess.id,
-            branch=branch,
-            short_sha=short_sha,
-            lines_added=added,
-            lines_removed=removed,
-            activity_ts=activity_ts,
-        ))
+        snapshot.append(
+            SessionSnapshot(
+                repo_name=repo_name,
+                repo_path=sess.repo_path,
+                session_name=sess.name,
+                session_type=sess_type,
+                is_active=is_active,
+                is_current=is_current,
+                alert_state=alert_state,
+                session_id=sess.id,
+                branch=branch,
+                short_sha=short_sha,
+                lines_added=added,
+                lines_removed=removed,
+                activity_ts=activity_ts,
+                backend_name=sess.backend_name,
+            )
+        )
     return snapshot

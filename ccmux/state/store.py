@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from ccmux.backend import DEFAULT_BACKEND_NAME
 from ccmux.state.session import Session
 
 
@@ -28,7 +29,7 @@ def _load_raw() -> dict:
         }
 
     try:
-        with open(STATE_FILE, 'r') as f:
+        with open(STATE_FILE, "r") as f:
             data = json.load(f)
     except (json.JSONDecodeError, IOError):
         return {
@@ -56,8 +57,7 @@ def _load_raw() -> dict:
 
     # Backfill id for sessions that lack it
     needs_backfill = any(
-        "id" not in sess_data
-        for sess_data in data.get("sessions", {}).values()
+        "id" not in sess_data for sess_data in data.get("sessions", {}).values()
     )
     if needs_backfill:
         next_id = data.get("next_id", 1)
@@ -73,11 +73,12 @@ def _load_raw() -> dict:
 def _save_raw(state: dict):
     """Save raw state to disk."""
     _ensure_state_dir()
-    with open(STATE_FILE, 'w') as f:
+    with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
 
 # --- Session CRUD ---
+
 
 def add_session(
     session_name: str,
@@ -88,6 +89,7 @@ def add_session(
     tmux_bash_window_id: Optional[str] = None,
     is_worktree: bool = True,
     claude_session_id: Optional[str] = None,
+    backend_name: Optional[str] = None,
 ):
     """Add a session to the state (can be main repo or worktree)."""
     state = _load_raw()
@@ -102,11 +104,15 @@ def add_session(
         "repo_path": repo_path,
         "session_path": session_path,
         "is_worktree": is_worktree,
+        # NOTE: Key "claude_code" is kept for backward compatibility with
+        # existing state.json files.  It holds the tmux window ID for the
+        # coding tool pane regardless of which backend is in use.
         "tmux_window_ids": {
             "claude_code": tmux_cc_window_id,
             "bash_terminal": tmux_bash_window_id,
         },
         "id": session_id,
+        "backend": backend_name or DEFAULT_BACKEND_NAME,
     }
     if claude_session_id:
         sess_data["claude_session_id"] = claude_session_id
@@ -193,7 +199,9 @@ def get_all_sessions() -> list[Session]:
     return sessions_list
 
 
-def find_session_by_tmux_ids(tmux_session_id: str, tmux_window_id: str) -> Optional[tuple[str, Session]]:
+def find_session_by_tmux_ids(
+    tmux_session_id: str, tmux_window_id: str
+) -> Optional[tuple[str, Session]]:
     """Find a session by its tmux session and window IDs.
 
     Returns: (session_name, Session) or None

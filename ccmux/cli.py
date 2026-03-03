@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code Multiplexer CLI - Manage Claude Code sessions in a shared workspace."""
+"""Claude Code Multiplexer CLI - Manage coding sessions in a shared workspace."""
 
 import shutil
 import sys
@@ -10,6 +10,7 @@ from cyclopts import Parameter
 from rich.prompt import Confirm
 
 from ccmux import __version__
+from ccmux.backend import get_available_backends, get_backend
 from ccmux.display import console
 from ccmux.exceptions import CcmuxError, NoSessionsFound
 from ccmux.naming import BASH_SESSION, INNER_SESSION, OUTER_SESSION
@@ -34,7 +35,7 @@ from ccmux.tmux_ops import check_tmux_installed, kill_all_ccmux_sessions
 app = cyclopts.App(
     name="ccmux",
     version=__version__,
-    help="Claude Code Multiplexer - Manage Claude Code sessions in a shared workspace.",
+    help="Claude Code Multiplexer - Manage coding sessions in a shared workspace.",
 )
 
 
@@ -59,9 +60,10 @@ def session_new(
     name: Annotated[Optional[str], Parameter(name=["-n", "--name"])] = None,
     worktree: Annotated[bool, Parameter(name=["-w", "--worktree"])] = False,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
+    backend: Annotated[Optional[str], Parameter(name=["-b", "--backend"])] = None,
 ) -> None:
-    """Create a new Claude Code session in main repo or as a git worktree."""
-    do_session_new(name=name, worktree=worktree, yes=yes, path=path)
+    """Create a new coding session in main repo or as a git worktree."""
+    do_session_new(name=name, worktree=worktree, yes=yes, path=path, backend=backend)
 
 
 @app.command(name="list")
@@ -91,7 +93,7 @@ def session_activate(
     *,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
-    """Activate Claude Code in a session (useful if its window was closed)."""
+    """Activate the coding tool in a session (useful if its window was closed)."""
     do_session_activate(name=name, yes=yes)
 
 
@@ -101,7 +103,7 @@ def session_deactivate(
     *,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
-    """Deactivate Claude Code session(s) by closing their windows (keeps session data)."""
+    """Deactivate session(s) by closing their windows (keeps session data)."""
     do_session_deactivate(name=name, yes=yes)
 
 
@@ -140,15 +142,37 @@ def reload() -> None:
     do_reload()
 
 
-def check_claude_installed() -> bool:
-    """Check if Claude Code CLI is available on PATH."""
-    return shutil.which("claude") is not None
+def check_backend_installed() -> bool:
+    """Check if at least one supported backend CLI is available on PATH.
+
+    When no backend is installed, prints install instructions for all of them.
+    """
+    for name in get_available_backends():
+        if get_backend(name).check_installed():
+            return True
+
+    # None installed — print instructions for all backends
+    console.print(
+        "[red]Error:[/red] No supported coding tool found on PATH.",
+        style="bold",
+    )
+    console.print()
+    for name in get_available_backends():
+        backend = get_backend(name)
+        for line in backend.install_instructions():
+            console.print(line)
+        console.print()
+
+    return False
 
 
 def main():
     """Main entry point for the CLI."""
     if not check_tmux_installed():
-        console.print("[red]Error:[/red] tmux is not installed or not found on PATH.", style="bold")
+        console.print(
+            "[red]Error:[/red] tmux is not installed or not found on PATH.",
+            style="bold",
+        )
         console.print("\nInstall tmux for your platform:")
         console.print("  Ubuntu/Debian:  sudo apt install tmux")
         console.print("  macOS:          brew install tmux")
@@ -156,11 +180,7 @@ def main():
         console.print("  Arch:           sudo pacman -S tmux")
         sys.exit(1)
 
-    if not check_claude_installed():
-        console.print("[red]Error:[/red] Claude Code is not installed or not found on PATH.", style="bold")
-        console.print("\nInstall Claude Code:")
-        console.print("  npm install -g @anthropic-ai/claude-code")
-        console.print("\nFor more info: https://docs.anthropic.com/en/docs/claude-code")
+    if not check_backend_installed():
         sys.exit(1)
 
     if stale_sessions_running():
@@ -168,13 +188,11 @@ def main():
         console.print()
         if stored:
             console.print(
-                f"[yellow bold]ccmux upgraded:[/yellow bold] "
-                f"{stored} → {__version__}"
+                f"[yellow bold]ccmux upgraded:[/yellow bold] {stored} → {__version__}"
             )
         else:
             console.print(
-                f"[yellow bold]ccmux upgrade detected[/yellow bold] "
-                f"(now {__version__})"
+                f"[yellow bold]ccmux upgrade detected[/yellow bold] (now {__version__})"
             )
         console.print(
             "The running workspace uses outdated hooks and may behave unexpectedly."
@@ -185,7 +203,9 @@ def main():
         )
 
         if Confirm.ask("Shut down the stale workspace?", default=True):
-            kill_all_ccmux_sessions(OUTER_SESSION, OUTER_SESSION, INNER_SESSION, BASH_SESSION)
+            kill_all_ccmux_sessions(
+                OUTER_SESSION, OUTER_SESSION, INNER_SESSION, BASH_SESSION
+            )
             console.print(
                 "[green]Done.[/green] Run [bold]ccmux new[/bold] or "
                 "[bold]ccmux activate[/bold] to start fresh."

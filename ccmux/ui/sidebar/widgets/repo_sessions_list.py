@@ -17,11 +17,13 @@ class RepoSessionsList(Vertical):
         self,
         repo_name: str,
         sessions: list[DerivedSessionState],
+        show_backend: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.repo_name = repo_name
         self.sessions = sessions
+        self.show_backend = show_backend
 
     def compose(self) -> ComposeResult:
         yield RepoHeader(f"\u25cf {self.repo_name}")
@@ -29,8 +31,10 @@ class RepoSessionsList(Vertical):
         for i, derived in enumerate(self.sessions):
             entry = derived.snapshot
             yield SessionRow(
-                entry.session_name, entry.session_type,
-                entry.is_active, entry.is_current,
+                entry.session_name,
+                entry.session_type,
+                entry.is_active,
+                entry.is_current,
                 status=derived.status,
                 has_blocker_alert=derived.has_blocker_alert,
                 is_last=(i == last_idx),
@@ -39,5 +43,7 @@ class RepoSessionsList(Vertical):
                 lines_added=entry.lines_added,
                 lines_removed=entry.lines_removed,
                 session_id=entry.session_id,
+                backend_name=entry.backend_name,
+                show_backend=self.show_backend,
                 id=f"sess-{entry.session_name}",
             )

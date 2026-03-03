@@ -19,7 +19,12 @@ from ccmux import state
 from ccmux.naming import INNER_SESSION
 from ccmux.ui.sidebar import snapshot
 from ccmux.ui.sidebar.snapshot import DerivedSessionState, SessionSnapshot
-from ccmux.ui.sidebar.widgets import SessionRow, RepoSessionsList, TitleBanner, AboutPanel
+from ccmux.ui.sidebar.widgets import (
+    SessionRow,
+    RepoSessionsList,
+    TitleBanner,
+    AboutPanel,
+)
 
 POLL_INTERVAL = 1.0
 DEMO_POLL_INTERVAL = 1.0
@@ -35,7 +40,9 @@ def _setup_logger() -> logging.Logger:
     logger = logging.getLogger("ccmux.sidebar")
     logger.setLevel(logging.DEBUG)
     handler = logging.FileHandler(_LOG_FILE, mode="a")
-    handler.setFormatter(logging.Formatter("%(asctime)s.%(msecs)03d %(message)s", datefmt="%H:%M:%S"))
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s.%(msecs)03d %(message)s", datefmt="%H:%M:%S")
+    )
     logger.addHandler(handler)
     return logger
 
@@ -79,7 +86,6 @@ class SidebarApp(App):
         await self._refresh_sessions(caller="mount")
         self.set_interval(self._poll_interval, self._poll_refresh)
         self._register_signal_handler()
-
 
     def _toggle_about(self) -> None:
         """Toggle between the session list and the about panel."""
@@ -181,7 +187,8 @@ class SidebarApp(App):
             pass
 
     def _compute_session_state(
-        self, entry: SessionSnapshot,
+        self,
+        entry: SessionSnapshot,
     ) -> tuple[str, bool]:
         """Compute derived (status, has_blocker_alert) from raw snapshot + sticky state."""
         name = entry.session_name
@@ -264,8 +271,15 @@ class SidebarApp(App):
             else:
                 grouped = snapshot.group_by_repo(derived)
                 display_names = snapshot.build_repo_display_names(grouped)
+                all_backends = {d.snapshot.backend_name for d in derived}
+                show_backend = len(all_backends) > 1
                 new_widgets = [
-                    RepoSessionsList(display_names[repo_path], entries, id=f"repo-group-{idx}")
+                    RepoSessionsList(
+                        display_names[repo_path],
+                        entries,
+                        show_backend=show_backend,
+                        id=f"repo-group-{idx}",
+                    )
                     for idx, (repo_path, entries) in enumerate(grouped.items())
                 ]
             await container.remove_children()
@@ -280,9 +294,7 @@ class SidebarApp(App):
         if not old_derived or not new_derived:
             return False
         # Structure check: same (repo_path, name) pairs in same order
-        if [
-            (d.snapshot.repo_path, d.snapshot.session_name) for d in old_derived
-        ] != [
+        if [(d.snapshot.repo_path, d.snapshot.session_name) for d in old_derived] != [
             (d.snapshot.repo_path, d.snapshot.session_name) for d in new_derived
         ]:
             return False
@@ -291,10 +303,14 @@ class SidebarApp(App):
                 entry = new_d.snapshot
                 row = self.query_one(f"#sess-{entry.session_name}", SessionRow)
                 row.update_state(
-                    entry.is_active, entry.is_current,
-                    new_d.status, new_d.has_blocker_alert,
-                    entry.branch, entry.short_sha,
-                    entry.lines_added, entry.lines_removed,
+                    entry.is_active,
+                    entry.is_current,
+                    new_d.status,
+                    new_d.has_blocker_alert,
+                    entry.branch,
+                    entry.short_sha,
+                    entry.lines_added,
+                    entry.lines_removed,
                 )
         return True
 
@@ -331,10 +347,14 @@ class SidebarApp(App):
             row = self.query_one(f"#sess-{message.session_name}", SessionRow)
             if row.has_blocker_alert:
                 row.update_state(
-                    row.is_active, row.is_current,
-                    row.status, False,
-                    row.branch, row.short_sha,
-                    row.lines_added, row.lines_removed,
+                    row.is_active,
+                    row.is_current,
+                    row.status,
+                    False,
+                    row.branch,
+                    row.short_sha,
+                    row.lines_added,
+                    row.lines_removed,
                 )
         except Exception:
             pass

@@ -12,5 +12,5 @@ from ccmux.ui.sidebar import (  # noqa: F401
 )
 from ccmux.ui.tmux import (  # noqa: F401
     apply_outer_session_config,
-    apply_claude_inner_session_config,
+    apply_inner_session_config,
 )

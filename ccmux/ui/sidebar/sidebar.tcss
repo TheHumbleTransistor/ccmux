@@ -111,6 +111,23 @@ SessionRow .line3 .deletions {
     margin-left: 1;
 }
 
+SessionRow .line3b {
+    height: 1;
+}
+
+SessionRow .line3b .tree-prefix {
+    width: auto;
+}
+
+SessionRow .line3b .backend-label {
+    width: auto;
+    color: #555555;
+}
+
+SessionRow.current .backend-label {
+    color: #444444;
+}
+
 SessionRow .line4 {
     height: 1;
 }

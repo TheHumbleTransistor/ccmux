@@ -1,19 +1,26 @@
 """Session dataclasses for ccmux state management."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
+
+from ccmux.backend import DEFAULT_BACKEND_NAME
 
 
 @dataclass
 class Session:
     """Base class for a ccmux session (worktree or main repo)."""
+
     name: str
     repo_path: str
     session_path: str
     tmux_cc_window_id: Optional[str] = None
     tmux_bash_window_id: Optional[str] = None
+    # NOTE: Named "claude_session_id" for backward compatibility with existing
+    # state.json files. This is the generic tool session ID used by any backend
+    # (Claude Code's --session-id, OpenCode's --session, etc.).
     claude_session_id: Optional[str] = None
     id: int = 0
+    backend_name: str = field(default=DEFAULT_BACKEND_NAME)
 
     @property
     def is_worktree(self) -> bool:
@@ -33,6 +40,7 @@ class Session:
                 "bash_terminal": self.tmux_bash_window_id,
             },
             "id": self.id,
+            "backend": self.backend_name,
         }
         if self.claude_session_id:
             d["claude_session_id"] = self.claude_session_id
@@ -50,6 +58,7 @@ class Session:
             tmux_bash_window_id=window_ids.get("bash_terminal"),
             claude_session_id=data.get("claude_session_id"),
             id=data.get("id", 0),
+            backend_name=data.get("backend", DEFAULT_BACKEND_NAME),
         )
         if data.get("is_worktree", True):
             return WorktreeSession(**kwargs)
