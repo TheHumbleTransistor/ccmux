@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ccmux"
 dynamic = ["version"]
-description = "Claude Code Multiplexer - Manage multiple Claude Code instances"
+description = "Terminal UI for managing multiple AI coding sessions (Claude Code, OpenCode)"
 readme = "README.md"
 requires-python = ">=3.8"
 authors = [

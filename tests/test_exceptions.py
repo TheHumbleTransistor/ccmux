@@ -27,6 +27,7 @@ from ccmux.exceptions import (
 # Exception class instantiation and attributes
 # ---------------------------------------------------------------------------
 
+
 class TestCcmuxError:
     def test_base_exception(self):
         e = CcmuxError("something broke")
@@ -177,21 +178,25 @@ class TestAttachError:
 # All exceptions inherit from CcmuxError
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("exc_class", [
-    NoSessionsFound,
-    SessionNotFoundError,
-    SessionExistsError,
-    NotInGitRepoError,
-    DefaultBranchError,
-    UserAbortedError,
-    TmuxError,
-    WorktreeError,
-    InvalidArgumentError,
-    NotInCcmuxSessionError,
-    ActivationError,
-    DetachError,
-    AttachError,
-])
+
+@pytest.mark.parametrize(
+    "exc_class",
+    [
+        NoSessionsFound,
+        SessionNotFoundError,
+        SessionExistsError,
+        NotInGitRepoError,
+        DefaultBranchError,
+        UserAbortedError,
+        TmuxError,
+        WorktreeError,
+        InvalidArgumentError,
+        NotInCcmuxSessionError,
+        ActivationError,
+        DetachError,
+        AttachError,
+    ],
+)
 def test_all_inherit_from_ccmux_error(exc_class):
     assert issubclass(exc_class, CcmuxError)
 
@@ -200,17 +205,23 @@ def test_all_inherit_from_ccmux_error(exc_class):
 # CLI integration: exception → sys.exit mapping
 # ---------------------------------------------------------------------------
 
+
 class TestCliExceptionHandling:
     """Test that cli.main() catches exceptions and exits correctly."""
 
     def _run_main_with_exception(self, exception):
         """Run cli.main() where app() raises the given exception."""
-        with mock.patch("ccmux.cli.check_tmux_installed", return_value=True), \
-             mock.patch("ccmux.cli.check_claude_installed", return_value=True), \
-             mock.patch("ccmux.cli.stale_sessions_running", return_value=False), \
-             mock.patch("ccmux.cli.app", side_effect=exception), \
-             mock.patch("ccmux.cli.console") as mock_console:
+        with mock.patch(
+            "ccmux.cli.check_tmux_installed", return_value=True
+        ), mock.patch(
+            "ccmux.cli.check_backend_installed", return_value=True
+        ), mock.patch(
+            "ccmux.cli.stale_sessions_running", return_value=False
+        ), mock.patch("ccmux.cli.app", side_effect=exception), mock.patch(
+            "ccmux.cli.console"
+        ) as mock_console:
             from ccmux.cli import main
+
             with pytest.raises(SystemExit) as exc_info:
                 main()
             return exc_info.value.code, mock_console
@@ -228,9 +239,7 @@ class TestCliExceptionHandling:
         mock_console.print.assert_any_call("  Create one with: ccmux new")
 
     def test_session_not_found_exits_1(self):
-        code, mock_console = self._run_main_with_exception(
-            SessionNotFoundError("foo")
-        )
+        code, mock_console = self._run_main_with_exception(SessionNotFoundError("foo"))
         assert code == 1
 
     def test_session_not_found_with_hint(self):

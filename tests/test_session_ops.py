@@ -17,7 +17,9 @@ class TestValidateRepoContext:
     @patch("ccmux.session_ops.get_default_branch", return_value="main")
     @patch("ccmux.session_ops.get_repo_root", return_value=Path("/repo"))
     @patch("os.chdir")
-    def test_no_path_returns_repo_root_as_working_dir(self, mock_chdir, mock_root, mock_branch):
+    def test_no_path_returns_repo_root_as_working_dir(
+        self, mock_chdir, mock_root, mock_branch
+    ):
         """When no path is given, working_dir equals repo_root."""
         repo_root, default_branch, working_dir = _validate_repo_context()
         assert working_dir == repo_root
@@ -27,7 +29,9 @@ class TestValidateRepoContext:
     @patch("ccmux.session_ops.get_default_branch", return_value="main")
     @patch("ccmux.session_ops.get_repo_root", return_value=Path("/repo"))
     @patch("os.chdir")
-    def test_with_subdirectory_returns_resolved_path(self, mock_chdir, mock_root, mock_branch, tmp_path):
+    def test_with_subdirectory_returns_resolved_path(
+        self, mock_chdir, mock_root, mock_branch, tmp_path
+    ):
         """When a subdirectory path is given, working_dir is that resolved path."""
         subdir = tmp_path / "subproject"
         subdir.mkdir()
@@ -50,14 +54,16 @@ class TestDoSessionNewUsesWorkingDir:
     @patch("ccmux.session_ops._reactivate_orphaned_sessions")
     @patch("ccmux.session_ops._save_new_session_state")
     @patch("ccmux.session_ops._create_new_session_window", return_value=("@1", "@2"))
-    @patch("ccmux.session_ops.build_claude_command", return_value="claude")
+    @patch("ccmux.session_ops.build_launch_command", return_value="opencode")
     @patch("ccmux.session_ops.tmux_session_exists", return_value=False)
     @patch("ccmux.session_ops._print_creation_info")
     @patch("ccmux.session_ops._generate_session_name", return_value="test-session")
     @patch("ccmux.session_ops._resolve_session_type", return_value=False)
     @patch("ccmux.session_ops._validate_repo_context")
+    @patch("ccmux.session_ops.get_configured_backend")
     def test_non_worktree_session_uses_working_dir(
         self,
+        mock_get_backend,
         mock_validate,
         mock_resolve_type,
         mock_gen_name,
@@ -98,27 +104,42 @@ class TestDoReload:
             do_reload()
 
     @patch.dict("os.environ", {}, clear=False)
+    @patch("ccmux.session_ops.auto_attach_if_outside_tmux")
     @patch("ccmux.session_ops.notify_sidebars")
     @patch("ccmux.session_ops.create_outer_session")
     @patch("ccmux.session_ops.kill_tmux_session", return_value=True)
     @patch("ccmux.session_ops.tmux_session_exists")
     def test_kills_outer_and_recreates(
-        self, mock_exists, mock_kill, mock_create, mock_notify,
+        self,
+        mock_exists,
+        mock_kill,
+        mock_create,
+        mock_notify,
+        mock_auto_attach,
     ):
         """Normal reload: kills outer, recreates, notifies sidebars."""
-        mock_exists.side_effect = [True, True]  # inner exists, outer exists after create
+        mock_exists.side_effect = [
+            True,
+            True,
+        ]  # inner exists, outer exists after create
         do_reload()
         mock_kill.assert_called_once_with(OUTER_SESSION)
         mock_create.assert_called_once()
         mock_notify.assert_called_once()
 
     @patch.dict("os.environ", {}, clear=False)
+    @patch("ccmux.session_ops.auto_attach_if_outside_tmux")
     @patch("ccmux.session_ops.notify_sidebars")
     @patch("ccmux.session_ops.create_outer_session")
     @patch("ccmux.session_ops.kill_tmux_session", return_value=False)
     @patch("ccmux.session_ops.tmux_session_exists")
     def test_outer_already_dead(
-        self, mock_exists, mock_kill, mock_create, mock_notify,
+        self,
+        mock_exists,
+        mock_kill,
+        mock_create,
+        mock_notify,
+        mock_auto_attach,
     ):
         """Reload works even if outer session was already dead."""
         mock_exists.side_effect = [True, True]
@@ -130,6 +151,9 @@ class TestDoReload:
     @patch("ccmux.session_ops.tmux_session_exists")
     def test_create_fails_raises(self, mock_exists, mock_kill, mock_create):
         """Raises TmuxError if outer session cannot be recreated."""
-        mock_exists.side_effect = [True, False]  # inner exists, outer absent after create
+        mock_exists.side_effect = [
+            True,
+            False,
+        ]  # inner exists, outer absent after create
         with pytest.raises(TmuxError, match="Failed to recreate"):
             do_reload()
