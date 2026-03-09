@@ -97,6 +97,7 @@ class SessionRow(Vertical):
         lines_removed: int = 0,
         session_id: int = 0,
         note: str = "",
+        is_shallow: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -115,6 +116,7 @@ class SessionRow(Vertical):
         self.short_sha = short_sha
         self.lines_added = lines_added
         self.lines_removed = lines_removed
+        self.is_shallow = is_shallow
         self._flash_timer = None
         self._edit_timeout_timer = None
         self._breath_timer = None
@@ -169,7 +171,8 @@ class SessionRow(Vertical):
         with Horizontal(classes="line2"):
             yield Static(self._format_name_text(), classes="name")
             if self.session_type == "worktree":
-                yield Static(" (worktree)", classes="worktree-suffix")
+                suffix = " (worktree, shallow)" if self.is_shallow else " (worktree)"
+                yield Static(suffix, classes="worktree-suffix")
         with Horizontal(classes="line3"):
             yield Static(self._tree_prefix(), classes="tree-prefix")
             yield Static(self._format_branch_text(), classes="branch")
@@ -244,6 +247,7 @@ class SessionRow(Vertical):
         branch: str | None = None, short_sha: str = "",
         lines_added: int = 0, lines_removed: int = 0,
         note: str = "",
+        is_shallow: bool = False,
     ) -> None:
         """Update mutable display state without rebuilding the widget."""
         if is_active != self.is_active:
@@ -294,6 +298,14 @@ class SessionRow(Vertical):
                 ni = self.query_one(f"#note-input-{self.session_name}", NoteInput)
                 ni.load_text(note)
                 ni.display = bool(note)
+            except Exception:
+                pass
+        if is_shallow != self.is_shallow:
+            self.is_shallow = is_shallow
+            try:
+                suffix_widget = self.query_one(".worktree-suffix", Static)
+                suffix = " (worktree, shallow)" if is_shallow else " (worktree)"
+                suffix_widget.update(suffix)
             except Exception:
                 pass
         self._update_flash()

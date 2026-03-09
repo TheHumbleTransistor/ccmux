@@ -296,6 +296,7 @@ class SidebarApp(App):
                     entry.branch, entry.short_sha,
                     entry.lines_added, entry.lines_removed,
                     entry.note,
+                    entry.is_shallow,
                 )
         return True
 
@@ -348,6 +349,7 @@ class SidebarApp(App):
                     row.branch, row.short_sha,
                     row.lines_added, row.lines_removed,
                     row.note,
+                    row.is_shallow,
                 )
         except Exception:
             pass
