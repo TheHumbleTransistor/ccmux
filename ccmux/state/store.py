@@ -88,6 +88,7 @@ def add_session(
     tmux_bash_window_id: Optional[str] = None,
     is_worktree: bool = True,
     claude_session_id: Optional[str] = None,
+    is_shallow: bool = False,
 ):
     """Add a session to the state (can be main repo or worktree)."""
     state = _load_raw()
@@ -110,6 +111,8 @@ def add_session(
     }
     if claude_session_id:
         sess_data["claude_session_id"] = claude_session_id
+    if is_shallow:
+        sess_data["is_shallow"] = True
 
     state["sessions"][session_name] = sess_data
 

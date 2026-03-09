@@ -20,6 +20,7 @@ from ccmux.session_ops import (
     do_session_activate,
     do_session_deactivate,
     do_session_info,
+    do_session_init,
     do_session_kill,
     do_session_list,
     do_session_new,
@@ -59,10 +60,11 @@ def session_new(
     *,
     name: Annotated[Optional[str], Parameter(name=["-n", "--name"])] = None,
     worktree: Annotated[bool, Parameter(name=["-w", "--worktree"])] = False,
+    shallow: Annotated[bool, Parameter(name=["-s", "--shallow"])] = False,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
     """Create a new Claude Code session in main repo or as a git worktree."""
-    do_session_new(name=name, worktree=worktree, yes=yes, path=path)
+    do_session_new(name=name, worktree=worktree, shallow=shallow, yes=yes, path=path)
 
 
 @app.command(name="list")
@@ -89,6 +91,12 @@ def session_note(
 ) -> None:
     """Set, view, or clear a session's note."""
     do_session_note(name=name, message=message, clear=clear)
+
+
+@app.command(name="init")
+def session_init(name: Optional[str] = None) -> None:
+    """Run post_create hooks on a shallow worktree session."""
+    do_session_init(name=name)
 
 
 @app.command(name="attach")

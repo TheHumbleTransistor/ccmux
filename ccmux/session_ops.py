@@ -346,7 +346,7 @@ def _run_post_create_with_display(
         )
 
 
-def _setup_worktree(repo_root: Path, session_path: Path, default_branch: str, name: str) -> None:
+def _setup_worktree(repo_root: Path, session_path: Path, default_branch: str, name: str, shallow: bool = False) -> None:
     """Create the git worktree and run post_create hooks."""
     if worktree_exists(session_path, repo_root):
         console.print("  [yellow]Worktree already exists, reusing it.[/yellow]")
@@ -356,7 +356,10 @@ def _setup_worktree(repo_root: Path, session_path: Path, default_branch: str, na
             console.print(f"  [green]\u2713[/green] Created detached worktree from {default_branch}")
         except subprocess.CalledProcessError as e:
             raise WorktreeError("creation", str(e)) from e
-    _run_post_create_with_display(repo_root, session_path, name)
+    if shallow:
+        console.print("  Skipping post_create hooks (--shallow)")
+    else:
+        _run_post_create_with_display(repo_root, session_path, name)
 
 
 def _reactivate_orphaned_sessions(current_name: str) -> None:
@@ -392,7 +395,7 @@ def _reactivate_single_orphan(sess) -> None:
         console.print(f"  [yellow]\u26a0[/yellow] Could not reactivate '{name}'")
 
 
-def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool = False, path: Optional[str] = None) -> None:
+def do_session_new(name: Optional[str] = None, worktree: bool = False, shallow: bool = False, yes: bool = False, path: Optional[str] = None) -> None:
     """Create a new Claude Code session."""
     repo_root, default_branch, working_dir = _validate_repo_context(path)
     create_as_worktree = _resolve_session_type(repo_root, worktree, yes)
@@ -407,7 +410,7 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool
     _print_creation_info(name, repo_root, create_as_worktree, session_path, default_branch)
 
     if create_as_worktree:
-        _setup_worktree(repo_root, session_path, default_branch, name)
+        _setup_worktree(repo_root, session_path, default_branch, name, shallow=shallow)
 
     is_first = not tmux_session_exists(INNER_SESSION)
 
@@ -417,7 +420,8 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool
 
     cc_window_id, bash_window_id = _create_new_session_window(name, str(session_path), launch_cmd, is_first)
 
-    _save_new_session_state(name, repo_root, session_path, create_as_worktree, claude_session_id, cc_window_id, bash_window_id)
+    is_shallow = shallow and create_as_worktree
+    _save_new_session_state(name, repo_root, session_path, create_as_worktree, claude_session_id, cc_window_id, bash_window_id, is_shallow=is_shallow)
 
     notify_sidebars()
     if is_first:
@@ -472,6 +476,7 @@ def _save_new_session_state(
     name: str, repo_root: Path, session_path: Path, is_worktree: bool,
     claude_session_id: str, cc_window_id: Optional[str],
     bash_window_id: Optional[str] = None,
+    is_shallow: bool = False,
 ) -> None:
     """Save session state after creation, then tag both windows with @ccmux_sid."""
     tmux_session_id = get_session_id(INNER_SESSION)
@@ -485,6 +490,7 @@ def _save_new_session_state(
         tmux_bash_window_id=bash_window_id,
         is_worktree=is_worktree,
         claude_session_id=claude_session_id,
+        is_shallow=is_shallow,
     )
     tag_window_with_session_id(cc_window_id, name)
     tag_window_with_session_id(bash_window_id, name)
@@ -724,6 +730,32 @@ def do_session_note(
             console.print(f"\n[bold cyan]Note ({name}):[/bold cyan] {current_note}\n")
         else:
             console.print(f"\n[dim]No note set for session '{name}'.[/dim]\n")
+
+
+def do_session_init(name: Optional[str] = None) -> None:
+    """Run post_create hooks on a shallow worktree session."""
+    if name is None:
+        detected = detect_current_ccmux_session_any()
+        if not detected:
+            raise NotInCcmuxSessionError()
+        name = detected[0]
+
+    session = state.get_session(name)
+    if session is None:
+        raise SessionNotFoundError(name)
+    if not session.is_worktree:
+        raise InvalidArgumentError(f"Session '{name}' is not a worktree session.")
+    if not session.is_shallow:
+        raise InvalidArgumentError(f"Session '{name}' is not shallow (hooks already ran).")
+
+    repo_root = Path(session.repo_path)
+    session_path = Path(session.session_path)
+
+    console.print(f"\n[bold cyan]Initializing shallow session:[/bold cyan] {name}")
+    _run_post_create_with_display(repo_root, session_path, name)
+    state.update_session(name, is_shallow=False)
+    notify_sidebars()
+    console.print(f"[bold green]Done![/bold green] Session '{name}' is now fully initialized.")
 
 
 # ---------------------------------------------------------------------------
