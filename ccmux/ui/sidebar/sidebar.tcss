@@ -1,6 +1,7 @@
 Screen {
     background: #1e1e1e;
     layout: vertical;
+    scrollbar-size: 0 0;
 }
 
 #title {
@@ -115,7 +116,7 @@ SessionRow .line3 .deletions {
 SessionRow .note-input {
     height: auto;
     min-height: 1;
-    max-height: 5;
+    max-height: 3;
     background: transparent;
     color: #7a7a7a;
     border: none;
@@ -125,6 +126,7 @@ SessionRow .note-input {
 }
 
 SessionRow.current .note-input {
+    max-height: 100%;
     color: #444444;
 }
 

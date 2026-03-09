@@ -325,8 +325,19 @@ class SessionRow(Vertical):
         note_input.focus()
         self._edit_timeout_timer = self.set_timer(EDIT_INACTIVITY_TIMEOUT, self._on_edit_timeout)
 
+    def _reset_edit_timeout(self) -> None:
+        """Reset the inactivity timer (called on text changes)."""
+        if self._edit_timeout_timer is not None:
+            self._edit_timeout_timer.stop()
+        self._edit_timeout_timer = self.set_timer(EDIT_INACTIVITY_TIMEOUT, self._on_edit_timeout)
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """Reset inactivity timer when the user types."""
+        if self._editing:
+            self._reset_edit_timeout()
+
     def _on_edit_timeout(self) -> None:
-        """Auto-save after 60 seconds of inactivity."""
+        """Auto-save after inactivity."""
         self._edit_timeout_timer = None
         self.save_and_close_editor()
 
