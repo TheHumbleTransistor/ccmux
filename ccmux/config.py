@@ -2,18 +2,24 @@
 
 import os
 import subprocess
-import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
-
-from rich.console import Console
+from typing import Generator, Optional
 
 try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib
 
-console = Console()
+
+@dataclass
+class CommandEvent:
+    """Structured event emitted by run_post_create_commands()."""
+
+    cmd: str
+    event_type: str  # "start", "stdout", "success", "failure", "error"
+    data: str = ""
+    returncode: int = 0
 
 
 def load_repo_config(repo_root: Path) -> Optional[dict]:
@@ -32,57 +38,62 @@ def load_repo_config(repo_root: Path) -> Optional[dict]:
     try:
         with open(config_path, "rb") as f:
             return tomllib.load(f)
-    except Exception as e:
+    except Exception:
         return None
 
 
-def run_post_create(
+def run_post_create_commands(
     repo_root: Path,
     session_path: Path,
     session_name: str,
-) -> bool:
-    """Execute post_create commands from ccmux.toml after worktree creation.
+) -> Generator[CommandEvent, None, None]:
+    """Execute post_create commands from ccmux.toml, yielding structured events.
+
+    Uses /bin/bash as the shell executable so bash-specific features
+    (source, [[, nvm, etc.) work correctly.
 
     Args:
         repo_root: Absolute path to the main git repo
         session_path: Absolute path to the new worktree
         session_name: Name of the new session
 
-    Returns:
-        True if all commands succeeded, False if any failed
+    Yields:
+        CommandEvent objects describing execution progress
     """
     config = load_repo_config(repo_root)
     if config is None:
-        return True
+        return
 
     commands = config.get("worktree", {}).get("post_create", [])
     if not commands:
-        return True
+        return
 
     env = os.environ.copy()
     env["CCMUX_REPO_ROOT"] = str(repo_root)
     env["CCMUX_SESSION_PATH"] = str(session_path)
     env["CCMUX_SESSION_NAME"] = session_name
 
-    all_ok = True
     for cmd in commands:
+        yield CommandEvent(cmd=cmd, event_type="start")
         try:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 cmd,
                 shell=True,
+                executable="/bin/bash",
                 cwd=str(session_path),
                 env=env,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
             )
-            if result.returncode == 0:
-                pass
+            for line in proc.stdout:
+                yield CommandEvent(cmd=cmd, event_type="stdout", data=line.rstrip("\n"))
+            proc.wait()
+            if proc.returncode == 0:
+                yield CommandEvent(cmd=cmd, event_type="success")
             else:
-                if result.stderr.strip():
-                    for line in result.stderr.strip().split("\n"):
-                        pass
-                all_ok = False
+                yield CommandEvent(
+                    cmd=cmd, event_type="failure", returncode=proc.returncode
+                )
         except Exception as e:
-            all_ok = False
-
-    return all_ok
+            yield CommandEvent(cmd=cmd, event_type="error", data=str(e))

@@ -16,7 +16,7 @@ from typing import Optional
 from rich.prompt import Confirm, Prompt
 
 from ccmux import __version__, state
-from ccmux.config import run_post_create
+from ccmux.config import run_post_create_commands
 from ccmux.display import console, display_session_table, show_session_info
 from ccmux.exceptions import (
     ActivationError,
@@ -315,6 +315,37 @@ def _generate_session_name(repo_root: Path, create_as_worktree: bool, name: Opti
     return f"{base}-{suffix}"
 
 
+def _run_post_create_with_display(
+    repo_root: Path, session_path: Path, session_name: str
+) -> None:
+    """Run post_create hooks with live output streaming to the console."""
+    has_events = False
+    failures = []
+    for event in run_post_create_commands(repo_root, session_path, session_name):
+        if not has_events:
+            console.print("  [bold cyan]Running post_create hooks[/bold cyan]")
+            has_events = True
+        if event.event_type == "start":
+            console.print(f"    [dim]$[/dim] {event.cmd}")
+        elif event.event_type == "stdout":
+            console.print(f"      [dim]{event.data}[/dim]")
+        elif event.event_type == "success":
+            console.print("    [green]\u2713[/green] OK")
+        elif event.event_type == "failure":
+            console.print(
+                f"    [red]\u2717[/red] Failed (exit code {event.returncode})"
+            )
+            failures.append(event.cmd)
+        elif event.event_type == "error":
+            console.print(f"    [red]\u2717[/red] Error: {event.data}")
+            failures.append(event.cmd)
+
+    if failures:
+        console.print(
+            f"  [yellow]\u26a0 {len(failures)} hook(s) failed \u2014 session created anyway[/yellow]"
+        )
+
+
 def _setup_worktree(repo_root: Path, session_path: Path, default_branch: str, name: str) -> None:
     """Create the git worktree and run post_create hooks."""
     if worktree_exists(session_path, repo_root):
@@ -325,7 +356,7 @@ def _setup_worktree(repo_root: Path, session_path: Path, default_branch: str, na
             console.print(f"  [green]\u2713[/green] Created detached worktree from {default_branch}")
         except subprocess.CalledProcessError as e:
             raise WorktreeError("creation", str(e)) from e
-    run_post_create(repo_root, session_path, name)
+    _run_post_create_with_display(repo_root, session_path, name)
 
 
 def _reactivate_orphaned_sessions(current_name: str) -> None:
