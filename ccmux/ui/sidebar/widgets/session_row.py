@@ -1,9 +1,49 @@
-"""SessionRow — four-line widget with tree characters, indicator, name, and git info."""
+"""SessionRow — variable-height widget with tree characters, indicator, name, git info, and optional note."""
 
+import time
+
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Static
+from textual.widgets import Static, TextArea
+
+EDIT_INACTIVITY_TIMEOUT = 10  # seconds before auto-saving an open note editor
+
+
+class NoteInput(TextArea):
+    """Multi-line note editor: Tab submits, double-click submits."""
+
+    class Submitted(Message):
+        """Posted when the user presses Tab or double-clicks to save."""
+
+        def __init__(self, value: str) -> None:
+            super().__init__()
+            self.value = value
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._last_click_time: float = 0
+
+    async def _on_key(self, event: events.Key) -> None:
+        if self.read_only:
+            return
+        if event.key == "tab":
+            event.prevent_default()
+            event.stop()
+            self.post_message(self.Submitted(self.text))
+        else:
+            await super()._on_key(event)
+
+    async def on_click(self, event: events.Click) -> None:
+        now = time.monotonic()
+        elapsed = now - self._last_click_time
+        self._last_click_time = now
+        if elapsed < 0.4 and not self.read_only:
+            event.stop()
+            self.post_message(self.Submitted(self.text))
+        elif not self.read_only:
+            event.stop()
 
 
 class SessionRow(Vertical):
@@ -34,6 +74,14 @@ class SessionRow(Vertical):
             self.session_name = session_name
             self.session_id = session_id
 
+    class NoteEdited(Message):
+        """Posted when the user edits a session note via double-click."""
+
+        def __init__(self, session_name: str, note: str) -> None:
+            super().__init__()
+            self.session_name = session_name
+            self.note = note
+
     def __init__(
         self,
         session_name: str,
@@ -48,11 +96,15 @@ class SessionRow(Vertical):
         lines_added: int = 0,
         lines_removed: int = 0,
         session_id: int = 0,
+        note: str = "",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.session_name = session_name
         self.session_id = session_id
+        self.note = note
+        self._last_click_time: float = 0
+        self._editing: bool = False
         self.session_type = session_type
         self.is_active = is_active
         self.is_current = is_current
@@ -64,6 +116,7 @@ class SessionRow(Vertical):
         self.lines_added = lines_added
         self.lines_removed = lines_removed
         self._flash_timer = None
+        self._edit_timeout_timer = None
         self._breath_timer = None
         self._breath_frame = 0
         self._breath_offset = hash(session_name) % len(self._BREATH_COLORS)
@@ -124,6 +177,20 @@ class SessionRow(Vertical):
                 yield Static(f"+{self.lines_added}", classes="additions")
             if self.lines_removed:
                 yield Static(f"-{self.lines_removed}", classes="deletions")
+        note_input = NoteInput(
+            self.note,
+            soft_wrap=True,
+            compact=True,
+            read_only=True,
+            show_cursor=False,
+            show_line_numbers=False,
+            tab_behavior="focus",
+            classes="note-input",
+            id=f"note-input-{self.session_name}",
+        )
+        if not self.note:
+            note_input.display = False
+        yield note_input
         yield Static(tail, classes="line4")
 
     def _toggle_flash(self) -> None:
@@ -176,6 +243,7 @@ class SessionRow(Vertical):
         status: str, has_blocker_alert: bool,
         branch: str | None = None, short_sha: str = "",
         lines_added: int = 0, lines_removed: int = 0,
+        note: str = "",
     ) -> None:
         """Update mutable display state without rebuilding the widget."""
         if is_active != self.is_active:
@@ -220,8 +288,104 @@ class SessionRow(Vertical):
                     line3.mount(Static(f"-{self.lines_removed}", classes="deletions"))
             elif deletions:
                 deletions.first().remove()
+        if note != self.note and not self._editing:
+            self.note = note
+            try:
+                ni = self.query_one(f"#note-input-{self.session_name}", NoteInput)
+                ni.load_text(note)
+                ni.display = bool(note)
+            except Exception:
+                pass
         self._update_flash()
 
     async def on_click(self) -> None:
-        """Signal that this session row was clicked."""
-        self.post_message(self.Selected(self.session_name, self.session_id))
+        """Handle click: single-click selects, double-click edits note."""
+        now = time.monotonic()
+        elapsed = now - self._last_click_time
+        self._last_click_time = now
+        if self._editing:
+            self.save_and_close_editor()
+        elif elapsed < 0.4:
+            self._enter_edit_mode()
+        else:
+            self.post_message(self.Selected(self.session_name, self.session_id))
+
+    def _enter_edit_mode(self) -> None:
+        """Enable editing on the always-mounted NoteInput."""
+        self._editing = True
+        try:
+            note_input = self.query_one(f"#note-input-{self.session_name}", NoteInput)
+        except Exception:
+            self._editing = False
+            return
+        note_input.display = True
+        note_input.read_only = False
+        note_input.show_cursor = True
+        note_input.add_class("editing")
+        note_input.focus()
+        self._edit_timeout_timer = self.set_timer(EDIT_INACTIVITY_TIMEOUT, self._on_edit_timeout)
+
+    def _reset_edit_timeout(self) -> None:
+        """Reset the inactivity timer (called on text changes)."""
+        if self._edit_timeout_timer is not None:
+            self._edit_timeout_timer.stop()
+        self._edit_timeout_timer = self.set_timer(EDIT_INACTIVITY_TIMEOUT, self._on_edit_timeout)
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """Reset inactivity timer when the user types."""
+        if self._editing:
+            self._reset_edit_timeout()
+
+    def _on_edit_timeout(self) -> None:
+        """Auto-save after inactivity."""
+        self._edit_timeout_timer = None
+        self.save_and_close_editor()
+
+    def _exit_edit_mode(self, new_note: str | None = None) -> None:
+        """Switch the NoteInput back to read-only display mode."""
+        self._editing = False
+        if self._edit_timeout_timer is not None:
+            self._edit_timeout_timer.stop()
+            self._edit_timeout_timer = None
+        if new_note is not None:
+            self.note = new_note
+        try:
+            note_input = self.query_one(f"#note-input-{self.session_name}", NoteInput)
+        except Exception:
+            return
+        note_input.read_only = True
+        note_input.show_cursor = False
+        note_input.remove_class("editing")
+        note_input.load_text(self.note)
+        note_input.move_cursor((0, 0))
+        note_input.display = bool(self.note)
+
+        def _scroll_top() -> None:
+            note_input.scroll_home(animate=False)
+
+        self.call_after_refresh(_scroll_top)
+
+    def save_and_close_editor(self) -> None:
+        """Save the current note and close the editor (used when clicking away)."""
+        if not self._editing:
+            return
+        try:
+            note_input = self.query_one(f"#note-input-{self.session_name}", NoteInput)
+            new_note = note_input.text.strip()
+        except Exception:
+            new_note = self.note
+        self.post_message(self.NoteEdited(self.session_name, new_note))
+        self._exit_edit_mode(new_note)
+
+    def on_note_input_submitted(self, event: NoteInput.Submitted) -> None:
+        """Save the note on Enter."""
+        if not self._editing:
+            return
+        new_note = event.value.strip()
+        self.post_message(self.NoteEdited(self.session_name, new_note))
+        self._exit_edit_mode(new_note)
+
+    def key_escape(self) -> None:
+        """Save and close on Escape."""
+        if self._editing:
+            self.save_and_close_editor()

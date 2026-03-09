@@ -23,6 +23,7 @@ from ccmux.session_ops import (
     do_session_kill,
     do_session_list,
     do_session_new,
+    do_session_note,
     do_session_remove,
     do_session_rename,
     do_session_which,
@@ -77,6 +78,17 @@ def session_rename(
 ) -> None:
     """Rename a session."""
     do_session_rename(old=old, new=new)
+
+
+@app.command(name="note")
+def session_note(
+    name: Optional[str] = None,
+    *,
+    message: Annotated[Optional[str], Parameter(name=["-m", "--message"])] = None,
+    clear: Annotated[bool, Parameter(name=["--clear"], negative="")] = False,
+) -> None:
+    """Set, view, or clear a session's note."""
+    do_session_note(name=name, message=message, clear=clear)
 
 
 @app.command(name="attach")

@@ -27,6 +27,7 @@ def display_session_table() -> None:
     table.add_column("Session", style="cyan", no_wrap=True)
     table.add_column("Type", style="green")
     table.add_column("Branch")
+    table.add_column("Note", style="dim")
     table.add_column("Status", style="bold")
     table.add_column("Window", style="blue")
     table.add_column("Path", style="dim")
@@ -38,7 +39,7 @@ def display_session_table() -> None:
             active_count += 1
         table.add_row(
             row["repo_name"], sess.name, row["session_type"],
-            row["branch"], row["status"], row["tmux_window_name"],
+            row["branch"], row["note"], row["status"], row["tmux_window_name"],
             str(sess.session_path),
         )
 
@@ -72,10 +73,15 @@ def _build_session_row(sess) -> dict:
         tmux_window_name = _get_window_display_name(sess.tmux_cc_window_id)
         status = "[green]\u25cf Active[/green]"
 
+    note_text = sess.note or ""
+    if len(note_text) > 30:
+        note_text = note_text[:27] + "..."
+
     return {
         "repo_name": repo_name,
         "session_type": session_type,
         "branch": branch,
+        "note": note_text,
         "status": status,
         "tmux_window_name": tmux_window_name,
         "is_active": is_active,
@@ -110,4 +116,6 @@ def show_session_info(session_name: str, session_data) -> None:
     console.print(f"[bold cyan]Repository:[/bold cyan] {repo_name}")
     console.print(f"[bold cyan]Type:[/bold cyan]       {'worktree' if is_worktree else 'main repo'}")
     console.print(f"[bold cyan]Branch:[/bold cyan]     {branch}")
+    note = session_data.note or "(none)"
+    console.print(f"[bold cyan]Note:[/bold cyan]       {note}")
     console.print(f"[bold cyan]Path:[/bold cyan]       {session_path}\n")

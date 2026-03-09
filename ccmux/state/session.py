@@ -14,6 +14,7 @@ class Session:
     tmux_bash_window_id: Optional[str] = None
     claude_session_id: Optional[str] = None
     id: int = 0
+    note: Optional[str] = None
 
     @property
     def is_worktree(self) -> bool:
@@ -36,6 +37,8 @@ class Session:
         }
         if self.claude_session_id:
             d["claude_session_id"] = self.claude_session_id
+        if self.note:
+            d["note"] = self.note
         return d
 
     @classmethod
@@ -50,6 +53,7 @@ class Session:
             tmux_bash_window_id=window_ids.get("bash_terminal"),
             claude_session_id=data.get("claude_session_id"),
             id=data.get("id", 0),
+            note=data.get("note"),
         )
         if data.get("is_worktree", True):
             return WorktreeSession(**kwargs)
