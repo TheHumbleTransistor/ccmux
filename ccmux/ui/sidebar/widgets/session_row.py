@@ -1,6 +1,5 @@
 """SessionRow — variable-height widget with tree characters, indicator, name, git info, and optional note."""
 
-import textwrap
 import time
 
 from textual import events
@@ -21,6 +20,8 @@ class NoteInput(TextArea):
             self.value = value
 
     async def _on_key(self, event: events.Key) -> None:
+        if self.read_only:
+            return
         if event.key == "enter":
             # Plain Enter → submit
             event.prevent_default()
@@ -105,6 +106,7 @@ class SessionRow(Vertical):
         self.lines_added = lines_added
         self.lines_removed = lines_removed
         self._flash_timer = None
+        self._edit_timeout_timer = None
         self._breath_timer = None
         self._breath_frame = 0
         self._breath_offset = hash(session_name) % len(self._BREATH_COLORS)
@@ -151,26 +153,6 @@ class SessionRow(Vertical):
         max_ref = 39 - 6
         return ref_text[:max_ref] if max_ref > 0 else ""
 
-    _NOTE_MAX_LINES = 4
-    _NOTE_WRAP_WIDTH = 33  # ~39 sidebar - 6 tree prefix
-
-    def _build_note_widgets(self) -> list[Static]:
-        """Build Static widgets for each note line, with word-wrap and truncation."""
-        if not self.note:
-            return []
-        prefix = self._tree_prefix()
-        # Handle embedded newlines, then word-wrap each paragraph
-        lines: list[str] = []
-        for paragraph in self.note.split("\n"):
-            wrapped = textwrap.wrap(paragraph, width=self._NOTE_WRAP_WIDTH)
-            lines.extend(wrapped if wrapped else [""])
-        if not lines:
-            return []
-        if len(lines) > self._NOTE_MAX_LINES:
-            lines = lines[:self._NOTE_MAX_LINES]
-            lines.append("...")
-        return [Static(f"{prefix}{line}", classes="note-line") for line in lines]
-
     def compose(self) -> ComposeResult:
         top, branch_char, tail = self._tree_chars()
         yield Static(top, classes="line1")
@@ -185,9 +167,20 @@ class SessionRow(Vertical):
                 yield Static(f"+{self.lines_added}", classes="additions")
             if self.lines_removed:
                 yield Static(f"-{self.lines_removed}", classes="deletions")
-        with Vertical(classes="note-container", id=f"note-{self.session_name}"):
-            for widget in self._build_note_widgets():
-                yield widget
+        note_input = NoteInput(
+            self.note,
+            soft_wrap=True,
+            compact=True,
+            read_only=True,
+            show_cursor=False,
+            show_line_numbers=False,
+            tab_behavior="focus",
+            classes="note-input",
+            id=f"note-input-{self.session_name}",
+        )
+        if not self.note:
+            note_input.display = False
+        yield note_input
         yield Static(tail, classes="line4")
 
     def _toggle_flash(self) -> None:
@@ -288,69 +281,63 @@ class SessionRow(Vertical):
         if note != self.note and not self._editing:
             self.note = note
             try:
-                container = self.query_one(f"#note-{self.session_name}", Vertical)
-                for widget in container.query(".note-line"):
-                    widget.remove()
-                for widget in self._build_note_widgets():
-                    container.mount(widget)
+                ni = self.query_one(f"#note-input-{self.session_name}", NoteInput)
+                ni.load_text(note)
+                ni.display = bool(note)
             except Exception:
                 pass
         self._update_flash()
 
     async def on_click(self) -> None:
         """Handle click: single-click selects, double-click edits note."""
-        if self._editing:
-            return  # Don't switch tmux focus while editing a note
         now = time.monotonic()
         elapsed = now - self._last_click_time
         self._last_click_time = now
         if elapsed < 0.4:
-            self._enter_edit_mode()
-        else:
+            if self._editing:
+                self.save_and_close_editor()
+            else:
+                self._enter_edit_mode()
+        elif not self._editing:
             self.post_message(self.Selected(self.session_name, self.session_id))
 
     def _enter_edit_mode(self) -> None:
-        """Show a NoteInput (multi-line TextArea) in the note container for editing."""
+        """Enable editing on the always-mounted NoteInput."""
         self._editing = True
         try:
-            container = self.query_one(f"#note-{self.session_name}", Vertical)
+            note_input = self.query_one(f"#note-input-{self.session_name}", NoteInput)
         except Exception:
             self._editing = False
             return
-        # Hide existing note lines
-        for widget in container.query(".note-line"):
-            widget.display = False
-        note_input = NoteInput(
-            self.note,
-            soft_wrap=True,
-            compact=True,
-            show_line_numbers=False,
-            tab_behavior="focus",
-            classes="note-input",
-            id=f"note-input-{self.session_name}",
-        )
-        container.mount(note_input)
+        note_input.display = True
+        note_input.read_only = False
+        note_input.show_cursor = True
+        note_input.add_class("editing")
         note_input.focus()
+        self._edit_timeout_timer = self.set_timer(60, self._on_edit_timeout)
+
+    def _on_edit_timeout(self) -> None:
+        """Auto-save after 60 seconds of inactivity."""
+        self._edit_timeout_timer = None
+        self.save_and_close_editor()
 
     def _exit_edit_mode(self, new_note: str | None = None) -> None:
-        """Remove the NoteInput widget and re-render note display."""
+        """Switch the NoteInput back to read-only display mode."""
         self._editing = False
-        try:
-            container = self.query_one(f"#note-{self.session_name}", Vertical)
-        except Exception:
-            return
-        # Remove the input
-        for inp in container.query(".note-input"):
-            inp.remove()
-        # Remove old note lines
-        for widget in container.query(".note-line"):
-            widget.remove()
-        # If a new note was saved, update self.note
+        if self._edit_timeout_timer is not None:
+            self._edit_timeout_timer.stop()
+            self._edit_timeout_timer = None
         if new_note is not None:
             self.note = new_note
-        # Re-render note widgets
-        for widget in self._build_note_widgets():
-            container.mount(widget)
+        try:
+            note_input = self.query_one(f"#note-input-{self.session_name}", NoteInput)
+        except Exception:
+            return
+        note_input.read_only = True
+        note_input.show_cursor = False
+        note_input.remove_class("editing")
+        note_input.load_text(self.note)
+        note_input.display = bool(self.note)
 
     def save_and_close_editor(self) -> None:
         """Save the current note and close the editor (used when clicking away)."""

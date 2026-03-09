@@ -320,6 +320,12 @@ class SidebarApp(App):
             exit_on_error=False,
         )
 
+    def on_click(self, event: events.Click) -> None:
+        """Close any open note editor when clicking outside the editing row."""
+        for row in self.query(SessionRow):
+            if row._editing and row not in event.widget.ancestors_with_self:
+                row.save_and_close_editor()
+
     async def on_session_row_selected(self, message: SessionRow.Selected) -> None:
         """Switch to the clicked session's tmux window and clear blocker alert."""
         # Auto-save and close any open note editor before switching
