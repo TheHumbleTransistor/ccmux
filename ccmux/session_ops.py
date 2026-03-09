@@ -694,6 +694,38 @@ def do_session_rename(old: Optional[str] = None, new: Optional[str] = None) -> N
     console.print(f"\n[bold green]Success![/bold green] Session renamed: '{old_name}' -> '{new_name}'")
 
 
+def do_session_note(
+    name: Optional[str] = None,
+    message: Optional[str] = None,
+    clear: bool = False,
+) -> None:
+    """Set, view, or clear a session's note."""
+    if name is None:
+        detected = detect_current_ccmux_session_any()
+        if not detected:
+            raise NotInCcmuxSessionError()
+        name = detected[0]
+
+    session = state.get_session(name)
+    if session is None:
+        raise SessionNotFoundError(name)
+
+    if clear:
+        state.update_session(name, note="")
+        notify_sidebars()
+        console.print(f"[green]Note cleared for session '{name}'.[/green]")
+    elif message is not None:
+        state.update_session(name, note=message)
+        notify_sidebars()
+        console.print(f"[green]Note set for session '{name}'.[/green]")
+    else:
+        current_note = session.note
+        if current_note:
+            console.print(f"\n[bold cyan]Note ({name}):[/bold cyan] {current_note}\n")
+        else:
+            console.print(f"\n[dim]No note set for session '{name}'.[/dim]\n")
+
+
 # ---------------------------------------------------------------------------
 # session_remove decomposed
 # ---------------------------------------------------------------------------

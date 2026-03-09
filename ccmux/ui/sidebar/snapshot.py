@@ -32,6 +32,7 @@ class SessionSnapshot:
     lines_added: int = 0
     lines_removed: int = 0
     activity_ts: float = 0.0
+    note: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,5 +270,6 @@ async def build_snapshot() -> list[SessionSnapshot]:
             lines_added=added,
             lines_removed=removed,
             activity_ts=activity_ts,
+            note=sess.note or "",
         ))
     return snapshot

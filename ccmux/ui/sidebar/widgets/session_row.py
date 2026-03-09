@@ -1,9 +1,38 @@
-"""SessionRow — four-line widget with tree characters, indicator, name, and git info."""
+"""SessionRow — variable-height widget with tree characters, indicator, name, git info, and optional note."""
 
+import textwrap
+import time
+
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Static
+from textual.widgets import Static, TextArea
+
+
+class NoteInput(TextArea):
+    """Multi-line note editor: Enter submits, Shift+Enter / Ctrl+Enter inserts newline."""
+
+    class Submitted(Message):
+        """Posted when the user presses Enter (without modifier) to save."""
+
+        def __init__(self, value: str) -> None:
+            super().__init__()
+            self.value = value
+
+    async def _on_key(self, event: events.Key) -> None:
+        if event.key == "enter":
+            # Plain Enter → submit
+            event.prevent_default()
+            event.stop()
+            self.post_message(self.Submitted(self.text))
+        elif event.key in ("shift+enter", "ctrl+enter"):
+            # Modifier+Enter → insert newline (treat as plain enter for TextArea)
+            event.prevent_default()
+            event.stop()
+            self.insert("\n")
+        else:
+            await super()._on_key(event)
 
 
 class SessionRow(Vertical):
@@ -34,6 +63,14 @@ class SessionRow(Vertical):
             self.session_name = session_name
             self.session_id = session_id
 
+    class NoteEdited(Message):
+        """Posted when the user edits a session note via double-click."""
+
+        def __init__(self, session_name: str, note: str) -> None:
+            super().__init__()
+            self.session_name = session_name
+            self.note = note
+
     def __init__(
         self,
         session_name: str,
@@ -48,11 +85,15 @@ class SessionRow(Vertical):
         lines_added: int = 0,
         lines_removed: int = 0,
         session_id: int = 0,
+        note: str = "",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.session_name = session_name
         self.session_id = session_id
+        self.note = note
+        self._last_click_time: float = 0
+        self._editing: bool = False
         self.session_type = session_type
         self.is_active = is_active
         self.is_current = is_current
@@ -110,6 +151,26 @@ class SessionRow(Vertical):
         max_ref = 39 - 6
         return ref_text[:max_ref] if max_ref > 0 else ""
 
+    _NOTE_MAX_LINES = 4
+    _NOTE_WRAP_WIDTH = 33  # ~39 sidebar - 6 tree prefix
+
+    def _build_note_widgets(self) -> list[Static]:
+        """Build Static widgets for each note line, with word-wrap and truncation."""
+        if not self.note:
+            return []
+        prefix = self._tree_prefix()
+        # Handle embedded newlines, then word-wrap each paragraph
+        lines: list[str] = []
+        for paragraph in self.note.split("\n"):
+            wrapped = textwrap.wrap(paragraph, width=self._NOTE_WRAP_WIDTH)
+            lines.extend(wrapped if wrapped else [""])
+        if not lines:
+            return []
+        if len(lines) > self._NOTE_MAX_LINES:
+            lines = lines[:self._NOTE_MAX_LINES]
+            lines.append("...")
+        return [Static(f"{prefix}{line}", classes="note-line") for line in lines]
+
     def compose(self) -> ComposeResult:
         top, branch_char, tail = self._tree_chars()
         yield Static(top, classes="line1")
@@ -124,6 +185,9 @@ class SessionRow(Vertical):
                 yield Static(f"+{self.lines_added}", classes="additions")
             if self.lines_removed:
                 yield Static(f"-{self.lines_removed}", classes="deletions")
+        with Vertical(classes="note-container", id=f"note-{self.session_name}"):
+            for widget in self._build_note_widgets():
+                yield widget
         yield Static(tail, classes="line4")
 
     def _toggle_flash(self) -> None:
@@ -176,6 +240,7 @@ class SessionRow(Vertical):
         status: str, has_blocker_alert: bool,
         branch: str | None = None, short_sha: str = "",
         lines_added: int = 0, lines_removed: int = 0,
+        note: str = "",
     ) -> None:
         """Update mutable display state without rebuilding the widget."""
         if is_active != self.is_active:
@@ -220,8 +285,94 @@ class SessionRow(Vertical):
                     line3.mount(Static(f"-{self.lines_removed}", classes="deletions"))
             elif deletions:
                 deletions.first().remove()
+        if note != self.note and not self._editing:
+            self.note = note
+            try:
+                container = self.query_one(f"#note-{self.session_name}", Vertical)
+                for widget in container.query(".note-line"):
+                    widget.remove()
+                for widget in self._build_note_widgets():
+                    container.mount(widget)
+            except Exception:
+                pass
         self._update_flash()
 
     async def on_click(self) -> None:
-        """Signal that this session row was clicked."""
-        self.post_message(self.Selected(self.session_name, self.session_id))
+        """Handle click: single-click selects, double-click edits note."""
+        if self._editing:
+            return  # Don't switch tmux focus while editing a note
+        now = time.monotonic()
+        elapsed = now - self._last_click_time
+        self._last_click_time = now
+        if elapsed < 0.4:
+            self._enter_edit_mode()
+        else:
+            self.post_message(self.Selected(self.session_name, self.session_id))
+
+    def _enter_edit_mode(self) -> None:
+        """Show a NoteInput (multi-line TextArea) in the note container for editing."""
+        self._editing = True
+        try:
+            container = self.query_one(f"#note-{self.session_name}", Vertical)
+        except Exception:
+            self._editing = False
+            return
+        # Hide existing note lines
+        for widget in container.query(".note-line"):
+            widget.display = False
+        note_input = NoteInput(
+            self.note,
+            soft_wrap=True,
+            compact=True,
+            show_line_numbers=False,
+            tab_behavior="focus",
+            classes="note-input",
+            id=f"note-input-{self.session_name}",
+        )
+        container.mount(note_input)
+        note_input.focus()
+
+    def _exit_edit_mode(self, new_note: str | None = None) -> None:
+        """Remove the NoteInput widget and re-render note display."""
+        self._editing = False
+        try:
+            container = self.query_one(f"#note-{self.session_name}", Vertical)
+        except Exception:
+            return
+        # Remove the input
+        for inp in container.query(".note-input"):
+            inp.remove()
+        # Remove old note lines
+        for widget in container.query(".note-line"):
+            widget.remove()
+        # If a new note was saved, update self.note
+        if new_note is not None:
+            self.note = new_note
+        # Re-render note widgets
+        for widget in self._build_note_widgets():
+            container.mount(widget)
+
+    def save_and_close_editor(self) -> None:
+        """Save the current note and close the editor (used when clicking away)."""
+        if not self._editing:
+            return
+        try:
+            note_input = self.query_one(f"#note-input-{self.session_name}", NoteInput)
+            new_note = note_input.text.strip()
+        except Exception:
+            new_note = self.note
+        self.post_message(self.NoteEdited(self.session_name, new_note))
+        self._exit_edit_mode(new_note)
+
+    def on_note_input_submitted(self, event: NoteInput.Submitted) -> None:
+        """Save the note on Enter."""
+        if not self._editing:
+            return
+        new_note = event.value.strip()
+        self.post_message(self.NoteEdited(self.session_name, new_note))
+        self._exit_edit_mode(new_note)
+
+    def key_escape(self) -> None:
+        """Discard changes on Escape."""
+        if self._editing:
+            self._exit_edit_mode()

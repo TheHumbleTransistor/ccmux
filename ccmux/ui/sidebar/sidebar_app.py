@@ -295,6 +295,7 @@ class SidebarApp(App):
                     new_d.status, new_d.has_blocker_alert,
                     entry.branch, entry.short_sha,
                     entry.lines_added, entry.lines_removed,
+                    entry.note,
                 )
         return True
 
@@ -321,6 +322,11 @@ class SidebarApp(App):
 
     async def on_session_row_selected(self, message: SessionRow.Selected) -> None:
         """Switch to the clicked session's tmux window and clear blocker alert."""
+        # Auto-save and close any open note editor before switching
+        for row in self.query(SessionRow):
+            if row._editing:
+                row.save_and_close_editor()
+
         # Record debounce timestamp so that misleading tmux activity from
         # returning focus to the Claude Code window doesn't change session status.
         self._post_selection_debounce[message.session_name] = time.time()
@@ -335,6 +341,7 @@ class SidebarApp(App):
                     row.status, False,
                     row.branch, row.short_sha,
                     row.lines_added, row.lines_removed,
+                    row.note,
                 )
         except Exception:
             pass
@@ -396,3 +403,10 @@ class SidebarApp(App):
             )
         except subprocess.CalledProcessError:
             pass
+
+    async def on_session_row_note_edited(self, message: SessionRow.NoteEdited) -> None:
+        """Persist a note edit from the sidebar UI."""
+        await asyncio.to_thread(state.update_session, message.session_name, note=message.note)
+        from ccmux.session_layout import notify_sidebars
+        await asyncio.to_thread(notify_sidebars)
+        await self._refresh_sessions(caller="note_edited")
