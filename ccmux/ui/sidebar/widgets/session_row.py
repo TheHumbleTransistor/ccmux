@@ -8,32 +8,42 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Static, TextArea
 
+EDIT_INACTIVITY_TIMEOUT = 10  # seconds before auto-saving an open note editor
+
 
 class NoteInput(TextArea):
-    """Multi-line note editor: Enter submits, Shift+Enter / Ctrl+Enter inserts newline."""
+    """Multi-line note editor: Tab submits, double-click submits."""
 
     class Submitted(Message):
-        """Posted when the user presses Enter (without modifier) to save."""
+        """Posted when the user presses Tab or double-clicks to save."""
 
         def __init__(self, value: str) -> None:
             super().__init__()
             self.value = value
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._last_click_time: float = 0
+
     async def _on_key(self, event: events.Key) -> None:
         if self.read_only:
             return
-        if event.key == "enter":
-            # Plain Enter → submit
+        if event.key == "tab":
             event.prevent_default()
             event.stop()
             self.post_message(self.Submitted(self.text))
-        elif event.key in ("shift+enter", "ctrl+enter"):
-            # Modifier+Enter → insert newline (treat as plain enter for TextArea)
-            event.prevent_default()
-            event.stop()
-            self.insert("\n")
         else:
             await super()._on_key(event)
+
+    async def on_click(self, event: events.Click) -> None:
+        now = time.monotonic()
+        elapsed = now - self._last_click_time
+        self._last_click_time = now
+        if elapsed < 0.4 and not self.read_only:
+            event.stop()
+            self.post_message(self.Submitted(self.text))
+        elif not self.read_only:
+            event.stop()
 
 
 class SessionRow(Vertical):
@@ -293,12 +303,11 @@ class SessionRow(Vertical):
         now = time.monotonic()
         elapsed = now - self._last_click_time
         self._last_click_time = now
-        if elapsed < 0.4:
-            if self._editing:
-                self.save_and_close_editor()
-            else:
-                self._enter_edit_mode()
-        elif not self._editing:
+        if self._editing:
+            self.save_and_close_editor()
+        elif elapsed < 0.4:
+            self._enter_edit_mode()
+        else:
             self.post_message(self.Selected(self.session_name, self.session_id))
 
     def _enter_edit_mode(self) -> None:
@@ -314,7 +323,7 @@ class SessionRow(Vertical):
         note_input.show_cursor = True
         note_input.add_class("editing")
         note_input.focus()
-        self._edit_timeout_timer = self.set_timer(60, self._on_edit_timeout)
+        self._edit_timeout_timer = self.set_timer(EDIT_INACTIVITY_TIMEOUT, self._on_edit_timeout)
 
     def _on_edit_timeout(self) -> None:
         """Auto-save after 60 seconds of inactivity."""
@@ -337,7 +346,13 @@ class SessionRow(Vertical):
         note_input.show_cursor = False
         note_input.remove_class("editing")
         note_input.load_text(self.note)
+        note_input.move_cursor((0, 0))
         note_input.display = bool(self.note)
+
+        def _scroll_top() -> None:
+            note_input.scroll_home(animate=False)
+
+        self.call_after_refresh(_scroll_top)
 
     def save_and_close_editor(self) -> None:
         """Save the current note and close the editor (used when clicking away)."""
@@ -360,6 +375,6 @@ class SessionRow(Vertical):
         self._exit_edit_mode(new_note)
 
     def key_escape(self) -> None:
-        """Discard changes on Escape."""
+        """Save and close on Escape."""
         if self._editing:
-            self._exit_edit_mode()
+            self.save_and_close_editor()
