@@ -21,6 +21,7 @@ from ccmux.config import (
     get_agent_resume_command,
     get_bash_command,
     run_post_create_commands,
+    run_repo_init_commands,
     run_session_post_create_commands,
 )
 from ccmux.display import console, display_session_table, show_session_info
@@ -387,6 +388,24 @@ def _run_session_post_create_with_display(
     )
 
 
+def _run_repo_init_with_display(
+    repo_root: Path, session_path: Path, session_name: str
+) -> None:
+    """Run [repo].init hooks with live output."""
+    _display_hook_events(
+        run_repo_init_commands(repo_root, session_path, session_name),
+        "repo init",
+    )
+
+
+def _is_first_session_for_repo(repo_root: Path) -> bool:
+    """Return True if no sessions currently exist for this repo."""
+    repo_root_str = str(repo_root)
+    return not any(
+        sess.repo_path == repo_root_str for sess in state.get_all_sessions()
+    )
+
+
 def _setup_worktree(repo_root: Path, session_path: Path, default_branch: str, name: str) -> None:
     """Create the git worktree and run post_create hooks."""
     if worktree_exists(session_path, repo_root):
@@ -449,10 +468,15 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool
     else:
         session_path = working_dir
 
+    is_first_for_repo = _is_first_session_for_repo(repo_root)
+
     _print_creation_info(name, repo_root, create_as_worktree, session_path, default_branch)
 
     if create_as_worktree:
         _setup_worktree(repo_root, session_path, default_branch, name)
+
+    if is_first_for_repo:
+        _run_repo_init_with_display(repo_root, session_path, name)
 
     _run_session_post_create_with_display(repo_root, session_path, name)
 
