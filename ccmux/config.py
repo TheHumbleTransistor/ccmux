@@ -169,3 +169,34 @@ def run_session_post_create_commands(
 
     env = _build_hook_env(repo_root, session_path, session_name)
     yield from _execute_commands(commands, session_path, env)
+
+
+def run_repo_init_commands(
+    repo_root: Path,
+    session_path: Path,
+    session_name: str,
+) -> Generator[CommandEvent, None, None]:
+    """Execute [repo].init commands from ccmux.toml.
+
+    Intended to run only once — the first time a session is created for a repo
+    (i.e. when no other sessions for that repo exist yet). The caller is
+    responsible for checking this condition.
+
+    Args:
+        repo_root: Absolute path to the main git repo
+        session_path: Absolute path to the session working directory
+        session_name: Name of the new session
+
+    Yields:
+        CommandEvent objects describing execution progress
+    """
+    config = load_repo_config(repo_root)
+    if config is None:
+        return
+
+    commands = config.get("repo", {}).get("init", [])
+    if not commands:
+        return
+
+    env = _build_hook_env(repo_root, session_path, session_name)
+    yield from _execute_commands(commands, session_path, env)

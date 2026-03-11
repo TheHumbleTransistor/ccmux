@@ -12,6 +12,7 @@ from ccmux.config import (
     get_agent_resume_command,
     get_bash_command,
     run_post_create_commands,
+    run_repo_init_commands,
     run_session_post_create_commands,
 )
 
@@ -350,3 +351,121 @@ class TestSessionDisplayIntegration:
         _run_session_post_create_with_display(Path("/repo"), Path("/wt"), "sess")
 
         mock_console.print.assert_not_called()
+
+
+class TestRunRepoInitCommands:
+    """Tests for [repo].init command execution."""
+
+    def test_no_config_file(self, tmp_path):
+        events = list(run_repo_init_commands(tmp_path, tmp_path, "sess"))
+        assert events == []
+
+    def test_empty_init_list(self, tmp_path):
+        _write_config(tmp_path, '[repo]\ninit = []\n')
+        events = list(run_repo_init_commands(tmp_path, tmp_path, "sess"))
+        assert events == []
+
+    def test_no_repo_section(self, tmp_path):
+        _write_config(tmp_path, '[session]\npost_create = ["echo hi"]\n')
+        events = list(run_repo_init_commands(tmp_path, tmp_path, "sess"))
+        assert events == []
+
+    @patch("ccmux.config.subprocess.Popen")
+    def test_runs_init_commands(self, mock_popen, tmp_path):
+        _write_config(tmp_path, '[repo]\ninit = ["npm install"]\n')
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter(["added 100 packages\n"])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        events = list(run_repo_init_commands(tmp_path, tmp_path, "sess"))
+
+        assert len(events) == 3
+        assert events[0] == CommandEvent(cmd="npm install", event_type="start")
+        assert events[1] == CommandEvent(cmd="npm install", event_type="stdout", data="added 100 packages")
+        assert events[2] == CommandEvent(cmd="npm install", event_type="success")
+
+    @patch("ccmux.config.subprocess.Popen")
+    def test_does_not_run_session_or_worktree_commands(self, mock_popen, tmp_path):
+        _write_config(tmp_path, '[session]\npost_create = ["echo session"]\n[worktree]\npost_create = ["echo wt"]\n')
+        events = list(run_repo_init_commands(tmp_path, tmp_path, "sess"))
+        assert events == []
+        mock_popen.assert_not_called()
+
+    @patch("ccmux.config.subprocess.Popen")
+    def test_env_vars_set(self, mock_popen, tmp_path):
+        _write_config(tmp_path, '[repo]\ninit = ["true"]\n')
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        session_path = tmp_path / "work"
+        list(run_repo_init_commands(tmp_path, session_path, "my-sess"))
+
+        env = mock_popen.call_args[1]["env"]
+        assert env["CCMUX_REPO_ROOT"] == str(tmp_path)
+        assert env["CCMUX_SESSION_PATH"] == str(session_path)
+        assert env["CCMUX_SESSION_NAME"] == "my-sess"
+
+
+class TestRepoInitDisplayIntegration:
+    """Tests for _run_repo_init_with_display in session_ops."""
+
+    @patch("ccmux.session_ops.console")
+    @patch("ccmux.session_ops.run_repo_init_commands")
+    def test_display_prints_repo_init_hooks(self, mock_gen, mock_console):
+        from ccmux.session_ops import _run_repo_init_with_display
+
+        mock_gen.return_value = iter([
+            CommandEvent(cmd="npm install", event_type="start"),
+            CommandEvent(cmd="npm install", event_type="success"),
+        ])
+
+        _run_repo_init_with_display(Path("/repo"), Path("/wt"), "sess")
+
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "repo init" in printed
+        assert "npm install" in printed
+
+    @patch("ccmux.session_ops.console")
+    @patch("ccmux.session_ops.run_repo_init_commands")
+    def test_display_noop_when_no_commands(self, mock_gen, mock_console):
+        from ccmux.session_ops import _run_repo_init_with_display
+
+        mock_gen.return_value = iter([])
+
+        _run_repo_init_with_display(Path("/repo"), Path("/wt"), "sess")
+
+        mock_console.print.assert_not_called()
+
+
+class TestIsFirstSessionForRepo:
+    """Tests for _is_first_session_for_repo."""
+
+    @patch("ccmux.session_ops.state")
+    def test_true_when_no_sessions(self, mock_state):
+        from ccmux.session_ops import _is_first_session_for_repo
+
+        mock_state.get_all_sessions.return_value = []
+        assert _is_first_session_for_repo(Path("/repo")) is True
+
+    @patch("ccmux.session_ops.state")
+    def test_true_when_no_sessions_for_this_repo(self, mock_state):
+        from ccmux.session_ops import _is_first_session_for_repo
+
+        other_sess = MagicMock()
+        other_sess.repo_path = "/other/repo"
+        mock_state.get_all_sessions.return_value = [other_sess]
+        assert _is_first_session_for_repo(Path("/repo")) is True
+
+    @patch("ccmux.session_ops.state")
+    def test_false_when_session_exists_for_repo(self, mock_state):
+        from ccmux.session_ops import _is_first_session_for_repo
+
+        existing = MagicMock()
+        existing.repo_path = "/repo"
+        mock_state.get_all_sessions.return_value = [existing]
+        assert _is_first_session_for_repo(Path("/repo")) is False

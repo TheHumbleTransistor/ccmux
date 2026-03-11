@@ -222,10 +222,12 @@ def kill_outer_session() -> bool:
 # ---------------------------------------------------------------------------
 
 def create_bash_window(session_name: str, working_dir: str,
-                       shell_command: str = "$SHELL") -> str | None:
+                       shell_command: str = "$SHELL",
+                       repo_root: str = "") -> str | None:
     """Create a window in the bash session for a session. Returns window ID or None."""
     bash_cmd = (
         f"export CCMUX_SESSION={session_name}; "
+        f"export CCMUX_REPO_ROOT={repo_root}; "
         f"export COLORTERM=truecolor; "
         f"while true; do {shell_command}; done"
     )
