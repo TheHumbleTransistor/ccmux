@@ -1,4 +1,4 @@
-"""Tests for ccmux.config — post_create command execution."""
+"""Tests for ccmux.config — config accessors and post_create command execution."""
 
 import subprocess
 from pathlib import Path
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from ccmux.config import CommandEvent, run_post_create_commands
+from ccmux.config import CommandEvent, get_agent_command, get_bash_command, run_post_create_commands
 
 
 def _write_config(tmp_path: Path, toml_content: str) -> Path:
@@ -14,6 +14,36 @@ def _write_config(tmp_path: Path, toml_content: str) -> Path:
     config_file = tmp_path / "ccmux.toml"
     config_file.write_text(toml_content)
     return tmp_path
+
+
+class TestGetAgentCommand:
+    """Tests for get_agent_command config accessor."""
+
+    def test_default_when_no_config(self, tmp_path):
+        assert get_agent_command(tmp_path) == "claude"
+
+    def test_custom_command(self, tmp_path):
+        _write_config(tmp_path, '[agent]\ncommand = "docker exec -it sandbox claude"\n')
+        assert get_agent_command(tmp_path) == "docker exec -it sandbox claude"
+
+    def test_default_when_no_agent_section(self, tmp_path):
+        _write_config(tmp_path, '[worktree]\npost_create = []\n')
+        assert get_agent_command(tmp_path) == "claude"
+
+
+class TestGetBashCommand:
+    """Tests for get_bash_command config accessor."""
+
+    def test_default_when_no_config(self, tmp_path):
+        assert get_bash_command(tmp_path) == "$SHELL"
+
+    def test_custom_command(self, tmp_path):
+        _write_config(tmp_path, '[bash]\ncommand = "docker exec -it sandbox bash"\n')
+        assert get_bash_command(tmp_path) == "docker exec -it sandbox bash"
+
+    def test_default_when_no_bash_section(self, tmp_path):
+        _write_config(tmp_path, '[agent]\ncommand = "claude"\n')
+        assert get_bash_command(tmp_path) == "$SHELL"
 
 
 class TestRunPostCreateCommandsNoOp:

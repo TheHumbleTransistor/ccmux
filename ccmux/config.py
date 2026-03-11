@@ -42,6 +42,22 @@ def load_repo_config(repo_root: Path) -> Optional[dict]:
         return None
 
 
+def get_agent_command(repo_root: Path) -> str:
+    """Return the agent launch command from ccmux.toml, or 'claude' if not configured."""
+    config = load_repo_config(repo_root)
+    if config is None:
+        return "claude"
+    return config.get("agent", {}).get("command", "claude")
+
+
+def get_bash_command(repo_root: Path) -> str:
+    """Return the bash shell command from ccmux.toml, or '$SHELL' if not configured."""
+    config = load_repo_config(repo_root)
+    if config is None:
+        return "$SHELL"
+    return config.get("bash", {}).get("command", "$SHELL")
+
+
 def run_post_create_commands(
     repo_root: Path,
     session_path: Path,

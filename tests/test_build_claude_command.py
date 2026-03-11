@@ -28,3 +28,19 @@ def test_command_sets_env_and_shell_loop():
     assert "export CCMUX_SESSION=sess" in cmd
     assert "unset CLAUDECODE" in cmd
     assert "while true; do $SHELL; done" in cmd
+
+
+def test_custom_agent_command():
+    cmd = build_claude_command("sess", "/p", "id-1", agent_command="docker exec -it sandbox claude")
+    assert "docker exec -it sandbox claude --session-id id-1" in cmd
+    assert "claude --session-id" not in cmd or "sandbox claude --session-id" in cmd
+
+
+def test_custom_agent_command_resume():
+    cmd = build_claude_command("sess", "/p", "id-1", resume=True, agent_command="my-claude")
+    assert "my-claude --resume id-1 || my-claude" in cmd
+
+
+def test_default_agent_command():
+    cmd = build_claude_command("sess", "/p", "id-1")
+    assert "claude --session-id id-1" in cmd

@@ -16,7 +16,7 @@ from typing import Optional
 from rich.prompt import Confirm, Prompt
 
 from ccmux import __version__, state
-from ccmux.config import run_post_create_commands
+from ccmux.config import get_agent_command, get_bash_command, run_post_create_commands
 from ccmux.display import console, display_session_table, show_session_info
 from ccmux.exceptions import (
     ActivationError,
@@ -105,12 +105,13 @@ def stale_sessions_running() -> bool:
 # Shared helpers (extracted from duplicated patterns)
 # ---------------------------------------------------------------------------
 
-def build_claude_command(name: str, path: str, claude_session_id: str, resume: bool = False) -> str:
+def build_claude_command(name: str, path: str, claude_session_id: str,
+                         resume: bool = False, agent_command: str = "claude") -> str:
     """Build the shell command to launch or resume Claude Code in a tmux pane."""
     if resume:
-        claude_part = f"claude --resume {claude_session_id} || claude"
+        claude_part = f"{agent_command} --resume {claude_session_id} || {agent_command}"
     else:
-        claude_part = f"claude --session-id {claude_session_id}"
+        claude_part = f"{agent_command} --session-id {claude_session_id}"
     return (
         f"export CCMUX_SESSION={name}; "
         f"unset CLAUDECODE; "
@@ -120,6 +121,7 @@ def build_claude_command(name: str, path: str, claude_session_id: str, resume: b
 
 def create_session_window(
     name: str, path: str, launch_cmd: str, is_first: bool,
+    shell_command: str = "$SHELL",
 ) -> tuple[Optional[str], Optional[str]]:
     """Create a tmux window for a session, creating the tmux session if first.
 
@@ -130,7 +132,7 @@ def create_session_window(
         bash_window_id = None
         if cc_window_id:
             apply_server_global_config()
-            bash_window_id = create_bash_window(name, path)
+            bash_window_id = create_bash_window(name, path, shell_command)
             if apply_claude_inner_session_config(INNER_SESSION):
                 console.print(f"  [green]\u2713[/green] Applied workspace configuration")
             else:
@@ -140,7 +142,7 @@ def create_session_window(
         cc_window_id = create_tmux_window(INNER_SESSION, name, path, launch_cmd)
         bash_window_id = None
         if cc_window_id:
-            bash_window_id = create_bash_window(name, path)
+            bash_window_id = create_bash_window(name, path, shell_command)
         return cc_window_id, bash_window_id
 
 
@@ -378,14 +380,17 @@ def _reactivate_single_orphan(sess) -> None:
     """Reactivate a single orphaned session."""
     name = sess.name
     path = sess.session_path
+    repo_root = Path(sess.repo_path)
     sess_type = sess.session_type + " repo" if not sess.is_worktree else "worktree"
 
+    agent_command = get_agent_command(repo_root)
+    shell_command = get_bash_command(repo_root)
     orphan_session_id = sess.claude_session_id or str(uuid.uuid4())
-    cmd = build_claude_command(name, path, orphan_session_id, resume=bool(sess.claude_session_id))
+    cmd = build_claude_command(name, path, orphan_session_id, resume=bool(sess.claude_session_id), agent_command=agent_command)
 
     cc_window_id = create_tmux_window(INNER_SESSION, name, path, cmd)
     if cc_window_id:
-        bash_window_id = create_bash_window(name, path)
+        bash_window_id = create_bash_window(name, path, shell_command)
         update_session_tmux_state(name, orphan_session_id, cc_window_id, bash_window_id)
         console.print(f"  [green]\u2713[/green] Reactivated '{name}'")
     else:
@@ -411,11 +416,13 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool
 
     is_first = not tmux_session_exists(INNER_SESSION)
 
+    agent_command = get_agent_command(repo_root)
+    shell_command = get_bash_command(repo_root)
     session_type = "worktree" if create_as_worktree else "main repo"
     claude_session_id = str(uuid.uuid4())
-    launch_cmd = build_claude_command(name, str(session_path), claude_session_id)
+    launch_cmd = build_claude_command(name, str(session_path), claude_session_id, agent_command=agent_command)
 
-    cc_window_id, bash_window_id = _create_new_session_window(name, str(session_path), launch_cmd, is_first)
+    cc_window_id, bash_window_id = _create_new_session_window(name, str(session_path), launch_cmd, is_first, shell_command)
 
     _save_new_session_state(name, repo_root, session_path, create_as_worktree, claude_session_id, cc_window_id, bash_window_id)
 
@@ -441,14 +448,15 @@ def _print_creation_info(name: str, repo_root: Path, create_as_worktree: bool, s
         console.print(f"  Path:      {session_path}")
 
 
-def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: bool) -> tuple[Optional[str], Optional[str]]:
+def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: bool,
+                               shell_command: str = "$SHELL") -> tuple[Optional[str], Optional[str]]:
     """Create the tmux window for a new session. Returns (cc_window_id, bash_window_id)."""
     if is_first:
         cc_window_id = create_tmux_session(INNER_SESSION, name, path, launch_cmd)
         if cc_window_id is None:
             raise TmuxError("session creation")
         apply_server_global_config()
-        bash_window_id = create_bash_window(name, path)
+        bash_window_id = create_bash_window(name, path, shell_command)
         console.print(f"  [green]\u2713[/green] Created workspace with session '{name}'")
         if apply_claude_inner_session_config(INNER_SESSION):
             console.print(f"  [green]\u2713[/green] Applied workspace configuration")
@@ -460,7 +468,7 @@ def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: 
         cc_window_id = create_tmux_window(INNER_SESSION, name, path, launch_cmd)
         if cc_window_id is None:
             raise TmuxError("window creation")
-        bash_window_id = create_bash_window(name, path)
+        bash_window_id = create_bash_window(name, path, shell_command)
         select_window(INNER_SESSION, name)
         console.print(f"  [green]\u2713[/green] Created new window '{name}'")
 
@@ -565,9 +573,11 @@ def _rename_active_worktree(old_name: str, new_name: str, session_data) -> None:
         raise SessionExistsError(new_name)
     state.update_session(new_name, session_path=str(new_path))
 
-    new_cc_window_id = _create_renamed_window(new_name, new_path, session_data, migrated)
+    agent_command = get_agent_command(repo_path)
+    shell_command = get_bash_command(repo_path)
+    new_cc_window_id = _create_renamed_window(new_name, new_path, session_data, migrated, agent_command)
 
-    new_bash_window_id = create_bash_window(new_name, str(new_path))
+    new_bash_window_id = create_bash_window(new_name, str(new_path), shell_command)
 
     if new_cc_window_id:
         update_session_tmux_state(new_name,
@@ -588,7 +598,8 @@ def _migrate_session_data(session_data, old_path: Path, new_path: Path) -> bool:
     return False
 
 
-def _create_renamed_window(new_name: str, new_path: Path, session_data, migrated: bool) -> Optional[str]:
+def _create_renamed_window(new_name: str, new_path: Path, session_data, migrated: bool,
+                           agent_command: str = "claude") -> Optional[str]:
     """Create a new tmux window for the renamed session."""
     old_session_id = session_data.claude_session_id
     new_session_id = old_session_id if migrated else str(uuid.uuid4())
@@ -596,6 +607,7 @@ def _create_renamed_window(new_name: str, new_path: Path, session_data, migrated
     launch_cmd = build_claude_command(
         new_name, str(new_path), new_session_id,
         resume=bool(migrated and old_session_id),
+        agent_command=agent_command,
     )
 
     window_id = create_tmux_window(INNER_SESSION, new_name, str(new_path), launch_cmd)
@@ -1026,10 +1038,13 @@ def _activate_all(yes: bool = False) -> None:
         if sess.tmux_cc_window_id:
             state.clear_tmux_window_ids(sess.name)
         is_first = not inner_exists and i == 0
+        repo_root = Path(sess.repo_path)
+        agent_command = get_agent_command(repo_root)
+        shell_command = get_bash_command(repo_root)
         claude_session_id = sess.claude_session_id or str(uuid.uuid4())
-        launch_cmd = build_claude_command(sess.name, sess.session_path, claude_session_id, resume=bool(sess.claude_session_id))
+        launch_cmd = build_claude_command(sess.name, sess.session_path, claude_session_id, resume=bool(sess.claude_session_id), agent_command=agent_command)
 
-        cc_window_id, bash_window_id = create_session_window(sess.name, sess.session_path, launch_cmd, is_first)
+        cc_window_id, bash_window_id = create_session_window(sess.name, sess.session_path, launch_cmd, is_first, shell_command)
         if cc_window_id:
             if is_first:
                 inner_exists = True
@@ -1068,10 +1083,13 @@ def _activate_single(name: str, yes: bool = False) -> None:
     console.print(f"  Session: {session.session_path}")
 
     is_first = not tmux_session_exists(INNER_SESSION)
+    repo_root = Path(session.repo_path)
+    agent_command = get_agent_command(repo_root)
+    shell_command = get_bash_command(repo_root)
     claude_session_id = session.claude_session_id or str(uuid.uuid4())
-    launch_cmd = build_claude_command(name, session.session_path, claude_session_id, resume=bool(session.claude_session_id))
+    launch_cmd = build_claude_command(name, session.session_path, claude_session_id, resume=bool(session.claude_session_id), agent_command=agent_command)
 
-    cc_window_id, bash_window_id = create_session_window(name, session.session_path, launch_cmd, is_first)
+    cc_window_id, bash_window_id = create_session_window(name, session.session_path, launch_cmd, is_first, shell_command)
 
     if cc_window_id is None:
         raise ActivationError(name)
