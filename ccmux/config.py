@@ -42,28 +42,61 @@ def load_repo_config(repo_root: Path) -> Optional[dict]:
         return None
 
 
-def get_agent_command(repo_root: Path) -> str:
-    """Return the agent launch command from ccmux.toml, or 'claude' if not configured."""
+def _warn_deprecated_key(section: str, old_key: str, new_key: str) -> None:
+    """Print a deprecation warning for a renamed config key."""
+    import sys
+
+    print(
+        f"ccmux: [agent].{old_key} is deprecated, use [agent].{new_key} instead",
+        file=sys.stderr,
+    )
+
+
+def _resolve_launch(value) -> str:
+    """Normalize a launch value to a single shell command string.
+
+    Accepts a string or a list of strings. Lists are joined with ' && '
+    so the last command is the long-running one.
+    """
+    if isinstance(value, list):
+        return " && ".join(value)
+    return value
+
+
+def get_agent_launch(repo_root: Path) -> str:
+    """Return the agent launch command from ccmux.toml, or 'claude' if not configured.
+
+    Reads [agent].launch first. Falls back to deprecated [agent].command with a warning.
+    The value can be a string or a list of strings (joined with &&).
+    """
     config = load_repo_config(repo_root)
     if config is None:
         return "claude"
-    return config.get("agent", {}).get("command", "claude")
+    agent = config.get("agent", {})
+    if "launch" in agent:
+        return _resolve_launch(agent["launch"])
+    if "command" in agent:
+        _warn_deprecated_key("agent", "command", "launch")
+        return _resolve_launch(agent["command"])
+    return "claude"
 
 
-def get_agent_resume_command(repo_root: Path) -> Optional[str]:
-    """Return the agent resume command from ccmux.toml, or None if not configured."""
-    config = load_repo_config(repo_root)
-    if config is None:
-        return None
-    return config.get("agent", {}).get("resume_command", None)
+def get_bash_launch(repo_root: Path) -> str:
+    """Return the bash shell command from ccmux.toml, or '$SHELL' if not configured.
 
-
-def get_bash_command(repo_root: Path) -> str:
-    """Return the bash shell command from ccmux.toml, or '$SHELL' if not configured."""
+    Reads [bash].launch first. Falls back to deprecated [bash].command with a warning.
+    The value can be a string or a list of strings (joined with &&).
+    """
     config = load_repo_config(repo_root)
     if config is None:
         return "$SHELL"
-    return config.get("bash", {}).get("command", "$SHELL")
+    bash = config.get("bash", {})
+    if "launch" in bash:
+        return _resolve_launch(bash["launch"])
+    if "command" in bash:
+        _warn_deprecated_key("bash", "command", "launch")
+        return _resolve_launch(bash["command"])
+    return "$SHELL"
 
 
 def _execute_commands(

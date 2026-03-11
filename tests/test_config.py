@@ -8,13 +8,13 @@ import pytest
 
 from ccmux.config import (
     CommandEvent,
-    get_agent_command,
-    get_agent_resume_command,
-    get_bash_command,
+    get_agent_launch,
+    get_bash_launch,
     run_post_create_commands,
     run_repo_init_commands,
     run_session_post_create_commands,
 )
+from ccmux.session_ops import build_agent_command
 
 
 def _write_config(tmp_path: Path, toml_content: str) -> Path:
@@ -24,50 +24,137 @@ def _write_config(tmp_path: Path, toml_content: str) -> Path:
     return tmp_path
 
 
-class TestGetAgentCommand:
-    """Tests for get_agent_command config accessor."""
+# ---------------------------------------------------------------------------
+# Config accessor tests
+# ---------------------------------------------------------------------------
+
+class TestGetAgentLaunch:
+    """Tests for get_agent_launch config accessor."""
 
     def test_default_when_no_config(self, tmp_path):
-        assert get_agent_command(tmp_path) == "claude"
+        assert get_agent_launch(tmp_path) == "claude"
 
-    def test_custom_command(self, tmp_path):
-        _write_config(tmp_path, '[agent]\ncommand = "docker exec -it sandbox claude"\n')
-        assert get_agent_command(tmp_path) == "docker exec -it sandbox claude"
+    def test_launch_key(self, tmp_path):
+        _write_config(tmp_path, '[agent]\nlaunch = "docker exec -it sandbox claude"\n')
+        assert get_agent_launch(tmp_path) == "docker exec -it sandbox claude"
 
     def test_default_when_no_agent_section(self, tmp_path):
         _write_config(tmp_path, '[worktree]\npost_create = []\n')
-        assert get_agent_command(tmp_path) == "claude"
+        assert get_agent_launch(tmp_path) == "claude"
+
+    def test_backwards_compat_command_key(self, tmp_path):
+        _write_config(tmp_path, '[agent]\ncommand = "aider"\n')
+        assert get_agent_launch(tmp_path) == "aider"
+
+    def test_launch_takes_precedence_over_command(self, tmp_path):
+        _write_config(tmp_path, '[agent]\nlaunch = "claude"\ncommand = "aider"\n')
+        assert get_agent_launch(tmp_path) == "claude"
+
+    def test_list_of_commands_joined(self, tmp_path):
+        _write_config(tmp_path, '[agent]\nlaunch = ["source .venv/bin/activate", "claude --session-id $CCMUX_AGENT_SESSION_ID"]\n')
+        assert get_agent_launch(tmp_path) == "source .venv/bin/activate && claude --session-id $CCMUX_AGENT_SESSION_ID"
 
 
-class TestGetAgentResumeCommand:
-    """Tests for get_agent_resume_command config accessor."""
-
-    def test_default_when_no_config(self, tmp_path):
-        assert get_agent_resume_command(tmp_path) is None
-
-    def test_default_when_no_resume_command(self, tmp_path):
-        _write_config(tmp_path, '[agent]\ncommand = "claude"\n')
-        assert get_agent_resume_command(tmp_path) is None
-
-    def test_custom_resume_command(self, tmp_path):
-        _write_config(tmp_path, '[agent]\nresume_command = "claude --resume $CCMUX_AGENT_SESSION_ID"\n')
-        assert get_agent_resume_command(tmp_path) == "claude --resume $CCMUX_AGENT_SESSION_ID"
-
-
-class TestGetBashCommand:
-    """Tests for get_bash_command config accessor."""
+class TestGetBashLaunch:
+    """Tests for get_bash_launch config accessor."""
 
     def test_default_when_no_config(self, tmp_path):
-        assert get_bash_command(tmp_path) == "$SHELL"
+        assert get_bash_launch(tmp_path) == "$SHELL"
 
-    def test_custom_command(self, tmp_path):
-        _write_config(tmp_path, '[bash]\ncommand = "docker exec -it sandbox bash"\n')
-        assert get_bash_command(tmp_path) == "docker exec -it sandbox bash"
+    def test_launch_key(self, tmp_path):
+        _write_config(tmp_path, '[bash]\nlaunch = "docker exec -it sandbox bash"\n')
+        assert get_bash_launch(tmp_path) == "docker exec -it sandbox bash"
 
     def test_default_when_no_bash_section(self, tmp_path):
-        _write_config(tmp_path, '[agent]\ncommand = "claude"\n')
-        assert get_bash_command(tmp_path) == "$SHELL"
+        _write_config(tmp_path, '[agent]\nlaunch = "claude"\n')
+        assert get_bash_launch(tmp_path) == "$SHELL"
 
+    def test_backwards_compat_command_key(self, tmp_path):
+        _write_config(tmp_path, '[bash]\ncommand = "zsh"\n')
+        assert get_bash_launch(tmp_path) == "zsh"
+
+    def test_launch_takes_precedence_over_command(self, tmp_path):
+        _write_config(tmp_path, '[bash]\nlaunch = "fish"\ncommand = "zsh"\n')
+        assert get_bash_launch(tmp_path) == "fish"
+
+    def test_list_of_commands_joined(self, tmp_path):
+        _write_config(tmp_path, '[bash]\nlaunch = ["export FOO=bar", "exec bash"]\n')
+        assert get_bash_launch(tmp_path) == "export FOO=bar && exec bash"
+
+
+# ---------------------------------------------------------------------------
+# build_agent_command tests
+# ---------------------------------------------------------------------------
+
+class TestBuildAgentCommand:
+    """Tests for build_agent_command."""
+
+    def test_default_new_session(self):
+        cmd = build_agent_command("sess", "abc-123", repo_root="/repo", session_path="/repo")
+        assert "claude --session-id abc-123" in cmd
+
+    def test_default_resume(self):
+        cmd = build_agent_command("sess", "abc-123", repo_root="/repo", session_path="/repo", resume=True)
+        assert "claude --resume abc-123 || claude" in cmd
+
+    def test_custom_launch_no_flags_appended(self):
+        cmd = build_agent_command("sess", "abc-123", repo_root="/repo", session_path="/repo",
+                                  agent_launch="aider")
+        assert "aider" in cmd
+        assert "--session-id" not in cmd
+        assert "--resume" not in cmd
+
+    def test_custom_launch_resume_same_command(self):
+        """Resume doesn't change the custom command — CCMUX_SESSION_RESUMING env var handles it."""
+        cmd_new = build_agent_command("sess", "abc-123", repo_root="/repo", session_path="/repo",
+                                      agent_launch="myagent")
+        cmd_resume = build_agent_command("sess", "abc-123", repo_root="/repo", session_path="/repo",
+                                          agent_launch="myagent", resume=True)
+        # Both should contain "myagent" verbatim
+        assert "myagent" in cmd_new
+        assert "myagent" in cmd_resume
+        # But the CCMUX_SESSION_RESUMING differs
+        assert "CCMUX_SESSION_RESUMING=0" in cmd_new
+        assert "CCMUX_SESSION_RESUMING=1" in cmd_resume
+
+    def test_session_resuming_env_var_new(self):
+        cmd = build_agent_command("sess", "id", repo_root="/repo", session_path="/repo")
+        assert "CCMUX_SESSION_RESUMING=0" in cmd
+
+    def test_session_resuming_env_var_resume(self):
+        cmd = build_agent_command("sess", "id", repo_root="/repo", session_path="/repo", resume=True)
+        assert "CCMUX_SESSION_RESUMING=1" in cmd
+
+    def test_session_id_env_var_always_exported(self):
+        for launch in ["claude", "aider"]:
+            cmd = build_agent_command("sess", "my-uuid", repo_root="/repo", session_path="/repo",
+                                      agent_launch=launch)
+            assert "CCMUX_AGENT_SESSION_ID=my-uuid" in cmd
+
+    def test_ccmux_session_env_var(self):
+        cmd = build_agent_command("aquatic-otter", "id", repo_root="/repo", session_path="/repo")
+        assert "CCMUX_SESSION=aquatic-otter" in cmd
+
+    def test_repo_root_exported(self):
+        cmd = build_agent_command("sess", "id", repo_root="/home/user/myrepo", session_path="/home/user/myrepo")
+        assert "CCMUX_REPO_ROOT=/home/user/myrepo" in cmd
+
+    def test_session_relative_dir_worktree(self):
+        cmd = build_agent_command("sess", "id",
+                                  repo_root="/repo",
+                                  session_path="/repo/.worktrees/my-session")
+        assert "CCMUX_SESSION_RELATIVE_DIR=.worktrees/my-session" in cmd
+
+    def test_session_relative_dir_main_repo(self):
+        cmd = build_agent_command("sess", "id",
+                                  repo_root="/repo",
+                                  session_path="/repo")
+        assert "CCMUX_SESSION_RELATIVE_DIR=." in cmd
+
+
+# ---------------------------------------------------------------------------
+# run_post_create_commands tests
+# ---------------------------------------------------------------------------
 
 class TestRunPostCreateCommandsNoOp:
     """Cases where the generator should yield nothing."""

@@ -222,14 +222,18 @@ def kill_outer_session() -> bool:
 # ---------------------------------------------------------------------------
 
 def create_bash_window(session_name: str, working_dir: str,
-                       shell_command: str = "$SHELL",
+                       shell_launch: str = "$SHELL",
                        repo_root: str = "") -> str | None:
     """Create a window in the bash session for a session. Returns window ID or None."""
+    rel_dir = os.path.relpath(working_dir, repo_root) if repo_root else "."
+    if not rel_dir:
+        rel_dir = "."
     bash_cmd = (
         f"export CCMUX_SESSION={session_name}; "
         f"export CCMUX_REPO_ROOT={repo_root}; "
+        f"export CCMUX_SESSION_RELATIVE_DIR={rel_dir}; "
         f"export COLORTERM=truecolor; "
-        f"while true; do {shell_command}; done"
+        f"while true; do {shell_launch}; done"
     )
     try:
         if not tmux_session_exists(BASH_SESSION):
