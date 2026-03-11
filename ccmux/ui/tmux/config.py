@@ -1,5 +1,6 @@
 """Tmux configuration management for ccmux."""
 
+import shutil
 import subprocess
 import time
 
@@ -19,6 +20,83 @@ def _wait_for_session(session_name: str, timeout: float = 2.0) -> bool:
             return True
         time.sleep(0.05)
     return False
+
+
+def _detect_clipboard_command() -> str | None:
+    """Detect available clipboard command, or None if no clipboard tool found."""
+    if shutil.which("xclip"):
+        return "xclip -selection clipboard -i"
+    if shutil.which("xsel"):
+        return "xsel --clipboard --input"
+    if shutil.which("wl-copy"):
+        return "wl-copy"
+    return None
+
+
+def _apply_copy_mode_config(session_name: str) -> None:
+    """Configure vi copy-mode with mouse-drag copy and optional clipboard integration.
+
+    Sets up:
+    - vi mode keys for copy-mode navigation
+    - Mouse drag auto-copies selection (pane-scoped, avoids cross-pane issues)
+    - Double-click selects word, triple-click selects line
+    - 'y' in copy-mode yanks selection
+    - Pipes to system clipboard when xclip/xsel/wl-copy is available
+    """
+    clip_cmd = _detect_clipboard_command()
+
+    # Use vi keys in copy mode
+    subprocess.run(
+        ["tmux", "set-option", "-t", session_name, "mode-keys", "vi"],
+        capture_output=True,
+    )
+
+    if clip_cmd:
+        copy_action = f"send -X copy-pipe-and-cancel '{clip_cmd}'"
+    else:
+        copy_action = "send -X copy-selection-and-cancel"
+
+    # Mouse drag release → copy (stays within the pane)
+    subprocess.run(
+        ["tmux", "bind-key", "-T", "copy-mode-vi", "MouseDragEnd1Pane", copy_action],
+        capture_output=True,
+    )
+
+    # 'y' in copy mode → yank
+    subprocess.run(
+        ["tmux", "bind-key", "-T", "copy-mode-vi", "y", copy_action],
+        capture_output=True,
+    )
+
+    # Double-click → select word
+    subprocess.run(
+        ["tmux", "bind-key", "-T", "copy-mode-vi", "DoubleClick1Pane",
+         "select-pane", ";", "send-keys", "-X", "select-word"],
+        capture_output=True,
+    )
+    subprocess.run(
+        ["tmux", "bind-key", "-T", "root", "DoubleClick1Pane",
+         "select-pane", "-t=", ";",
+         "if-shell", "-F", "#{||:#{pane_in_mode},#{mouse_any_flag}}",
+         "send-keys -M",
+         "copy-mode -H ; send-keys -X select-word"],
+        capture_output=True,
+    )
+
+    # Triple-click → select line
+    subprocess.run(
+        ["tmux", "bind-key", "-T", "copy-mode-vi", "TripleClick1Pane",
+         "select-pane", ";", "send-keys", "-X", "select-line"],
+        capture_output=True,
+    )
+    subprocess.run(
+        ["tmux", "bind-key", "-T", "root", "TripleClick1Pane",
+         "select-pane", "-t=", ";",
+         "if-shell", "-F", "#{||:#{pane_in_mode},#{mouse_any_flag}}",
+         "send-keys -M",
+         "copy-mode -H ; send-keys -X select-line"],
+        capture_output=True,
+    )
 
 
 def apply_claude_inner_session_config(session_name: str) -> bool:
@@ -61,6 +139,7 @@ def apply_claude_inner_session_config(session_name: str) -> bool:
                 ["tmux", "set-option", "-w", "-t", session_name, key, val],
                 check=True, capture_output=True,
             )
+        _apply_copy_mode_config(session_name)
         return True
     except subprocess.CalledProcessError:
         return False
@@ -135,6 +214,7 @@ def apply_outer_session_config(session_name: str) -> bool:
                 ["tmux", "set-option", "-t", session_name, key, val],
                 check=True, capture_output=True,
             )
+        _apply_copy_mode_config(session_name)
         return True
     except subprocess.CalledProcessError:
         return False

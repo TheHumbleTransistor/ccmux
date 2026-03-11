@@ -50,7 +50,7 @@ class TestDoSessionNewUsesWorkingDir:
     @patch("ccmux.session_ops._reactivate_orphaned_sessions")
     @patch("ccmux.session_ops._save_new_session_state")
     @patch("ccmux.session_ops._create_new_session_window", return_value=("@1", "@2"))
-    @patch("ccmux.session_ops.build_claude_command", return_value="claude")
+    @patch("ccmux.session_ops.build_agent_command", return_value="claude")
     @patch("ccmux.session_ops.tmux_session_exists", return_value=False)
     @patch("ccmux.session_ops._print_creation_info")
     @patch("ccmux.session_ops._generate_session_name", return_value="test-session")
