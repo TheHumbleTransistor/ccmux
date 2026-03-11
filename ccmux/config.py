@@ -50,6 +50,14 @@ def get_agent_command(repo_root: Path) -> str:
     return config.get("agent", {}).get("command", "claude")
 
 
+def get_agent_resume_command(repo_root: Path) -> Optional[str]:
+    """Return the agent resume command from ccmux.toml, or None if not configured."""
+    config = load_repo_config(repo_root)
+    if config is None:
+        return None
+    return config.get("agent", {}).get("resume_command", None)
+
+
 def get_bash_command(repo_root: Path) -> str:
     """Return the bash shell command from ccmux.toml, or '$SHELL' if not configured."""
     config = load_repo_config(repo_root)
@@ -58,15 +66,60 @@ def get_bash_command(repo_root: Path) -> str:
     return config.get("bash", {}).get("command", "$SHELL")
 
 
+def _execute_commands(
+    commands: list[str],
+    cwd: Path,
+    env: dict[str, str],
+) -> Generator[CommandEvent, None, None]:
+    """Execute shell commands, yielding structured events.
+
+    Uses /bin/bash as the shell executable so bash-specific features
+    (source, [[, nvm, etc.) work correctly.
+    """
+    for cmd in commands:
+        yield CommandEvent(cmd=cmd, event_type="start")
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                shell=True,
+                executable="/bin/bash",
+                cwd=str(cwd),
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            for line in proc.stdout:
+                yield CommandEvent(cmd=cmd, event_type="stdout", data=line.rstrip("\n"))
+            proc.wait()
+            if proc.returncode == 0:
+                yield CommandEvent(cmd=cmd, event_type="success")
+            else:
+                yield CommandEvent(
+                    cmd=cmd, event_type="failure", returncode=proc.returncode
+                )
+        except Exception as e:
+            yield CommandEvent(cmd=cmd, event_type="error", data=str(e))
+
+
+def _build_hook_env(repo_root: Path, session_path: Path, session_name: str) -> dict[str, str]:
+    """Build the environment dict for hook commands."""
+    env = os.environ.copy()
+    env["CCMUX_REPO_ROOT"] = str(repo_root)
+    env["CCMUX_SESSION_PATH"] = str(session_path)
+    env["CCMUX_SESSION_NAME"] = session_name
+    return env
+
+
 def run_post_create_commands(
     repo_root: Path,
     session_path: Path,
     session_name: str,
 ) -> Generator[CommandEvent, None, None]:
-    """Execute post_create commands from ccmux.toml, yielding structured events.
+    """Execute [worktree].post_create commands from ccmux.toml.
 
-    Uses /bin/bash as the shell executable so bash-specific features
-    (source, [[, nvm, etc.) work correctly.
+    Only runs for worktree sessions. See also run_session_post_create_commands()
+    for commands that run on every session.
 
     Args:
         repo_root: Absolute path to the main git repo
@@ -84,32 +137,35 @@ def run_post_create_commands(
     if not commands:
         return
 
-    env = os.environ.copy()
-    env["CCMUX_REPO_ROOT"] = str(repo_root)
-    env["CCMUX_SESSION_PATH"] = str(session_path)
-    env["CCMUX_SESSION_NAME"] = session_name
+    env = _build_hook_env(repo_root, session_path, session_name)
+    yield from _execute_commands(commands, session_path, env)
 
-    for cmd in commands:
-        yield CommandEvent(cmd=cmd, event_type="start")
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                shell=True,
-                executable="/bin/bash",
-                cwd=str(session_path),
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            for line in proc.stdout:
-                yield CommandEvent(cmd=cmd, event_type="stdout", data=line.rstrip("\n"))
-            proc.wait()
-            if proc.returncode == 0:
-                yield CommandEvent(cmd=cmd, event_type="success")
-            else:
-                yield CommandEvent(
-                    cmd=cmd, event_type="failure", returncode=proc.returncode
-                )
-        except Exception as e:
-            yield CommandEvent(cmd=cmd, event_type="error", data=str(e))
+
+def run_session_post_create_commands(
+    repo_root: Path,
+    session_path: Path,
+    session_name: str,
+) -> Generator[CommandEvent, None, None]:
+    """Execute [session].post_create commands from ccmux.toml.
+
+    Runs for every session created via ``ccmux new``, regardless of whether
+    it is a worktree or main-repo session.
+
+    Args:
+        repo_root: Absolute path to the main git repo
+        session_path: Absolute path to the session working directory
+        session_name: Name of the new session
+
+    Yields:
+        CommandEvent objects describing execution progress
+    """
+    config = load_repo_config(repo_root)
+    if config is None:
+        return
+
+    commands = config.get("session", {}).get("post_create", [])
+    if not commands:
+        return
+
+    env = _build_hook_env(repo_root, session_path, session_name)
+    yield from _execute_commands(commands, session_path, env)
