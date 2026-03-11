@@ -191,9 +191,12 @@ SessionRow.current.blocker-alert.blocker-alert-flash {
 
 RepoHeader {
     height: 1;
+    width: 100%;
     padding: 0 1;
     color: #d7af5f;
     text-style: bold;
+    text-wrap: nowrap;
+    text-overflow: clip;
 }
 
 /* RepoSessionsList */
