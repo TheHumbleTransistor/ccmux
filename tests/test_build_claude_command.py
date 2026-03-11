@@ -76,6 +76,10 @@ class TestEnvVarsAndShellLoop:
         cmd = build_agent_command("my-sess", "id-1")
         assert "export CCMUX_SESSION=my-sess" in cmd
 
+    def test_repo_root_env_var_exported(self):
+        cmd = build_agent_command("sess", "id-1", repo_root="/my/repo")
+        assert "export CCMUX_REPO_ROOT=/my/repo" in cmd
+
     def test_command_sets_env_and_shell_loop(self):
         cmd = build_agent_command("sess", "id-1")
         assert "export CCMUX_SESSION=sess" in cmd
