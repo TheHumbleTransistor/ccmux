@@ -22,24 +22,34 @@ class CommandEvent:
     returncode: int = 0
 
 
-def load_repo_config(repo_root: Path) -> Optional[dict]:
-    """Load ccmux.toml from a repository root.
+def load_repo_config(repo_root: Path, session_path: Optional[Path] = None) -> Optional[dict]:
+    """Load ccmux.toml, checking session_path first then repo root.
+
+    For bare repo topologies the config may live in a worktree rather than
+    (or in addition to) the project root.  When *session_path* differs from
+    *repo_root*, we check the session directory first so worktree-specific
+    configs take precedence.
 
     Args:
-        repo_root: Path to the git repository root
+        repo_root: Path to the git repository / project root
+        session_path: Optional session working directory to check first
 
     Returns:
         Parsed config dict, or None if no config file exists
     """
-    config_path = repo_root / "ccmux.toml"
-    if not config_path.exists():
-        return None
+    search_paths: list[Path] = []
+    if session_path is not None and session_path != repo_root:
+        search_paths.append(session_path / "ccmux.toml")
+    search_paths.append(repo_root / "ccmux.toml")
 
-    try:
-        with open(config_path, "rb") as f:
-            return tomllib.load(f)
-    except Exception:
-        return None
+    for config_path in search_paths:
+        if config_path.exists():
+            try:
+                with open(config_path, "rb") as f:
+                    return tomllib.load(f)
+            except Exception:
+                continue
+    return None
 
 
 def _warn_deprecated_key(section: str, old_key: str, new_key: str) -> None:
@@ -63,13 +73,13 @@ def _resolve_launch(value) -> str:
     return value
 
 
-def get_agent_launch(repo_root: Path) -> str:
+def get_agent_launch(repo_root: Path, session_path: Optional[Path] = None) -> str:
     """Return the agent launch command from ccmux.toml, or 'claude' if not configured.
 
     Reads [agent].launch first. Falls back to deprecated [agent].command with a warning.
     The value can be a string or a list of strings (joined with &&).
     """
-    config = load_repo_config(repo_root)
+    config = load_repo_config(repo_root, session_path)
     if config is None:
         return "claude"
     agent = config.get("agent", {})
@@ -81,13 +91,13 @@ def get_agent_launch(repo_root: Path) -> str:
     return "claude"
 
 
-def get_bash_launch(repo_root: Path) -> str:
+def get_bash_launch(repo_root: Path, session_path: Optional[Path] = None) -> str:
     """Return the bash shell command from ccmux.toml, or '$SHELL' if not configured.
 
     Reads [bash].launch first. Falls back to deprecated [bash].command with a warning.
     The value can be a string or a list of strings (joined with &&).
     """
-    config = load_repo_config(repo_root)
+    config = load_repo_config(repo_root, session_path)
     if config is None:
         return "$SHELL"
     bash = config.get("bash", {})
@@ -97,6 +107,22 @@ def get_bash_launch(repo_root: Path) -> str:
         _warn_deprecated_key("bash", "command", "launch")
         return _resolve_launch(bash["command"])
     return "$SHELL"
+
+
+def get_worktrees_dir(repo_root: Path, session_path: Optional[Path] = None) -> Path:
+    """Return the worktree directory relative path from ccmux.toml, or the default.
+
+    Reads [worktree].dir.  The value is a path relative to repo_root where
+    new ccmux worktrees are created.  Defaults to ``.ccmux/worktrees``.
+    """
+    config = load_repo_config(repo_root, session_path)
+    if config is not None:
+        raw = config.get("worktree", {}).get("dir")
+        if raw:
+            return Path(raw)
+    # Import here to avoid circular dependency at module level
+    from ccmux.naming import WORKTREES_DIR_NAME
+    return WORKTREES_DIR_NAME
 
 
 def _execute_commands(
@@ -162,7 +188,7 @@ def run_post_create_commands(
     Yields:
         CommandEvent objects describing execution progress
     """
-    config = load_repo_config(repo_root)
+    config = load_repo_config(repo_root, session_path)
     if config is None:
         return
 
@@ -192,7 +218,7 @@ def run_session_post_create_commands(
     Yields:
         CommandEvent objects describing execution progress
     """
-    config = load_repo_config(repo_root)
+    config = load_repo_config(repo_root, session_path)
     if config is None:
         return
 
@@ -223,7 +249,7 @@ def run_repo_init_commands(
     Yields:
         CommandEvent objects describing execution progress
     """
-    config = load_repo_config(repo_root)
+    config = load_repo_config(repo_root, session_path)
     if config is None:
         return
 

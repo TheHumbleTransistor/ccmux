@@ -19,6 +19,7 @@ from ccmux import __version__, state
 from ccmux.config import (
     get_agent_launch,
     get_bash_launch,
+    get_worktrees_dir,
     run_post_create_commands,
     run_repo_init_commands,
     run_session_post_create_commands,
@@ -45,6 +46,8 @@ from ccmux.git_ops import (
     get_default_branch,
     get_most_recently_used_branch,
     get_repo_root,
+    get_worktree_root,
+    is_bare_repo,
     move_worktree,
     remove_worktree,
     worktree_exists,
@@ -282,13 +285,17 @@ def _validate_repo_context(path: Optional[str] = None) -> tuple[Path, str, Path]
     """Validate git repo and return (repo_root, default_branch, working_dir).
 
     When *path* is given, *working_dir* is the resolved path (which may be a
-    subdirectory inside the repo).  Otherwise *working_dir* equals *repo_root*.
+    subdirectory inside the repo).  Otherwise *working_dir* equals *repo_root*
+    — except for bare repo topologies where the original cwd's worktree root
+    is preserved so the caller can reuse an existing worktree.
     """
     if path is not None:
         resolved = Path(path).resolve()
         if not resolved.is_dir():
             raise InvalidArgumentError(f"Path is not a directory: {resolved}")
         os.chdir(resolved)
+
+    original_cwd = Path.cwd().resolve()
     repo_root = get_repo_root()
     if repo_root is None:
         raise NotInGitRepoError(path or "")
@@ -302,13 +309,35 @@ def _validate_repo_context(path: Optional[str] = None) -> tuple[Path, str, Path]
     if default_branch is None:
         raise DefaultBranchError()
 
-    working_dir = resolved if path is not None else repo_root
+    if path is not None:
+        working_dir = resolved
+    elif is_bare_repo(repo_root) and original_cwd != repo_root:
+        # Inside a bare repo topology — preserve the worktree root so the
+        # caller can reuse the existing worktree instead of creating one.
+        working_dir = get_worktree_root(original_cwd) or repo_root
+    else:
+        working_dir = repo_root
     return repo_root, default_branch, working_dir
 
 
-def _resolve_session_type(repo_root: Path, worktree: bool, yes: bool) -> bool:
+def _resolve_session_type(repo_root: Path, worktree: bool, yes: bool,
+                          working_dir: Optional[Path] = None) -> bool:
     """Decide whether to create as worktree. Returns create_as_worktree flag."""
     if worktree:
+        return True
+    if is_bare_repo(repo_root):
+        if working_dir is not None and working_dir != repo_root:
+            # Inside an existing worktree — use it directly.
+            # Check for duplicate session at this worktree path.
+            for sess in state.get_all_sessions():
+                if sess.session_path == str(working_dir):
+                    console.print(f"[yellow]Warning:[/yellow] This worktree already has a session: '{sess.name}'")
+                    if yes or Confirm.ask("Create a new worktree instead?", default=True):
+                        return True
+                    raise UserAbortedError("Worktree already in use.")
+            return False
+        # At bare repo root — create a worktree.
+        console.print("[yellow]Bare repository detected — creating worktree session.[/yellow]")
         return True
     existing_main = state.find_main_repo_session(str(repo_root))
     if existing_main:
@@ -319,25 +348,27 @@ def _resolve_session_type(repo_root: Path, worktree: bool, yes: bool) -> bool:
     return False
 
 
-def session_name_exists(name: str, repo_root: Path) -> bool:
+def session_name_exists(name: str, repo_root: Path, worktrees_dir: Optional[Path] = None) -> bool:
     """Check if a session name is already in use (session state or worktree on disk)."""
     if state.get_session(name):
         return True
-    test_path = repo_root / WORKTREES_DIR_NAME / name
+    wt_dir = worktrees_dir if worktrees_dir is not None else WORKTREES_DIR_NAME
+    test_path = repo_root / wt_dir / name
     return worktree_exists(test_path, repo_root)
 
 
-def _generate_session_name(repo_root: Path, create_as_worktree: bool, name: Optional[str]) -> str:
+def _generate_session_name(repo_root: Path, create_as_worktree: bool, name: Optional[str],
+                           worktrees_dir: Optional[Path] = None) -> str:
     """Generate or sanitize session name."""
     if name is not None:
         sanitized = sanitize_name(name)
-        if session_name_exists(sanitized, repo_root):
+        if session_name_exists(sanitized, repo_root, worktrees_dir):
             raise SessionExistsError(sanitized)
         return sanitized
 
     for _ in range(20):
         candidate = sanitize_name(generate_animal_name())
-        if not session_name_exists(candidate, repo_root):
+        if not session_name_exists(candidate, repo_root, worktrees_dir):
             return candidate
 
     base = sanitize_name(generate_animal_name())
@@ -447,8 +478,9 @@ def _reactivate_single_orphan(sess) -> None:
     repo_root = Path(sess.repo_path)
     sess_type = sess.session_type + " repo" if not sess.is_worktree else "worktree"
 
-    agent_launch = get_agent_launch(repo_root)
-    shell_launch = get_bash_launch(repo_root)
+    session_path = Path(path)
+    agent_launch = get_agent_launch(repo_root, session_path)
+    shell_launch = get_bash_launch(repo_root, session_path)
     orphan_session_id = sess.claude_session_id or str(uuid.uuid4())
     cmd = build_agent_command(name, orphan_session_id, repo_root=str(repo_root), session_path=path, agent_launch=agent_launch, resume=bool(sess.claude_session_id))
 
@@ -464,12 +496,13 @@ def _reactivate_single_orphan(sess) -> None:
 def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool = False, path: Optional[str] = None) -> None:
     """Create a new Claude Code session."""
     repo_root, default_branch, working_dir = _validate_repo_context(path)
-    create_as_worktree = _resolve_session_type(repo_root, worktree, yes)
-    name = _generate_session_name(repo_root, create_as_worktree, name)
+    create_as_worktree = _resolve_session_type(repo_root, worktree, yes, working_dir)
+    worktrees_dir = get_worktrees_dir(repo_root, working_dir)
+    name = _generate_session_name(repo_root, create_as_worktree, name, worktrees_dir)
 
     if create_as_worktree:
-        session_path = repo_root / WORKTREES_DIR_NAME / name
-        (repo_root / WORKTREES_DIR_NAME).mkdir(parents=True, exist_ok=True)
+        session_path = repo_root / worktrees_dir / name
+        (repo_root / worktrees_dir).mkdir(parents=True, exist_ok=True)
     else:
         session_path = working_dir
 
@@ -479,6 +512,10 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool
 
     if create_as_worktree:
         _setup_worktree(repo_root, session_path, default_branch, name)
+    elif session_path != repo_root:
+        # Reusing an existing worktree (bare repo topology) — still run
+        # [worktree].post_create hooks since this is a new session.
+        _run_post_create_with_display(repo_root, session_path, name)
 
     if is_first_for_repo:
         _run_repo_init_with_display(repo_root, session_path, name)
@@ -487,8 +524,8 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, yes: bool
 
     is_first = not tmux_session_exists(INNER_SESSION)
 
-    agent_launch = get_agent_launch(repo_root)
-    shell_launch = get_bash_launch(repo_root)
+    agent_launch = get_agent_launch(repo_root, session_path)
+    shell_launch = get_bash_launch(repo_root, session_path)
     session_type = "worktree" if create_as_worktree else "main repo"
     claude_session_id = str(uuid.uuid4())
     launch_cmd = build_agent_command(name, claude_session_id, repo_root=str(repo_root), session_path=str(session_path), agent_launch=agent_launch)
@@ -645,8 +682,8 @@ def _rename_active_worktree(old_name: str, new_name: str, session_data) -> None:
         raise SessionExistsError(new_name)
     state.update_session(new_name, session_path=str(new_path))
 
-    agent_launch = get_agent_launch(repo_path)
-    shell_launch = get_bash_launch(repo_path)
+    agent_launch = get_agent_launch(repo_path, new_path)
+    shell_launch = get_bash_launch(repo_path, new_path)
     new_cc_window_id = _create_renamed_window(new_name, new_path, session_data, migrated, agent_launch, str(repo_path))
 
     new_bash_window_id = create_bash_window(new_name, str(new_path), shell_launch, str(repo_path))
@@ -1114,8 +1151,9 @@ def _activate_all(yes: bool = False) -> None:
             state.clear_tmux_window_ids(sess.name)
         is_first = not inner_exists and i == 0
         repo_root = Path(sess.repo_path)
-        agent_launch = get_agent_launch(repo_root)
-        shell_launch = get_bash_launch(repo_root)
+        sess_path = Path(sess.session_path)
+        agent_launch = get_agent_launch(repo_root, sess_path)
+        shell_launch = get_bash_launch(repo_root, sess_path)
         claude_session_id = sess.claude_session_id or str(uuid.uuid4())
         launch_cmd = build_agent_command(sess.name, claude_session_id, repo_root=str(repo_root), session_path=sess.session_path, agent_launch=agent_launch, resume=bool(sess.claude_session_id))
 
@@ -1159,8 +1197,9 @@ def _activate_single(name: str, yes: bool = False) -> None:
 
     is_first = not tmux_session_exists(INNER_SESSION)
     repo_root = Path(session.repo_path)
-    agent_launch = get_agent_launch(repo_root)
-    shell_launch = get_bash_launch(repo_root)
+    sess_path = Path(session.session_path)
+    agent_launch = get_agent_launch(repo_root, sess_path)
+    shell_launch = get_bash_launch(repo_root, sess_path)
     claude_session_id = session.claude_session_id or str(uuid.uuid4())
     launch_cmd = build_agent_command(name, claude_session_id, repo_root=str(repo_root), session_path=session.session_path, agent_launch=agent_launch, resume=bool(session.claude_session_id))
 

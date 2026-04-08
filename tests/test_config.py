@@ -10,6 +10,8 @@ from ccmux.config import (
     CommandEvent,
     get_agent_launch,
     get_bash_launch,
+    get_worktrees_dir,
+    load_repo_config,
     run_post_create_commands,
     run_repo_init_commands,
     run_session_post_create_commands,
@@ -80,6 +82,94 @@ class TestGetBashLaunch:
     def test_list_of_commands_joined(self, tmp_path):
         _write_config(tmp_path, '[bash]\nlaunch = ["export FOO=bar", "exec bash"]\n')
         assert get_bash_launch(tmp_path) == "export FOO=bar && exec bash"
+
+
+# ---------------------------------------------------------------------------
+# Config search path tests (worktree-first fallback for bare repos)
+# ---------------------------------------------------------------------------
+
+class TestConfigSearchPath:
+    """Tests for load_repo_config session_path-first search."""
+
+    def test_session_path_takes_precedence(self, tmp_path):
+        """Config in session_path is preferred over repo_root."""
+        repo_root = tmp_path / "repo"
+        session = tmp_path / "session"
+        repo_root.mkdir()
+        session.mkdir()
+        (repo_root / "ccmux.toml").write_text('[agent]\nlaunch = "from-repo"\n')
+        (session / "ccmux.toml").write_text('[agent]\nlaunch = "from-session"\n')
+
+        config = load_repo_config(repo_root, session_path=session)
+        assert config["agent"]["launch"] == "from-session"
+
+    def test_falls_back_to_repo_root(self, tmp_path):
+        """When session_path has no config, falls back to repo_root."""
+        repo_root = tmp_path / "repo"
+        session = tmp_path / "session"
+        repo_root.mkdir()
+        session.mkdir()
+        (repo_root / "ccmux.toml").write_text('[agent]\nlaunch = "from-repo"\n')
+
+        config = load_repo_config(repo_root, session_path=session)
+        assert config["agent"]["launch"] == "from-repo"
+
+    def test_no_session_path_uses_repo_root(self, tmp_path):
+        """Without session_path, behaves like before (repo_root only)."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / "ccmux.toml").write_text('[agent]\nlaunch = "from-repo"\n')
+
+        config = load_repo_config(repo_root)
+        assert config["agent"]["launch"] == "from-repo"
+
+    def test_session_path_same_as_repo_root(self, tmp_path):
+        """When session_path == repo_root, no duplicate check."""
+        _write_config(tmp_path, '[agent]\nlaunch = "hello"\n')
+        config = load_repo_config(tmp_path, session_path=tmp_path)
+        assert config["agent"]["launch"] == "hello"
+
+    def test_none_when_neither_has_config(self, tmp_path):
+        """Returns None when no config exists in either path."""
+        repo_root = tmp_path / "repo"
+        session = tmp_path / "session"
+        repo_root.mkdir()
+        session.mkdir()
+        assert load_repo_config(repo_root, session_path=session) is None
+
+    def test_get_worktrees_dir_default(self, tmp_path):
+        """Returns default .ccmux/worktrees when no config."""
+        assert str(get_worktrees_dir(tmp_path)) == ".ccmux/worktrees"
+
+    def test_get_worktrees_dir_from_config(self, tmp_path):
+        """Returns configured [worktree].dir value."""
+        _write_config(tmp_path, '[worktree]\ndir = "."\n')
+        assert str(get_worktrees_dir(tmp_path)) == "."
+
+    def test_get_worktrees_dir_custom_path(self, tmp_path):
+        """Returns a custom relative path from config."""
+        _write_config(tmp_path, '[worktree]\ndir = "my-worktrees"\n')
+        assert str(get_worktrees_dir(tmp_path)) == "my-worktrees"
+
+    def test_get_agent_launch_with_session_path(self, tmp_path):
+        """get_agent_launch forwards session_path to load_repo_config."""
+        repo_root = tmp_path / "repo"
+        session = tmp_path / "session"
+        repo_root.mkdir()
+        session.mkdir()
+        (session / "ccmux.toml").write_text('[agent]\nlaunch = "from-session"\n')
+
+        assert get_agent_launch(repo_root, session) == "from-session"
+
+    def test_get_bash_launch_with_session_path(self, tmp_path):
+        """get_bash_launch forwards session_path to load_repo_config."""
+        repo_root = tmp_path / "repo"
+        session = tmp_path / "session"
+        repo_root.mkdir()
+        session.mkdir()
+        (session / "ccmux.toml").write_text('[bash]\nlaunch = "from-session"\n')
+
+        assert get_bash_launch(repo_root, session) == "from-session"
 
 
 # ---------------------------------------------------------------------------
