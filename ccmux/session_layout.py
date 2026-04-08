@@ -35,6 +35,19 @@ from ccmux.ui.tmux import apply_outer_session_config, apply_server_global_config
 HOOKS_DIR = Path.home() / ".ccmux" / "hooks"
 
 
+def _send_sigwinch_to_pane(target: str) -> None:
+    """Send SIGWINCH to the process in a tmux pane so it recalculates layout."""
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-t", target, "-p", "#{pane_pid}"],
+            capture_output=True, text=True, check=True,
+        )
+        pid = int(result.stdout.strip())
+        os.kill(pid, signal.SIGWINCH)
+    except (subprocess.CalledProcessError, ValueError, ProcessLookupError):
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Sidebar communication
 # ---------------------------------------------------------------------------
@@ -190,6 +203,7 @@ def create_outer_session() -> None:
         split_window(f"{OUTER_SESSION}:0.0", "-h", "50%",
                      f"TMUX= tmux attach -t ={INNER_SESSION}")
         resize_pane(f"{OUTER_SESSION}:0.0", SIDEBAR_WIDTH)
+        _send_sigwinch_to_pane(f"{OUTER_SESSION}:0.0")
         install_inner_hook()
         install_detach_hook()
         _rebind_detach_key()
