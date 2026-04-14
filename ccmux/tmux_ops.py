@@ -337,6 +337,22 @@ def resize_pane(target: str, width: int) -> bool:
         return False
 
 
+def respawn_pane(target: str, cmd: str) -> bool:
+    """Kill the process in a pane and restart with a new command.
+
+    Uses ``tmux respawn-pane -k`` which kills the existing process and
+    starts *cmd* in the same pane, preserving pane geometry.
+    """
+    try:
+        subprocess.run(
+            ["tmux", "respawn-pane", "-k", "-t", target, cmd],
+            check=True, capture_output=True,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
 def select_pane(target: str) -> bool:
     """Select a tmux pane. Returns True on success."""
     try:
