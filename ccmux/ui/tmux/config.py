@@ -22,6 +22,15 @@ def _wait_for_session(session_name: str, timeout: float = 2.0) -> bool:
     return False
 
 
+def _is_wsl() -> bool:
+    """Return True if running under Windows Subsystem for Linux."""
+    try:
+        with open("/proc/version") as f:
+            return "microsoft" in f.read().lower()
+    except OSError:
+        return False
+
+
 def _detect_clipboard_command() -> str | None:
     """Detect available clipboard command, or None if no clipboard tool found."""
     if shutil.which("xclip"):
@@ -30,6 +39,8 @@ def _detect_clipboard_command() -> str | None:
         return "xsel --clipboard --input"
     if shutil.which("wl-copy"):
         return "wl-copy"
+    if _is_wsl() and shutil.which("clip.exe"):
+        return "clip.exe"
     return None
 
 
@@ -41,7 +52,7 @@ def _apply_copy_mode_config(session_name: str) -> None:
     - Mouse drag auto-copies selection (pane-scoped, avoids cross-pane issues)
     - Double-click selects word, triple-click selects line
     - 'y' in copy-mode yanks selection
-    - Pipes to system clipboard when xclip/xsel/wl-copy is available
+    - Pipes to system clipboard when xclip/xsel/wl-copy/clip.exe is available
     """
     clip_cmd = _detect_clipboard_command()
 
@@ -164,7 +175,7 @@ def _terminal_features_contains_rgb() -> bool:
 
 
 def apply_server_global_config() -> bool:
-    """Apply server-global tmux options for true-color support."""
+    """Apply server-global tmux options for true-color support and clipboard."""
     try:
         subprocess.run(
             ["tmux", "set-option", "-g", "default-terminal", "tmux-256color"],
@@ -176,6 +187,12 @@ def apply_server_global_config() -> bool:
                  ",tmux-256color:RGB"],
                 check=True, capture_output=True,
             )
+        # Emit OSC 52 on copy so the host terminal (e.g. Windows Terminal,
+        # iTerm2) can populate the OS clipboard even without xclip/clip.exe.
+        subprocess.run(
+            ["tmux", "set-option", "-g", "set-clipboard", "on"],
+            check=True, capture_output=True,
+        )
         return True
     except subprocess.CalledProcessError:
         return False
