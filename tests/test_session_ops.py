@@ -6,7 +6,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ccmux.exceptions import InvalidArgumentError, TmuxError, UserAbortedError
+from ccmux.exceptions import (
+    DefaultBranchError,
+    InvalidArgumentError,
+    NotInCcmuxSessionError,
+    SessionNotFoundError,
+    TmuxError,
+    UserAbortedError,
+    WorktreeError,
+)
 from ccmux.naming import BASH_SESSION, INNER_SESSION, OUTER_SESSION
 from ccmux.session_ops import (
     _is_running_in_bash_pane,
@@ -15,7 +23,9 @@ from ccmux.session_ops import (
     _validate_repo_context,
     do_reload,
     do_session_new,
+    do_session_reset,
 )
+from ccmux.state.session import MainRepoSession, WorktreeSession
 
 
 class TestValidateRepoContext:
@@ -144,6 +154,196 @@ class TestDoReload:
         mock_exists.side_effect = [True, False]  # inner exists, outer absent after create
         with pytest.raises(TmuxError, match="Failed to recreate"):
             do_reload()
+
+
+def _make_worktree_session(tmp_path, name="duck", note=None):
+    """Build a real WorktreeSession backed by a temp directory that exists."""
+    wt = tmp_path / name
+    wt.mkdir()
+    return WorktreeSession(
+        name=name, repo_path=str(tmp_path),
+        session_path=str(wt), note=note,
+    )
+
+
+class TestDoSessionReset:
+    """Tests for do_session_reset()."""
+
+    @patch("ccmux.session_ops.notify_sidebars")
+    @patch("ccmux.session_ops.checkout_detached")
+    @patch("ccmux.session_ops.fetch_origin")
+    @patch("ccmux.session_ops.worktree_status", return_value=[])
+    @patch("ccmux.session_ops._resolve_reset_target_ref", return_value="origin/main")
+    @patch("ccmux.session_ops.state")
+    def test_clean_worktree_happy_path(
+        self, mock_state, mock_resolve, mock_status, mock_fetch, mock_checkout,
+        mock_notify, tmp_path,
+    ):
+        session = _make_worktree_session(tmp_path)
+        mock_state.get_session.return_value = session
+
+        do_session_reset(name="duck")
+
+        mock_fetch.assert_called_once_with(Path(session.session_path))
+        mock_checkout.assert_called_once_with(Path(session.session_path), "origin/main")
+        # No note set → update_session should not be called
+        mock_state.update_session.assert_not_called()
+        mock_notify.assert_called_once()
+
+    @patch("ccmux.session_ops.notify_sidebars")
+    @patch("ccmux.session_ops.checkout_detached")
+    @patch("ccmux.session_ops.fetch_origin")
+    @patch("ccmux.session_ops.worktree_status", return_value=[])
+    @patch("ccmux.session_ops._resolve_reset_target_ref", return_value="origin/main")
+    @patch("ccmux.session_ops.state")
+    def test_clears_note_when_set(
+        self, mock_state, mock_resolve, mock_status, mock_fetch, mock_checkout,
+        mock_notify, tmp_path,
+    ):
+        session = _make_worktree_session(tmp_path, note="some note")
+        mock_state.get_session.return_value = session
+
+        do_session_reset(name="duck")
+
+        mock_state.update_session.assert_called_once_with("duck", note="")
+
+    @patch("ccmux.session_ops.discard_all_changes")
+    @patch("ccmux.session_ops.stash_changes")
+    @patch("ccmux.session_ops.notify_sidebars")
+    @patch("ccmux.session_ops.checkout_detached")
+    @patch("ccmux.session_ops.fetch_origin")
+    @patch("ccmux.session_ops.worktree_status", return_value=["M foo.py"])
+    @patch("ccmux.session_ops._resolve_reset_target_ref", return_value="origin/main")
+    @patch("ccmux.session_ops.state")
+    @patch("ccmux.session_ops.Prompt.ask", return_value="s")
+    def test_dirty_stash_path(
+        self, mock_prompt, mock_state, mock_resolve, mock_status, mock_fetch,
+        mock_checkout, mock_notify, mock_stash, mock_discard, tmp_path,
+    ):
+        session = _make_worktree_session(tmp_path)
+        mock_state.get_session.return_value = session
+
+        do_session_reset(name="duck")
+
+        mock_stash.assert_called_once()
+        mock_discard.assert_not_called()
+        mock_checkout.assert_called_once()
+
+    @patch("ccmux.session_ops.discard_all_changes")
+    @patch("ccmux.session_ops.stash_changes")
+    @patch("ccmux.session_ops.notify_sidebars")
+    @patch("ccmux.session_ops.checkout_detached")
+    @patch("ccmux.session_ops.fetch_origin")
+    @patch("ccmux.session_ops.worktree_status", return_value=["M foo.py", "?? new.py"])
+    @patch("ccmux.session_ops._resolve_reset_target_ref", return_value="origin/main")
+    @patch("ccmux.session_ops.state")
+    @patch("ccmux.session_ops.Prompt.ask", return_value="d")
+    def test_dirty_discard_path(
+        self, mock_prompt, mock_state, mock_resolve, mock_status, mock_fetch,
+        mock_checkout, mock_notify, mock_stash, mock_discard, tmp_path,
+    ):
+        session = _make_worktree_session(tmp_path)
+        mock_state.get_session.return_value = session
+
+        do_session_reset(name="duck")
+
+        mock_discard.assert_called_once()
+        mock_stash.assert_not_called()
+        mock_checkout.assert_called_once()
+
+    @patch("ccmux.session_ops.discard_all_changes")
+    @patch("ccmux.session_ops.stash_changes")
+    @patch("ccmux.session_ops.checkout_detached")
+    @patch("ccmux.session_ops.fetch_origin")
+    @patch("ccmux.session_ops.worktree_status", return_value=["M foo.py"])
+    @patch("ccmux.session_ops._resolve_reset_target_ref", return_value="origin/main")
+    @patch("ccmux.session_ops.state")
+    @patch("ccmux.session_ops.Prompt.ask", return_value="c")
+    def test_dirty_cancel_path(
+        self, mock_prompt, mock_state, mock_resolve, mock_status, mock_fetch,
+        mock_checkout, mock_stash, mock_discard, tmp_path,
+    ):
+        session = _make_worktree_session(tmp_path)
+        mock_state.get_session.return_value = session
+
+        do_session_reset(name="duck")
+
+        mock_stash.assert_not_called()
+        mock_discard.assert_not_called()
+        mock_fetch.assert_not_called()
+        mock_checkout.assert_not_called()
+
+    @patch("ccmux.session_ops.discard_all_changes")
+    @patch("ccmux.session_ops.notify_sidebars")
+    @patch("ccmux.session_ops.checkout_detached")
+    @patch("ccmux.session_ops.fetch_origin")
+    @patch("ccmux.session_ops.worktree_status", return_value=["M foo.py"])
+    @patch("ccmux.session_ops._resolve_reset_target_ref", return_value="origin/main")
+    @patch("ccmux.session_ops.state")
+    def test_yes_flag_discards_without_prompt(
+        self, mock_state, mock_resolve, mock_status, mock_fetch, mock_checkout,
+        mock_notify, mock_discard, tmp_path,
+    ):
+        session = _make_worktree_session(tmp_path)
+        mock_state.get_session.return_value = session
+
+        do_session_reset(name="duck", yes=True)
+
+        mock_discard.assert_called_once()
+        mock_checkout.assert_called_once()
+
+    @patch("ccmux.session_ops.state")
+    def test_main_repo_session_rejected(self, mock_state, tmp_path):
+        session = MainRepoSession(
+            name="main", repo_path=str(tmp_path), session_path=str(tmp_path),
+        )
+        mock_state.get_session.return_value = session
+
+        with pytest.raises(InvalidArgumentError, match="main repository"):
+            do_session_reset(name="main")
+
+    @patch("ccmux.session_ops.state")
+    def test_missing_worktree_path_raises(self, mock_state, tmp_path):
+        wt = tmp_path / "gone"  # never created
+        session = WorktreeSession(
+            name="gone", repo_path=str(tmp_path), session_path=str(wt),
+        )
+        mock_state.get_session.return_value = session
+
+        with pytest.raises(WorktreeError, match="worktree path missing"):
+            do_session_reset(name="gone")
+
+    @patch("ccmux.session_ops.state")
+    def test_session_not_found_raises(self, mock_state):
+        mock_state.get_session.return_value = None
+        with pytest.raises(SessionNotFoundError):
+            do_session_reset(name="missing")
+
+    @patch("ccmux.session_ops.detect_current_ccmux_session_any", return_value=None)
+    def test_no_name_no_detection_raises(self, mock_detect):
+        with pytest.raises(NotInCcmuxSessionError):
+            do_session_reset(name=None)
+
+    @patch("ccmux.session_ops.notify_sidebars")
+    @patch("ccmux.session_ops.checkout_detached")
+    @patch("ccmux.session_ops.fetch_origin")
+    @patch("ccmux.session_ops.worktree_status", return_value=[])
+    @patch("ccmux.session_ops._resolve_reset_target_ref", return_value="origin/main")
+    @patch("ccmux.session_ops.state")
+    @patch("ccmux.session_ops.detect_current_ccmux_session_any",
+           return_value=("duck", None))
+    def test_auto_detect_session_name(
+        self, mock_detect, mock_state, mock_resolve, mock_status, mock_fetch,
+        mock_checkout, mock_notify, tmp_path,
+    ):
+        session = _make_worktree_session(tmp_path)
+        mock_state.get_session.return_value = session
+
+        do_session_reset(name=None)
+
+        mock_detect.assert_called_once()
+        mock_state.get_session.assert_called_with("duck")
+        mock_checkout.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
