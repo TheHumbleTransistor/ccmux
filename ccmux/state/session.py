@@ -15,6 +15,7 @@ class Session:
     claude_session_id: Optional[str] = None
     id: int = 0
     note: Optional[str] = None
+    is_shallow: bool = False
 
     @property
     def is_worktree(self) -> bool:
@@ -39,6 +40,8 @@ class Session:
             d["claude_session_id"] = self.claude_session_id
         if self.note:
             d["note"] = self.note
+        if self.is_shallow:
+            d["is_shallow"] = True
         return d
 
     @classmethod
@@ -54,6 +57,7 @@ class Session:
             claude_session_id=data.get("claude_session_id"),
             id=data.get("id", 0),
             note=data.get("note"),
+            is_shallow=data.get("is_shallow", False),
         )
         if data.get("is_worktree", True):
             return WorktreeSession(**kwargs)

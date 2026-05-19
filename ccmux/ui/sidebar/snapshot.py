@@ -33,6 +33,7 @@ class SessionSnapshot:
     lines_removed: int = 0
     activity_ts: float = 0.0
     note: str = ""
+    is_shallow: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,5 +272,6 @@ async def build_snapshot() -> list[SessionSnapshot]:
             lines_removed=removed,
             activity_ts=activity_ts,
             note=sess.note or "",
+            is_shallow=sess.is_shallow,
         ))
     return snapshot

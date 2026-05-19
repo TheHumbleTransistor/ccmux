@@ -40,5 +40,6 @@ class RepoSessionsList(Vertical):
                 lines_removed=entry.lines_removed,
                 session_id=entry.session_id,
                 note=entry.note,
+                is_shallow=entry.is_shallow,
                 id=f"sess-{entry.session_name}",
             )
