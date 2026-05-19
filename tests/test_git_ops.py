@@ -6,12 +6,17 @@ from unittest.mock import patch
 
 from ccmux.git_ops import (
     check_for_common_default_branches,
+    checkout_detached,
     create_worktree,
+    discard_all_changes,
+    fetch_origin,
     get_default_branch,
     get_most_recently_used_branch,
     get_repo_root,
     get_worktree_root,
     is_bare_repo,
+    remote_ref_exists,
+    stash_changes,
 )
 
 
@@ -248,6 +253,60 @@ class TestIsBareRepo:
         """Returns False when git command fails."""
         mock_run.side_effect = subprocess.CalledProcessError(1, "git")
         assert is_bare_repo(Path("/home/user/project")) is False
+
+
+class TestResetHelpers:
+    """Tests for fetch_origin, discard_all_changes, stash_changes,
+    checkout_detached, and remote_ref_exists."""
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_fetch_origin_uses_C_flag(self, mock_run):
+        wt = Path("/wt/path")
+        fetch_origin(wt)
+        mock_run.assert_called_once_with(
+            ["git", "-C", str(wt), "fetch", "origin"],
+            check=True, capture_output=True, text=True,
+        )
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_discard_runs_reset_then_clean(self, mock_run):
+        wt = Path("/wt/path")
+        discard_all_changes(wt)
+        assert mock_run.call_count == 2
+        assert mock_run.call_args_list[0][0][0] == [
+            "git", "-C", str(wt), "reset", "--hard", "HEAD",
+        ]
+        assert mock_run.call_args_list[1][0][0] == [
+            "git", "-C", str(wt), "clean", "-fd",
+        ]
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_stash_uses_include_untracked_and_label(self, mock_run):
+        wt = Path("/wt/path")
+        stash_changes(wt, "ccmux reset foo")
+        mock_run.assert_called_once_with(
+            ["git", "-C", str(wt), "stash", "push", "-u", "-m", "ccmux reset foo"],
+            check=True, capture_output=True, text=True,
+        )
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_checkout_detached_passes_ref(self, mock_run):
+        wt = Path("/wt/path")
+        checkout_detached(wt, "origin/main")
+        mock_run.assert_called_once_with(
+            ["git", "-C", str(wt), "checkout", "--detach", "origin/main"],
+            check=True, capture_output=True, text=True,
+        )
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_remote_ref_exists_true(self, mock_run):
+        mock_run.return_value = _make_completed_process("")
+        assert remote_ref_exists(Path("/wt"), "origin/main") is True
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_remote_ref_exists_false(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(1, "git")
+        assert remote_ref_exists(Path("/wt"), "origin/missing") is False
 
 
 class TestCreateWorktree:

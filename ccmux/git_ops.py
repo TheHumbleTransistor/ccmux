@@ -261,6 +261,59 @@ def worktree_status(worktree_path: Path) -> list[str]:
         return []
 
 
+def fetch_origin(worktree_path: Path) -> None:
+    """Fetch from the 'origin' remote inside the given worktree."""
+    subprocess.run(
+        ["git", "-C", str(worktree_path), "fetch", "origin"],
+        check=True, capture_output=True, text=True,
+    )
+
+
+def discard_all_changes(worktree_path: Path) -> None:
+    """Discard tracked + untracked changes in a worktree.
+
+    Equivalent to ``git reset --hard HEAD && git clean -fd``. Ignored files
+    (e.g. node_modules, build artifacts) are preserved.
+    """
+    subprocess.run(
+        ["git", "-C", str(worktree_path), "reset", "--hard", "HEAD"],
+        check=True, capture_output=True, text=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(worktree_path), "clean", "-fd"],
+        check=True, capture_output=True, text=True,
+    )
+
+
+def stash_changes(worktree_path: Path, message: str) -> None:
+    """Stash tracked + untracked changes with a label."""
+    subprocess.run(
+        ["git", "-C", str(worktree_path), "stash", "push", "-u", "-m", message],
+        check=True, capture_output=True, text=True,
+    )
+
+
+def checkout_detached(worktree_path: Path, ref: str) -> None:
+    """Check out a ref as a detached HEAD inside the worktree."""
+    subprocess.run(
+        ["git", "-C", str(worktree_path), "checkout", "--detach", ref],
+        check=True, capture_output=True, text=True,
+    )
+
+
+def remote_ref_exists(worktree_path: Path, ref: str) -> bool:
+    """Check if a remote-tracking ref like 'origin/main' exists in this worktree."""
+    try:
+        subprocess.run(
+            ["git", "-C", str(worktree_path), "show-ref", "--verify", "--quiet",
+             f"refs/remotes/{ref}"],
+            check=True, capture_output=True,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
 def get_branch_name(path: str) -> str:
     """Get the current branch name for a git working directory."""
     try:

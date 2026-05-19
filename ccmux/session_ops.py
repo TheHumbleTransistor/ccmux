@@ -42,14 +42,19 @@ from ccmux.exceptions import (
 )
 from ccmux.git_ops import (
     check_for_common_default_branches,
+    checkout_detached,
     create_worktree,
+    discard_all_changes,
+    fetch_origin,
     get_default_branch,
     get_most_recently_used_branch,
     get_repo_root,
     get_worktree_root,
     is_bare_repo,
     move_worktree,
+    remote_ref_exists,
     remove_worktree,
+    stash_changes,
     worktree_exists,
     worktree_status,
 )
@@ -848,6 +853,122 @@ def do_session_note(
             console.print(f"\n[bold cyan]Note ({name}):[/bold cyan] {current_note}\n")
         else:
             console.print(f"\n[dim]No note set for session '{name}'.[/dim]\n")
+
+
+# ---------------------------------------------------------------------------
+# session_reset
+# ---------------------------------------------------------------------------
+
+def _resolve_reset_target_ref(worktree_path: Path) -> str:
+    """Pick the origin/<default-branch> ref to reset to.
+
+    Tries (in order): the remote's HEAD branch via `get_default_branch()`,
+    then `origin/main`, then `origin/master`. Raises DefaultBranchError if
+    none of the candidates exist as a remote-tracking ref.
+    """
+    candidates = []
+    remote_default = get_default_branch()
+    if remote_default:
+        candidates.append(remote_default)
+    for fallback in ("main", "master"):
+        if fallback not in candidates:
+            candidates.append(fallback)
+
+    for branch in candidates:
+        ref = f"origin/{branch}"
+        if remote_ref_exists(worktree_path, ref):
+            return ref
+    raise DefaultBranchError()
+
+
+def do_session_reset(name: Optional[str] = None, yes: bool = False) -> None:
+    """Reset a worktree session: clean tree, checkout latest origin/main detached, clear note."""
+    if name is None:
+        detected = detect_current_ccmux_session_any()
+        if not detected:
+            raise NotInCcmuxSessionError()
+        name = detected[0]
+
+    session = state.get_session(name)
+    if session is None:
+        raise SessionNotFoundError(name)
+
+    if not session.is_worktree:
+        raise InvalidArgumentError(
+            f"'reset' only operates on worktree sessions. "
+            f"'{name}' is the main repository."
+        )
+
+    wt_path = Path(session.session_path)
+    if not wt_path.exists():
+        raise WorktreeError(
+            "reset",
+            f"worktree path missing: {wt_path}. Try `ccmux remove {name}` and recreate.",
+        )
+
+    target_ref = _resolve_reset_target_ref(wt_path)
+    dirty = worktree_status(wt_path)
+
+    console.print(f"\n[bold cyan]Reset session '{name}'[/bold cyan]")
+    console.print(f"  Path: {wt_path}")
+    console.print(f"  Target: [green]{target_ref}[/green] (detached)")
+    if session.note:
+        console.print(f"  Note: [yellow]will be cleared[/yellow]")
+    if dirty:
+        console.print(f"  [bold yellow]⚠ UNCOMMITTED CHANGES ({len(dirty)} file(s)):[/bold yellow]")
+        for f in dirty[:20]:
+            console.print(f"    [yellow]{f}[/yellow]")
+        if len(dirty) > 20:
+            console.print(f"    [dim]... and {len(dirty) - 20} more[/dim]")
+    console.print()
+
+    if dirty:
+        if yes:
+            action = "discard"
+        else:
+            choice = Prompt.ask(
+                "[bold]Uncommitted changes detected.[/bold] [s]tash, [d]iscard, or [c]ancel?",
+                choices=["s", "d", "c"], default="c",
+            )
+            action = {"s": "stash", "d": "discard", "c": "cancel"}[choice]
+
+        if action == "cancel":
+            console.print("[yellow]Cancelled.[/yellow]")
+            return
+        if action == "stash":
+            stash_label = f"ccmux reset {name}"
+            try:
+                stash_changes(wt_path, stash_label)
+            except subprocess.CalledProcessError as e:
+                raise WorktreeError("stash", e.stderr or str(e))
+            console.print(f"  [green]✓[/green] Stashed changes ([dim]see `git stash list`[/dim])")
+        elif action == "discard":
+            try:
+                discard_all_changes(wt_path)
+            except subprocess.CalledProcessError as e:
+                raise WorktreeError("discard", e.stderr or str(e))
+            console.print(f"  [red]✓[/red] Discarded all uncommitted changes")
+
+    try:
+        fetch_origin(wt_path)
+    except subprocess.CalledProcessError as e:
+        raise WorktreeError("fetch", e.stderr or str(e))
+    console.print(f"  [green]✓[/green] Fetched origin")
+
+    # Re-resolve in case the remote default changed during fetch.
+    target_ref = _resolve_reset_target_ref(wt_path)
+    try:
+        checkout_detached(wt_path, target_ref)
+    except subprocess.CalledProcessError as e:
+        raise WorktreeError("checkout", e.stderr or str(e))
+    console.print(f"  [green]✓[/green] Checked out [green]{target_ref}[/green] (detached)")
+
+    if session.note:
+        state.update_session(name, note="")
+        console.print(f"  [green]✓[/green] Cleared session note")
+
+    notify_sidebars()
+    console.print(f"\n[bold green]Success![/bold green] Session '{name}' reset to {target_ref}.")
 
 
 # ---------------------------------------------------------------------------

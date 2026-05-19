@@ -26,6 +26,7 @@ from ccmux.session_ops import (
     do_session_note,
     do_session_remove,
     do_session_rename,
+    do_session_reset,
     do_session_which,
     stale_sessions_running,
 )
@@ -124,6 +125,16 @@ def session_kill(
 ) -> None:
     """Deactivate all sessions and shut down the workspace."""
     do_session_kill(yes=yes)
+
+
+@app.command(name="reset")
+def session_reset(
+    name: Optional[str] = None,
+    *,
+    yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
+) -> None:
+    """Reset a worktree session: clean tree, checkout latest origin/main detached, clear note."""
+    do_session_reset(name=name, yes=yes)
 
 
 @app.command(name="remove")
