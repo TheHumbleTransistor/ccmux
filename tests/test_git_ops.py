@@ -254,6 +254,45 @@ class TestIsBareRepo:
         mock_run.side_effect = subprocess.CalledProcessError(1, "git")
         assert is_bare_repo(Path("/home/user/project")) is False
 
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_project_root_bare_topology_detected(self, mock_run, tmp_path):
+        """Project root with .git redirect to .bare is detected as bare."""
+        # Create a .git redirect file at tmp_path
+        (tmp_path / ".git").write_text("gitdir: .bare")
+
+        mock_run.side_effect = [
+            # First call: --is-bare-repository returns false (project root)
+            _make_completed_process("false\n"),
+            # Second call: --git-common-dir returns the .bare path
+            _make_completed_process(str(tmp_path / ".bare") + "\n"),
+            # Third call: --is-bare-repository on .bare returns true
+            _make_completed_process("true\n"),
+        ]
+        assert is_bare_repo(tmp_path) is True
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_project_root_non_bare_common_dir(self, mock_run, tmp_path):
+        """Project root with .git redirect to non-bare dir returns False."""
+        (tmp_path / ".git").write_text("gitdir: .worktrees/main")
+
+        mock_run.side_effect = [
+            _make_completed_process("false\n"),
+            _make_completed_process(str(tmp_path / ".worktrees" / "main") + "\n"),
+            _make_completed_process("false\n"),
+        ]
+        assert is_bare_repo(tmp_path) is False
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_no_git_redirect_file_returns_false(self, mock_run, tmp_path):
+        """Normal repo without .git redirect file returns False after first check."""
+        # .git is a directory, not a file
+        (tmp_path / ".git").mkdir()
+
+        mock_run.return_value = _make_completed_process("false\n")
+        assert is_bare_repo(tmp_path) is False
+        # Only the first --is-bare-repository call should be made
+        assert mock_run.call_count == 1
+
 
 class TestResetHelpers:
     """Tests for fetch_origin, discard_all_changes, stash_changes,

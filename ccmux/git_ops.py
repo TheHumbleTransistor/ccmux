@@ -90,7 +90,13 @@ def get_worktree_root(path: Path) -> Optional[Path]:
 
 
 def is_bare_repo(repo_path: Path) -> bool:
-    """Check if the repository at repo_path is a bare repo topology."""
+    """Check if the repository at repo_path is a bare repo topology.
+
+    Returns True for:
+    - Standard bare repos (git clone --bare / git init --bare)
+    - Project root bare topologies where ``.git`` is a redirect file
+      pointing to a bare git directory (e.g. ``.bare/``)
+    """
     try:
         result = subprocess.run(
             ["git", "-C", str(repo_path), "rev-parse", "--is-bare-repository"],
@@ -98,9 +104,33 @@ def is_bare_repo(repo_path: Path) -> bool:
             text=True,
             check=True,
         )
-        return result.stdout.strip() == "true"
+        if result.stdout.strip() == "true":
+            return True
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
+
+    # Project root bare topology: .git is a redirect file to a bare git dir.
+    # In this case --is-bare-repository returns false because git follows the
+    # redirect and sees a normal worktree context.  Check the common dir.
+    git_file = repo_path / ".git"
+    if git_file.is_file():
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(repo_path), "rev-parse",
+                 "--path-format=absolute", "--git-common-dir"],
+                capture_output=True, text=True, check=True,
+            )
+            common_dir = Path(result.stdout.strip())
+            if common_dir.name != ".git":
+                result2 = subprocess.run(
+                    ["git", "-C", str(common_dir), "rev-parse",
+                     "--is-bare-repository"],
+                    capture_output=True, text=True, check=True,
+                )
+                return result2.stdout.strip() == "true"
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+    return False
 
 
 def get_default_branch() -> Optional[str]:

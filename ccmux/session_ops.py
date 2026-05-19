@@ -240,6 +240,14 @@ def find_session_by_name(sessions: list, name: str):
     return None
 
 
+def _is_running_in_bash_pane(session_name: str) -> bool:
+    """Check if the current process is running in the bash pane of the given session."""
+    env_session = os.environ.get("CCMUX_SESSION")
+    if env_session != session_name:
+        return False
+    return get_current_tmux_session() == BASH_SESSION
+
+
 def auto_attach_if_outside_tmux(yes: bool = False) -> None:
     """Prompt and attach to tmux if not already inside tmux."""
     if "TMUX" not in os.environ:
@@ -321,7 +329,12 @@ def _validate_repo_context(path: Optional[str] = None) -> tuple[Path, str, Path]
         # caller can reuse the existing worktree instead of creating one.
         working_dir = get_worktree_root(original_cwd) or repo_root
     else:
-        working_dir = repo_root
+        # For non-bare repos, preserve the worktree root if the user is
+        # inside a linked worktree (not the main working tree).  This lets
+        # _resolve_session_type detect duplicate sessions and offer to
+        # create a new worktree instead.
+        wt_root = get_worktree_root(original_cwd) if original_cwd != repo_root else None
+        working_dir = wt_root if (wt_root and wt_root != repo_root) else repo_root
     return repo_root, default_branch, working_dir
 
 
@@ -330,20 +343,23 @@ def _resolve_session_type(repo_root: Path, worktree: bool, yes: bool,
     """Decide whether to create as worktree. Returns create_as_worktree flag."""
     if worktree:
         return True
+
+    # Inside an existing worktree (bare or non-bare) — check for duplicate session.
+    if working_dir is not None and working_dir != repo_root:
+        for sess in state.get_all_sessions():
+            if sess.session_path == str(working_dir):
+                console.print(f"[yellow]Warning:[/yellow] This directory already has a session: '{sess.name}'")
+                if yes or Confirm.ask("Create a new worktree instead?", default=True):
+                    return True
+                raise UserAbortedError("Directory already in use.")
+        # No existing session at this worktree — reuse it directly.
+        return False
+
     if is_bare_repo(repo_root):
-        if working_dir is not None and working_dir != repo_root:
-            # Inside an existing worktree — use it directly.
-            # Check for duplicate session at this worktree path.
-            for sess in state.get_all_sessions():
-                if sess.session_path == str(working_dir):
-                    console.print(f"[yellow]Warning:[/yellow] This worktree already has a session: '{sess.name}'")
-                    if yes or Confirm.ask("Create a new worktree instead?", default=True):
-                        return True
-                    raise UserAbortedError("Worktree already in use.")
-            return False
         # At bare repo root — create a worktree.
         console.print("[yellow]Bare repository detected — creating worktree session.[/yellow]")
         return True
+
     existing_main = state.find_main_repo_session(str(repo_root))
     if existing_main:
         console.print(f"[yellow]Warning:[/yellow] Main repository already has a session: '{existing_main.name}'")
@@ -1037,6 +1053,7 @@ def _remove_all_sessions(sessions: list, yes: bool) -> None:
         console.print(f"{prefix}[green]\u2713[/green] Removed '{sess.name}' from tracking")
         removed += 1
 
+    uninstall_inner_hook()
     _kill_remove_all_sessions()
     console.print(f"\n[bold green]Success![/bold green] Removed {removed} session(s).")
 
@@ -1093,17 +1110,32 @@ def _remove_single_session(name: str, sessions: list, yes: bool) -> None:
     state.remove_session(name)
     console.print(f"  [green]\u2713[/green] Removed '{name}' from tracking")
 
-    if is_active:
+    # Detect if we're running from the bash pane of the session being removed.
+    # If so, we must complete ALL cleanup before killing our own bash window,
+    # because that kill terminates this process via SIGHUP.
+    in_own_bash = is_active and _is_running_in_bash_pane(name)
+
+    if is_active and not in_own_bash:
         kill_session_windows(name, session.tmux_cc_window_id, session.tmux_bash_window_id)
         console.print(f"  [green]\u2713[/green] Deactivated '{name}'")
+    elif in_own_bash:
+        # Kill only the CC window — defer our own bash window kill to the end.
+        if session.tmux_cc_window_id:
+            kill_tmux_window(session.tmux_cc_window_id)
 
     notify_sidebars()
 
     remaining = state.get_all_sessions()
     if not remaining:
         uninstall_inner_hook()
-        kill_outer_session()
+        # Kill OUTER and INNER first (safe), then BASH last (kills us if in_own_bash).
+        kill_tmux_session(OUTER_SESSION)
         kill_tmux_session(INNER_SESSION)
+        kill_tmux_session(BASH_SESSION)
+    elif in_own_bash:
+        # Not the last session — kill only our own bash window (terminates us).
+        bash_target = session.tmux_bash_window_id or f"{BASH_SESSION}:{name}"
+        kill_tmux_window(bash_target)
 
     if is_main_repo:
         console.print(f"\n[bold green]Success![/bold green] Main repository '{name}' removed from tracking.")

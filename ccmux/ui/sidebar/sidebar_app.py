@@ -79,6 +79,18 @@ class SidebarApp(App):
         await self._refresh_sessions(caller="mount")
         self.set_interval(self._poll_interval, self._poll_refresh)
         self._register_signal_handler()
+        # Schedule a deferred resize to catch SIGWINCH events lost during
+        # pane setup (the panes are split/resized after the sidebar starts).
+        self.set_timer(0.5, self._deferred_resize)
+
+    def _deferred_resize(self) -> None:
+        """Force a resize after pane splitting has completed."""
+        try:
+            pty = os.get_terminal_size()
+            size = Size(pty.columns, pty.lines)
+            self.post_message(events.Resize(size, size))
+        except OSError:
+            pass
 
 
     def _toggle_about(self) -> None:
