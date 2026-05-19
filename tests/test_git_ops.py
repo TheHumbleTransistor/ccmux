@@ -10,6 +10,8 @@ from ccmux.git_ops import (
     get_default_branch,
     get_most_recently_used_branch,
     get_repo_root,
+    get_worktree_root,
+    is_bare_repo,
 )
 
 
@@ -149,6 +151,142 @@ class TestGetRepoRoot:
         """Returns None when git command fails."""
         mock_run.side_effect = subprocess.CalledProcessError(1, "git")
         assert get_repo_root() is None
+
+    @patch("ccmux.git_ops.Path.exists", return_value=True)
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_bare_repo_returns_project_root(self, mock_run, mock_exists):
+        """Bare repo topology: returns the project root, not the .bare dir.
+
+        When --git-common-dir returns a path like /project/.bare (not .git),
+        and ``git worktree list`` marks the first entry as ``bare``, the
+        project root is the parent of the bare git directory.
+        """
+        mock_run.side_effect = [
+            _make_completed_process("/home/user/project/.bare\n"),
+            _make_completed_process(
+                "worktree /home/user/project/.bare\nbare\n\n"
+                "worktree /home/user/project/main\nHEAD abc123\n"
+                "branch refs/heads/main\n\n"
+            ),
+        ]
+        assert get_repo_root() == Path("/home/user/project")
+        assert mock_run.call_count == 2
+
+    @patch("ccmux.git_ops.Path.exists", return_value=True)
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_bare_repo_from_worktree(self, mock_run, mock_exists):
+        """Bare repo from inside a worktree still returns the project root.
+
+        Git resolves through the worktree to the shared bare repo, so
+        --git-common-dir returns the same .bare path regardless of cwd.
+        """
+        mock_run.side_effect = [
+            _make_completed_process("/home/user/project/.bare\n"),
+            _make_completed_process(
+                "worktree /home/user/project/.bare\nbare\n\n"
+                "worktree /home/user/project/main\nHEAD abc123\n"
+                "branch refs/heads/main\n\n"
+            ),
+        ]
+        assert get_repo_root() == Path("/home/user/project")
+
+    @patch("ccmux.git_ops.Path.exists", return_value=False)
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_bare_repo_without_git_redirect_falls_back(self, mock_run, mock_exists):
+        """Bare repo without .git at parent falls back to first worktree path.
+
+        Standalone bare repos (no .git redirect file) should not crash.
+        """
+        mock_run.side_effect = [
+            _make_completed_process("/some/bare-repo.git\n"),
+            _make_completed_process(
+                "worktree /some/bare-repo.git\nbare\n\n"
+            ),
+        ]
+        assert get_repo_root() == Path("/some/bare-repo.git")
+
+
+class TestGetWorktreeRoot:
+    """Tests for get_worktree_root()."""
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_returns_worktree_root(self, mock_run):
+        """Returns the worktree root when inside a worktree."""
+        mock_run.return_value = _make_completed_process("/home/user/project/main\n")
+        assert get_worktree_root(Path("/home/user/project/main/src")) == Path("/home/user/project/main")
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_returns_none_at_bare_root(self, mock_run):
+        """Returns None when at a bare repo root (not a worktree)."""
+        mock_run.side_effect = subprocess.CalledProcessError(128, "git")
+        assert get_worktree_root(Path("/home/user/project")) is None
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_returns_none_outside_repo(self, mock_run):
+        """Returns None when outside any git repo."""
+        mock_run.side_effect = subprocess.CalledProcessError(128, "git")
+        assert get_worktree_root(Path("/tmp")) is None
+
+
+class TestIsBareRepo:
+    """Tests for is_bare_repo()."""
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_returns_true_for_bare_repo(self, mock_run):
+        """Returns True when git reports bare repository."""
+        mock_run.return_value = _make_completed_process("true\n")
+        assert is_bare_repo(Path("/home/user/project")) is True
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_returns_false_for_normal_repo(self, mock_run):
+        """Returns False for a normal (non-bare) repository."""
+        mock_run.return_value = _make_completed_process("false\n")
+        assert is_bare_repo(Path("/home/user/project")) is False
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_returns_false_on_failure(self, mock_run):
+        """Returns False when git command fails."""
+        mock_run.side_effect = subprocess.CalledProcessError(1, "git")
+        assert is_bare_repo(Path("/home/user/project")) is False
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_project_root_bare_topology_detected(self, mock_run, tmp_path):
+        """Project root with .git redirect to .bare is detected as bare."""
+        # Create a .git redirect file at tmp_path
+        (tmp_path / ".git").write_text("gitdir: .bare")
+
+        mock_run.side_effect = [
+            # First call: --is-bare-repository returns false (project root)
+            _make_completed_process("false\n"),
+            # Second call: --git-common-dir returns the .bare path
+            _make_completed_process(str(tmp_path / ".bare") + "\n"),
+            # Third call: --is-bare-repository on .bare returns true
+            _make_completed_process("true\n"),
+        ]
+        assert is_bare_repo(tmp_path) is True
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_project_root_non_bare_common_dir(self, mock_run, tmp_path):
+        """Project root with .git redirect to non-bare dir returns False."""
+        (tmp_path / ".git").write_text("gitdir: .worktrees/main")
+
+        mock_run.side_effect = [
+            _make_completed_process("false\n"),
+            _make_completed_process(str(tmp_path / ".worktrees" / "main") + "\n"),
+            _make_completed_process("false\n"),
+        ]
+        assert is_bare_repo(tmp_path) is False
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_no_git_redirect_file_returns_false(self, mock_run, tmp_path):
+        """Normal repo without .git redirect file returns False after first check."""
+        # .git is a directory, not a file
+        (tmp_path / ".git").mkdir()
+
+        mock_run.return_value = _make_completed_process("false\n")
+        assert is_bare_repo(tmp_path) is False
+        # Only the first --is-bare-repository call should be made
+        assert mock_run.call_count == 1
 
 
 class TestCreateWorktree:

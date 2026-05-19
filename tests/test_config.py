@@ -1,4 +1,4 @@
-"""Tests for ccmux.config — post_create command execution."""
+"""Tests for ccmux.config — config accessors and post_create command execution."""
 
 import subprocess
 from pathlib import Path
@@ -6,7 +6,17 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from ccmux.config import CommandEvent, run_post_create_commands
+from ccmux.config import (
+    CommandEvent,
+    get_agent_launch,
+    get_bash_launch,
+    get_worktrees_dir,
+    load_repo_config,
+    run_post_create_commands,
+    run_repo_init_commands,
+    run_session_post_create_commands,
+)
+from ccmux.session_ops import build_agent_command
 
 
 def _write_config(tmp_path: Path, toml_content: str) -> Path:
@@ -15,6 +25,226 @@ def _write_config(tmp_path: Path, toml_content: str) -> Path:
     config_file.write_text(toml_content)
     return tmp_path
 
+
+# ---------------------------------------------------------------------------
+# Config accessor tests
+# ---------------------------------------------------------------------------
+
+class TestGetAgentLaunch:
+    """Tests for get_agent_launch config accessor."""
+
+    def test_default_when_no_config(self, tmp_path):
+        assert get_agent_launch(tmp_path) == "claude"
+
+    def test_launch_key(self, tmp_path):
+        _write_config(tmp_path, '[agent]\nlaunch = "docker exec -it sandbox claude"\n')
+        assert get_agent_launch(tmp_path) == "docker exec -it sandbox claude"
+
+    def test_default_when_no_agent_section(self, tmp_path):
+        _write_config(tmp_path, '[worktree]\npost_create = []\n')
+        assert get_agent_launch(tmp_path) == "claude"
+
+    def test_backwards_compat_command_key(self, tmp_path):
+        _write_config(tmp_path, '[agent]\ncommand = "aider"\n')
+        assert get_agent_launch(tmp_path) == "aider"
+
+    def test_launch_takes_precedence_over_command(self, tmp_path):
+        _write_config(tmp_path, '[agent]\nlaunch = "claude"\ncommand = "aider"\n')
+        assert get_agent_launch(tmp_path) == "claude"
+
+    def test_list_of_commands_joined(self, tmp_path):
+        _write_config(tmp_path, '[agent]\nlaunch = ["source .venv/bin/activate", "claude --session-id $CCMUX_AGENT_SESSION_ID"]\n')
+        assert get_agent_launch(tmp_path) == "source .venv/bin/activate && claude --session-id $CCMUX_AGENT_SESSION_ID"
+
+
+class TestGetBashLaunch:
+    """Tests for get_bash_launch config accessor."""
+
+    def test_default_when_no_config(self, tmp_path):
+        assert get_bash_launch(tmp_path) == "$SHELL"
+
+    def test_launch_key(self, tmp_path):
+        _write_config(tmp_path, '[bash]\nlaunch = "docker exec -it sandbox bash"\n')
+        assert get_bash_launch(tmp_path) == "docker exec -it sandbox bash"
+
+    def test_default_when_no_bash_section(self, tmp_path):
+        _write_config(tmp_path, '[agent]\nlaunch = "claude"\n')
+        assert get_bash_launch(tmp_path) == "$SHELL"
+
+    def test_backwards_compat_command_key(self, tmp_path):
+        _write_config(tmp_path, '[bash]\ncommand = "zsh"\n')
+        assert get_bash_launch(tmp_path) == "zsh"
+
+    def test_launch_takes_precedence_over_command(self, tmp_path):
+        _write_config(tmp_path, '[bash]\nlaunch = "fish"\ncommand = "zsh"\n')
+        assert get_bash_launch(tmp_path) == "fish"
+
+    def test_list_of_commands_joined(self, tmp_path):
+        _write_config(tmp_path, '[bash]\nlaunch = ["export FOO=bar", "exec bash"]\n')
+        assert get_bash_launch(tmp_path) == "export FOO=bar && exec bash"
+
+
+# ---------------------------------------------------------------------------
+# Config search path tests (worktree-first fallback for bare repos)
+# ---------------------------------------------------------------------------
+
+class TestConfigSearchPath:
+    """Tests for load_repo_config session_path-first search."""
+
+    def test_session_path_takes_precedence(self, tmp_path):
+        """Config in session_path is preferred over repo_root."""
+        repo_root = tmp_path / "repo"
+        session = tmp_path / "session"
+        repo_root.mkdir()
+        session.mkdir()
+        (repo_root / "ccmux.toml").write_text('[agent]\nlaunch = "from-repo"\n')
+        (session / "ccmux.toml").write_text('[agent]\nlaunch = "from-session"\n')
+
+        config = load_repo_config(repo_root, session_path=session)
+        assert config["agent"]["launch"] == "from-session"
+
+    def test_falls_back_to_repo_root(self, tmp_path):
+        """When session_path has no config, falls back to repo_root."""
+        repo_root = tmp_path / "repo"
+        session = tmp_path / "session"
+        repo_root.mkdir()
+        session.mkdir()
+        (repo_root / "ccmux.toml").write_text('[agent]\nlaunch = "from-repo"\n')
+
+        config = load_repo_config(repo_root, session_path=session)
+        assert config["agent"]["launch"] == "from-repo"
+
+    def test_no_session_path_uses_repo_root(self, tmp_path):
+        """Without session_path, behaves like before (repo_root only)."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / "ccmux.toml").write_text('[agent]\nlaunch = "from-repo"\n')
+
+        config = load_repo_config(repo_root)
+        assert config["agent"]["launch"] == "from-repo"
+
+    def test_session_path_same_as_repo_root(self, tmp_path):
+        """When session_path == repo_root, no duplicate check."""
+        _write_config(tmp_path, '[agent]\nlaunch = "hello"\n')
+        config = load_repo_config(tmp_path, session_path=tmp_path)
+        assert config["agent"]["launch"] == "hello"
+
+    def test_none_when_neither_has_config(self, tmp_path):
+        """Returns None when no config exists in either path."""
+        repo_root = tmp_path / "repo"
+        session = tmp_path / "session"
+        repo_root.mkdir()
+        session.mkdir()
+        assert load_repo_config(repo_root, session_path=session) is None
+
+    def test_get_worktrees_dir_default(self, tmp_path):
+        """Returns default .ccmux/worktrees when no config."""
+        assert str(get_worktrees_dir(tmp_path)) == ".ccmux/worktrees"
+
+    def test_get_worktrees_dir_from_config(self, tmp_path):
+        """Returns configured [worktree].dir value."""
+        _write_config(tmp_path, '[worktree]\ndir = "."\n')
+        assert str(get_worktrees_dir(tmp_path)) == "."
+
+    def test_get_worktrees_dir_custom_path(self, tmp_path):
+        """Returns a custom relative path from config."""
+        _write_config(tmp_path, '[worktree]\ndir = "my-worktrees"\n')
+        assert str(get_worktrees_dir(tmp_path)) == "my-worktrees"
+
+    def test_get_agent_launch_with_session_path(self, tmp_path):
+        """get_agent_launch forwards session_path to load_repo_config."""
+        repo_root = tmp_path / "repo"
+        session = tmp_path / "session"
+        repo_root.mkdir()
+        session.mkdir()
+        (session / "ccmux.toml").write_text('[agent]\nlaunch = "from-session"\n')
+
+        assert get_agent_launch(repo_root, session) == "from-session"
+
+    def test_get_bash_launch_with_session_path(self, tmp_path):
+        """get_bash_launch forwards session_path to load_repo_config."""
+        repo_root = tmp_path / "repo"
+        session = tmp_path / "session"
+        repo_root.mkdir()
+        session.mkdir()
+        (session / "ccmux.toml").write_text('[bash]\nlaunch = "from-session"\n')
+
+        assert get_bash_launch(repo_root, session) == "from-session"
+
+
+# ---------------------------------------------------------------------------
+# build_agent_command tests
+# ---------------------------------------------------------------------------
+
+class TestBuildAgentCommand:
+    """Tests for build_agent_command."""
+
+    def test_default_new_session(self):
+        cmd = build_agent_command("sess", "abc-123", repo_root="/repo", session_path="/repo")
+        assert "claude --session-id abc-123" in cmd
+
+    def test_default_resume(self):
+        cmd = build_agent_command("sess", "abc-123", repo_root="/repo", session_path="/repo", resume=True)
+        assert "claude --resume abc-123 || claude" in cmd
+
+    def test_custom_launch_no_flags_appended(self):
+        cmd = build_agent_command("sess", "abc-123", repo_root="/repo", session_path="/repo",
+                                  agent_launch="aider")
+        assert "aider" in cmd
+        assert "--session-id" not in cmd
+        assert "--resume" not in cmd
+
+    def test_custom_launch_resume_same_command(self):
+        """Resume doesn't change the custom command — CCMUX_SESSION_RESUMING env var handles it."""
+        cmd_new = build_agent_command("sess", "abc-123", repo_root="/repo", session_path="/repo",
+                                      agent_launch="myagent")
+        cmd_resume = build_agent_command("sess", "abc-123", repo_root="/repo", session_path="/repo",
+                                          agent_launch="myagent", resume=True)
+        # Both should contain "myagent" verbatim
+        assert "myagent" in cmd_new
+        assert "myagent" in cmd_resume
+        # But the CCMUX_SESSION_RESUMING differs
+        assert "CCMUX_SESSION_RESUMING=0" in cmd_new
+        assert "CCMUX_SESSION_RESUMING=1" in cmd_resume
+
+    def test_session_resuming_env_var_new(self):
+        cmd = build_agent_command("sess", "id", repo_root="/repo", session_path="/repo")
+        assert "CCMUX_SESSION_RESUMING=0" in cmd
+
+    def test_session_resuming_env_var_resume(self):
+        cmd = build_agent_command("sess", "id", repo_root="/repo", session_path="/repo", resume=True)
+        assert "CCMUX_SESSION_RESUMING=1" in cmd
+
+    def test_session_id_env_var_always_exported(self):
+        for launch in ["claude", "aider"]:
+            cmd = build_agent_command("sess", "my-uuid", repo_root="/repo", session_path="/repo",
+                                      agent_launch=launch)
+            assert "CCMUX_AGENT_SESSION_ID=my-uuid" in cmd
+
+    def test_ccmux_session_env_var(self):
+        cmd = build_agent_command("aquatic-otter", "id", repo_root="/repo", session_path="/repo")
+        assert "CCMUX_SESSION=aquatic-otter" in cmd
+
+    def test_repo_root_exported(self):
+        cmd = build_agent_command("sess", "id", repo_root="/home/user/myrepo", session_path="/home/user/myrepo")
+        assert "CCMUX_REPO_ROOT=/home/user/myrepo" in cmd
+
+    def test_session_relative_dir_worktree(self):
+        cmd = build_agent_command("sess", "id",
+                                  repo_root="/repo",
+                                  session_path="/repo/.worktrees/my-session")
+        assert "CCMUX_SESSION_RELATIVE_DIR=.worktrees/my-session" in cmd
+
+    def test_session_relative_dir_main_repo(self):
+        cmd = build_agent_command("sess", "id",
+                                  repo_root="/repo",
+                                  session_path="/repo")
+        assert "CCMUX_SESSION_RELATIVE_DIR=." in cmd
+
+
+# ---------------------------------------------------------------------------
+# run_post_create_commands tests
+# ---------------------------------------------------------------------------
 
 class TestRunPostCreateCommandsNoOp:
     """Cases where the generator should yield nothing."""
@@ -154,6 +384,71 @@ class TestEnvironmentAndCwd:
         assert mock_popen.call_args[1]["cwd"] == str(session_path)
 
 
+class TestRunSessionPostCreateCommands:
+    """Tests for [session].post_create command execution."""
+
+    def test_no_config_file(self, tmp_path):
+        events = list(run_session_post_create_commands(tmp_path, tmp_path, "sess"))
+        assert events == []
+
+    def test_empty_post_create_list(self, tmp_path):
+        _write_config(tmp_path, '[session]\npost_create = []\n')
+        events = list(run_session_post_create_commands(tmp_path, tmp_path, "sess"))
+        assert events == []
+
+    def test_no_session_section(self, tmp_path):
+        _write_config(tmp_path, '[worktree]\npost_create = ["echo wt"]\n')
+        events = list(run_session_post_create_commands(tmp_path, tmp_path, "sess"))
+        assert events == []
+
+    @patch("ccmux.config.subprocess.Popen")
+    def test_runs_session_commands(self, mock_popen, tmp_path):
+        _write_config(tmp_path, '[session]\npost_create = ["echo hello"]\n')
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter(["hello\n"])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        events = list(run_session_post_create_commands(tmp_path, tmp_path, "sess"))
+
+        assert len(events) == 3
+        assert events[0] == CommandEvent(cmd="echo hello", event_type="start")
+        assert events[1] == CommandEvent(cmd="echo hello", event_type="stdout", data="hello")
+        assert events[2] == CommandEvent(cmd="echo hello", event_type="success")
+
+    @patch("ccmux.config.subprocess.Popen")
+    def test_does_not_run_worktree_commands(self, mock_popen, tmp_path):
+        """[session].post_create should not pick up [worktree].post_create."""
+        _write_config(tmp_path, '[worktree]\npost_create = ["echo wt"]\n')
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        events = list(run_session_post_create_commands(tmp_path, tmp_path, "sess"))
+        assert events == []
+        mock_popen.assert_not_called()
+
+    @patch("ccmux.config.subprocess.Popen")
+    def test_env_vars_set(self, mock_popen, tmp_path):
+        _write_config(tmp_path, '[session]\npost_create = ["true"]\n')
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        session_path = tmp_path / "work"
+        list(run_session_post_create_commands(tmp_path, session_path, "my-sess"))
+
+        env = mock_popen.call_args[1]["env"]
+        assert env["CCMUX_REPO_ROOT"] == str(tmp_path)
+        assert env["CCMUX_SESSION_PATH"] == str(session_path)
+        assert env["CCMUX_SESSION_NAME"] == "my-sess"
+
+
 class TestDisplayIntegration:
     """Tests for _run_post_create_with_display in session_ops."""
 
@@ -202,3 +497,152 @@ class TestDisplayIntegration:
         _run_post_create_with_display(Path("/repo"), Path("/wt"), "sess")
 
         mock_console.print.assert_not_called()
+
+
+class TestSessionDisplayIntegration:
+    """Tests for _run_session_post_create_with_display in session_ops."""
+
+    @patch("ccmux.session_ops.console")
+    @patch("ccmux.session_ops.run_session_post_create_commands")
+    def test_display_prints_session_hooks(self, mock_gen, mock_console):
+        from ccmux.session_ops import _run_session_post_create_with_display
+
+        mock_gen.return_value = iter([
+            CommandEvent(cmd="echo setup", event_type="start"),
+            CommandEvent(cmd="echo setup", event_type="success"),
+        ])
+
+        _run_session_post_create_with_display(Path("/repo"), Path("/wt"), "sess")
+
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "session post_create" in printed
+        assert "echo setup" in printed
+
+    @patch("ccmux.session_ops.console")
+    @patch("ccmux.session_ops.run_session_post_create_commands")
+    def test_display_noop_when_no_commands(self, mock_gen, mock_console):
+        from ccmux.session_ops import _run_session_post_create_with_display
+
+        mock_gen.return_value = iter([])
+
+        _run_session_post_create_with_display(Path("/repo"), Path("/wt"), "sess")
+
+        mock_console.print.assert_not_called()
+
+
+class TestRunRepoInitCommands:
+    """Tests for [repo].init command execution."""
+
+    def test_no_config_file(self, tmp_path):
+        events = list(run_repo_init_commands(tmp_path, tmp_path, "sess"))
+        assert events == []
+
+    def test_empty_init_list(self, tmp_path):
+        _write_config(tmp_path, '[repo]\ninit = []\n')
+        events = list(run_repo_init_commands(tmp_path, tmp_path, "sess"))
+        assert events == []
+
+    def test_no_repo_section(self, tmp_path):
+        _write_config(tmp_path, '[session]\npost_create = ["echo hi"]\n')
+        events = list(run_repo_init_commands(tmp_path, tmp_path, "sess"))
+        assert events == []
+
+    @patch("ccmux.config.subprocess.Popen")
+    def test_runs_init_commands(self, mock_popen, tmp_path):
+        _write_config(tmp_path, '[repo]\ninit = ["npm install"]\n')
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter(["added 100 packages\n"])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        events = list(run_repo_init_commands(tmp_path, tmp_path, "sess"))
+
+        assert len(events) == 3
+        assert events[0] == CommandEvent(cmd="npm install", event_type="start")
+        assert events[1] == CommandEvent(cmd="npm install", event_type="stdout", data="added 100 packages")
+        assert events[2] == CommandEvent(cmd="npm install", event_type="success")
+
+    @patch("ccmux.config.subprocess.Popen")
+    def test_does_not_run_session_or_worktree_commands(self, mock_popen, tmp_path):
+        _write_config(tmp_path, '[session]\npost_create = ["echo session"]\n[worktree]\npost_create = ["echo wt"]\n')
+        events = list(run_repo_init_commands(tmp_path, tmp_path, "sess"))
+        assert events == []
+        mock_popen.assert_not_called()
+
+    @patch("ccmux.config.subprocess.Popen")
+    def test_env_vars_set(self, mock_popen, tmp_path):
+        _write_config(tmp_path, '[repo]\ninit = ["true"]\n')
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        session_path = tmp_path / "work"
+        list(run_repo_init_commands(tmp_path, session_path, "my-sess"))
+
+        env = mock_popen.call_args[1]["env"]
+        assert env["CCMUX_REPO_ROOT"] == str(tmp_path)
+        assert env["CCMUX_SESSION_PATH"] == str(session_path)
+        assert env["CCMUX_SESSION_NAME"] == "my-sess"
+
+
+class TestRepoInitDisplayIntegration:
+    """Tests for _run_repo_init_with_display in session_ops."""
+
+    @patch("ccmux.session_ops.console")
+    @patch("ccmux.session_ops.run_repo_init_commands")
+    def test_display_prints_repo_init_hooks(self, mock_gen, mock_console):
+        from ccmux.session_ops import _run_repo_init_with_display
+
+        mock_gen.return_value = iter([
+            CommandEvent(cmd="npm install", event_type="start"),
+            CommandEvent(cmd="npm install", event_type="success"),
+        ])
+
+        _run_repo_init_with_display(Path("/repo"), Path("/wt"), "sess")
+
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "repo init" in printed
+        assert "npm install" in printed
+
+    @patch("ccmux.session_ops.console")
+    @patch("ccmux.session_ops.run_repo_init_commands")
+    def test_display_noop_when_no_commands(self, mock_gen, mock_console):
+        from ccmux.session_ops import _run_repo_init_with_display
+
+        mock_gen.return_value = iter([])
+
+        _run_repo_init_with_display(Path("/repo"), Path("/wt"), "sess")
+
+        mock_console.print.assert_not_called()
+
+
+class TestIsFirstSessionForRepo:
+    """Tests for _is_first_session_for_repo."""
+
+    @patch("ccmux.session_ops.state")
+    def test_true_when_no_sessions(self, mock_state):
+        from ccmux.session_ops import _is_first_session_for_repo
+
+        mock_state.get_all_sessions.return_value = []
+        assert _is_first_session_for_repo(Path("/repo")) is True
+
+    @patch("ccmux.session_ops.state")
+    def test_true_when_no_sessions_for_this_repo(self, mock_state):
+        from ccmux.session_ops import _is_first_session_for_repo
+
+        other_sess = MagicMock()
+        other_sess.repo_path = "/other/repo"
+        mock_state.get_all_sessions.return_value = [other_sess]
+        assert _is_first_session_for_repo(Path("/repo")) is True
+
+    @patch("ccmux.session_ops.state")
+    def test_false_when_session_exists_for_repo(self, mock_state):
+        from ccmux.session_ops import _is_first_session_for_repo
+
+        existing = MagicMock()
+        existing.repo_path = "/repo"
+        mock_state.get_all_sessions.return_value = [existing]
+        assert _is_first_session_for_repo(Path("/repo")) is False

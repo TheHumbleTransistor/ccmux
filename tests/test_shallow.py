@@ -105,21 +105,33 @@ class TestDoSessionNewShallow:
     @patch("ccmux.session_ops._reactivate_orphaned_sessions")
     @patch("ccmux.session_ops._save_new_session_state")
     @patch("ccmux.session_ops._create_new_session_window", return_value=("@1", "@2"))
-    @patch("ccmux.session_ops.build_claude_command", return_value="claude")
+    @patch("ccmux.session_ops.build_agent_command", return_value="claude")
+    @patch("ccmux.session_ops.get_agent_launch", return_value="claude")
+    @patch("ccmux.session_ops.get_bash_launch", return_value="bash")
     @patch("ccmux.session_ops.tmux_session_exists", return_value=False)
+    @patch("ccmux.session_ops._run_session_post_create_with_display")
+    @patch("ccmux.session_ops._run_repo_init_with_display")
+    @patch("ccmux.session_ops._is_first_session_for_repo", return_value=False)
     @patch("ccmux.session_ops._print_creation_info")
     @patch("ccmux.session_ops._generate_session_name", return_value="test-session")
     @patch("ccmux.session_ops._resolve_session_type", return_value=True)
+    @patch("ccmux.session_ops.get_worktrees_dir", return_value=".ccmux_worktrees")
     @patch("ccmux.session_ops._validate_repo_context")
     @patch("ccmux.session_ops._setup_worktree")
     def test_shallow_flag_passed_to_setup_worktree(
         self,
         mock_setup_wt,
         mock_validate,
+        mock_get_worktrees_dir,
         mock_resolve_type,
         mock_gen_name,
         mock_print_info,
+        mock_is_first,
+        mock_run_repo_init,
+        mock_run_session_post,
         mock_tmux_exists,
+        mock_bash_launch,
+        mock_agent_launch,
         mock_build_cmd,
         mock_create_window,
         mock_save_state,
@@ -143,21 +155,33 @@ class TestDoSessionNewShallow:
     @patch("ccmux.session_ops._reactivate_orphaned_sessions")
     @patch("ccmux.session_ops._save_new_session_state")
     @patch("ccmux.session_ops._create_new_session_window", return_value=("@1", "@2"))
-    @patch("ccmux.session_ops.build_claude_command", return_value="claude")
+    @patch("ccmux.session_ops.build_agent_command", return_value="claude")
+    @patch("ccmux.session_ops.get_agent_launch", return_value="claude")
+    @patch("ccmux.session_ops.get_bash_launch", return_value="bash")
     @patch("ccmux.session_ops.tmux_session_exists", return_value=False)
+    @patch("ccmux.session_ops._run_session_post_create_with_display")
+    @patch("ccmux.session_ops._run_repo_init_with_display")
+    @patch("ccmux.session_ops._is_first_session_for_repo", return_value=False)
     @patch("ccmux.session_ops._print_creation_info")
     @patch("ccmux.session_ops._generate_session_name", return_value="test-session")
     @patch("ccmux.session_ops._resolve_session_type", return_value=True)
+    @patch("ccmux.session_ops.get_worktrees_dir", return_value=".ccmux_worktrees")
     @patch("ccmux.session_ops._validate_repo_context")
     @patch("ccmux.session_ops._setup_worktree")
     def test_shallow_flag_saved_in_state(
         self,
         mock_setup_wt,
         mock_validate,
+        mock_get_worktrees_dir,
         mock_resolve_type,
         mock_gen_name,
         mock_print_info,
+        mock_is_first,
+        mock_run_repo_init,
+        mock_run_session_post,
         mock_tmux_exists,
+        mock_bash_launch,
+        mock_agent_launch,
         mock_build_cmd,
         mock_create_window,
         mock_save_state,

@@ -21,6 +21,7 @@ from ccmux.tmux_ops import (
     get_tmux_windows,
     kill_tmux_session,
     resize_pane,
+    respawn_pane,
     select_pane,
     set_hook,
     set_session_option,
@@ -33,6 +34,19 @@ from ccmux.ui.sidebar.process_id import SIDEBAR_PIDS_DIR
 from ccmux.ui.tmux import apply_outer_session_config, apply_server_global_config
 
 HOOKS_DIR = Path.home() / ".ccmux" / "hooks"
+
+
+def _send_sigwinch_to_pane(target: str) -> None:
+    """Send SIGWINCH to the process in a tmux pane so it recalculates layout."""
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-t", target, "-p", "#{pane_pid}"],
+            capture_output=True, text=True, check=True,
+        )
+        pid = int(result.stdout.strip())
+        os.kill(pid, signal.SIGWINCH)
+    except (subprocess.CalledProcessError, ValueError, ProcessLookupError):
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +195,10 @@ def create_outer_session() -> None:
     )
 
     try:
-        create_session_simple(OUTER_SESSION, sidebar_cmd)
+        # Phase 1: Create session with placeholder, build pane layout.
+        # Starting the sidebar here would expose it to a storm of SIGWINCH
+        # signals as panes are split and resized, causing Textual to crash.
+        create_session_simple(OUTER_SESSION, "sleep infinity")
         apply_server_global_config()
         apply_outer_session_config(OUTER_SESSION)
         if tmux_session_exists(BASH_SESSION):
@@ -190,6 +207,15 @@ def create_outer_session() -> None:
         split_window(f"{OUTER_SESSION}:0.0", "-h", "50%",
                      f"TMUX= tmux attach -t ={INNER_SESSION}")
         resize_pane(f"{OUTER_SESSION}:0.0", SIDEBAR_WIDTH)
+
+        # Phase 2: Layout is stable — start the real sidebar.
+        if not respawn_pane(f"{OUTER_SESSION}:0.0", sidebar_cmd):
+            print(
+                f"ccmux: failed to start sidebar in '{OUTER_SESSION}' (respawn-pane failed)",
+                file=sys.stderr,
+            )
+            return
+        _send_sigwinch_to_pane(f"{OUTER_SESSION}:0.0")
         install_inner_hook()
         install_detach_hook()
         _rebind_detach_key()
@@ -221,12 +247,19 @@ def kill_outer_session() -> bool:
 # Bash window management
 # ---------------------------------------------------------------------------
 
-def create_bash_window(session_name: str, working_dir: str) -> str | None:
+def create_bash_window(session_name: str, working_dir: str,
+                       shell_launch: str = "$SHELL",
+                       repo_root: str = "") -> str | None:
     """Create a window in the bash session for a session. Returns window ID or None."""
+    rel_dir = os.path.relpath(working_dir, repo_root) if repo_root else "."
+    if not rel_dir:
+        rel_dir = "."
     bash_cmd = (
         f"export CCMUX_SESSION={session_name}; "
+        f"export CCMUX_REPO_ROOT={repo_root}; "
+        f"export CCMUX_SESSION_RELATIVE_DIR={rel_dir}; "
         f"export COLORTERM=truecolor; "
-        f"while true; do $SHELL; done"
+        f"while true; do {shell_launch}; done"
     )
     try:
         if not tmux_session_exists(BASH_SESSION):

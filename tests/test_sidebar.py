@@ -558,14 +558,18 @@ class TestIsSessionWindowActive:
 class TestCreateOuterSession:
     """Tests for create_outer_session helper."""
 
+    @mock.patch("ccmux.session_layout._send_sigwinch_to_pane")
     @mock.patch("ccmux.session_layout.install_inner_hook")
+    @mock.patch("ccmux.session_layout.respawn_pane", return_value=True)
+    @mock.patch("ccmux.session_layout.resize_pane")
     @mock.patch("ccmux.session_layout.apply_outer_session_config")
     @mock.patch("ccmux.session_layout.apply_server_global_config")
     @mock.patch("ccmux.session_layout.split_window")
     @mock.patch("ccmux.session_layout.create_session_simple")
     @mock.patch("ccmux.session_layout.tmux_session_exists")
     def test_creates_outer_with_sidebar_inner_and_bash(
-        self, mock_exists, mock_create_simple, mock_split, mock_server_config, mock_outer_config, mock_hook
+        self, mock_exists, mock_create_simple, mock_split, mock_server_config,
+        mock_outer_config, mock_resize, mock_respawn, mock_hook, mock_sigwinch
     ):
         """create_outer_session creates outer session with sidebar, inner client, and bash pane."""
         from ccmux.session_layout import create_outer_session
@@ -576,6 +580,8 @@ class TestCreateOuterSession:
         mock_server_config.side_effect = lambda *a, **kw: call_log.append("apply_server_global_config")
         mock_outer_config.side_effect = lambda *a, **kw: call_log.append("apply_outer_session_config")
         mock_split.side_effect = lambda *a, **kw: call_log.append("split_window")
+        mock_resize.side_effect = lambda *a, **kw: call_log.append("resize_pane")
+        mock_respawn.side_effect = lambda *a, **kw: (call_log.append("respawn_pane"), True)[-1]
         mock_hook.side_effect = lambda *a, **kw: call_log.append("install_inner_hook")
 
         # outer (ccmux) doesn't exist, inner and bash do exist
@@ -583,11 +589,11 @@ class TestCreateOuterSession:
 
         create_outer_session()
 
-        # Verify create_session_simple creates the sidebar under outer name
+        # Verify create_session_simple creates session with placeholder
         mock_create_simple.assert_called_once()
         args = mock_create_simple.call_args[0]
         assert args[0] == "ccmux"
-        assert "ccmux.ui.sidebar" in args[1]
+        assert args[1] == "sleep infinity"
 
         # Should have 2 split-window calls (bash + inner)
         assert mock_split.call_count == 2
@@ -602,25 +608,46 @@ class TestCreateOuterSession:
         assert inner_split[0][1] == "-h"
         assert "tmux attach -t =ccmux-inner" in inner_split[0][3]
 
+        # Verify respawn_pane starts the sidebar AFTER layout is stable
+        mock_respawn.assert_called_once()
+        respawn_args = mock_respawn.call_args[0]
+        assert respawn_args[0] == "ccmux:0.0"
+        assert "ccmux.ui.sidebar" in respawn_args[1]
+
         mock_outer_config.assert_called_once_with("ccmux")
         mock_hook.assert_called_once()
 
-        # Verify outer config is applied BEFORE splits (mouse=on before clients attach)
+        # Verify ordering: config → splits → resize → respawn → hook
         outer_config_idx = call_log.index("apply_outer_session_config")
         first_split_idx = call_log.index("split_window")
+        resize_idx = call_log.index("resize_pane")
+        respawn_idx = call_log.index("respawn_pane")
+        hook_idx = call_log.index("install_inner_hook")
         assert outer_config_idx < first_split_idx, (
             f"apply_outer_session_config (index {outer_config_idx}) must be called "
             f"before split_window (index {first_split_idx}); call order: {call_log}"
         )
+        assert resize_idx < respawn_idx, (
+            f"resize_pane (index {resize_idx}) must be called "
+            f"before respawn_pane (index {respawn_idx}); call order: {call_log}"
+        )
+        assert respawn_idx < hook_idx, (
+            f"respawn_pane (index {respawn_idx}) must be called "
+            f"before install_inner_hook (index {hook_idx}); call order: {call_log}"
+        )
 
+    @mock.patch("ccmux.session_layout._send_sigwinch_to_pane")
     @mock.patch("ccmux.session_layout.install_inner_hook")
+    @mock.patch("ccmux.session_layout.respawn_pane", return_value=True)
+    @mock.patch("ccmux.session_layout.resize_pane")
     @mock.patch("ccmux.session_layout.apply_outer_session_config")
     @mock.patch("ccmux.session_layout.apply_server_global_config")
     @mock.patch("ccmux.session_layout.split_window")
     @mock.patch("ccmux.session_layout.create_session_simple")
     @mock.patch("ccmux.session_layout.tmux_session_exists")
     def test_creates_outer_without_bash_session(
-        self, mock_exists, mock_create_simple, mock_split, mock_server_config, mock_outer_config, mock_hook
+        self, mock_exists, mock_create_simple, mock_split, mock_server_config,
+        mock_outer_config, mock_resize, mock_respawn, mock_hook, mock_sigwinch
     ):
         """create_outer_session creates 2-pane layout when bash session doesn't exist."""
         from ccmux.session_layout import create_outer_session
@@ -630,7 +657,10 @@ class TestCreateOuterSession:
 
         create_outer_session()
 
+        # Verify placeholder is used, not sidebar command
         mock_create_simple.assert_called_once()
+        args = mock_create_simple.call_args[0]
+        assert args[1] == "sleep infinity"
 
         # Should have 1 split-window call (inner only, no bash)
         assert mock_split.call_count == 1
@@ -638,8 +668,34 @@ class TestCreateOuterSession:
         assert inner_split[0][1] == "-h"
         assert "tmux attach -t =ccmux-inner" in inner_split[0][3]
 
+        # Verify respawn_pane starts the sidebar
+        mock_respawn.assert_called_once()
+        assert "ccmux.ui.sidebar" in mock_respawn.call_args[0][1]
+
         mock_outer_config.assert_called_once_with("ccmux")
         mock_hook.assert_called_once()
+
+    @mock.patch("ccmux.session_layout.install_inner_hook")
+    @mock.patch("ccmux.session_layout.respawn_pane", return_value=False)
+    @mock.patch("ccmux.session_layout.resize_pane")
+    @mock.patch("ccmux.session_layout.apply_outer_session_config")
+    @mock.patch("ccmux.session_layout.apply_server_global_config")
+    @mock.patch("ccmux.session_layout.split_window")
+    @mock.patch("ccmux.session_layout.create_session_simple")
+    @mock.patch("ccmux.session_layout.tmux_session_exists")
+    def test_respawn_failure_skips_hook_install(
+        self, mock_exists, mock_create_simple, mock_split, mock_server_config,
+        mock_outer_config, mock_resize, mock_respawn, mock_hook
+    ):
+        """create_outer_session returns early without installing hooks when respawn fails."""
+        from ccmux.session_layout import create_outer_session
+
+        mock_exists.side_effect = lambda s: s == "ccmux-inner"
+
+        create_outer_session()
+
+        mock_respawn.assert_called_once()
+        mock_hook.assert_not_called()
 
     @mock.patch("ccmux.session_layout.create_session_simple")
     @mock.patch("ccmux.session_layout.tmux_session_exists")

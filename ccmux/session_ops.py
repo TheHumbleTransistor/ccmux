@@ -11,12 +11,19 @@ import shutil
 import subprocess
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Generator, Optional
 
 from rich.prompt import Confirm, Prompt
 
 from ccmux import __version__, state
-from ccmux.config import run_post_create_commands
+from ccmux.config import (
+    get_agent_launch,
+    get_bash_launch,
+    get_worktrees_dir,
+    run_post_create_commands,
+    run_repo_init_commands,
+    run_session_post_create_commands,
+)
 from ccmux.display import console, display_session_table, show_session_info
 from ccmux.exceptions import (
     ActivationError,
@@ -39,6 +46,8 @@ from ccmux.git_ops import (
     get_default_branch,
     get_most_recently_used_branch,
     get_repo_root,
+    get_worktree_root,
+    is_bare_repo,
     move_worktree,
     remove_worktree,
     worktree_exists,
@@ -105,21 +114,45 @@ def stale_sessions_running() -> bool:
 # Shared helpers (extracted from duplicated patterns)
 # ---------------------------------------------------------------------------
 
-def build_claude_command(name: str, path: str, claude_session_id: str, resume: bool = False) -> str:
-    """Build the shell command to launch or resume Claude Code in a tmux pane."""
-    if resume:
-        claude_part = f"claude --resume {claude_session_id} || claude"
+def build_agent_command(name: str, session_id: str,
+                        repo_root: str, session_path: str,
+                        agent_launch: str = "claude",
+                        resume: bool = False) -> str:
+    """Build the shell command to launch an AI agent in a tmux pane.
+
+    For the default 'claude' command, uses built-in --session-id/--resume flags.
+    For custom commands, exports env vars (CCMUX_AGENT_SESSION_ID,
+    CCMUX_SESSION_RESUMING, etc.) for the command to use.
+    """
+    is_default = (agent_launch == "claude")
+
+    if is_default:
+        if resume:
+            agent_part = f"claude --resume {session_id} || claude"
+        else:
+            agent_part = f"claude --session-id {session_id}"
     else:
-        claude_part = f"claude --session-id {claude_session_id}"
+        agent_part = agent_launch
+
+    rel_dir = os.path.relpath(session_path, repo_root) if repo_root else "."
+    if not rel_dir:
+        rel_dir = "."
+
     return (
         f"export CCMUX_SESSION={name}; "
+        f"export CCMUX_AGENT_SESSION_ID={session_id}; "
+        f"export CCMUX_SESSION_RESUMING={'1' if resume else '0'}; "
+        f"export CCMUX_REPO_ROOT={repo_root}; "
+        f"export CCMUX_SESSION_RELATIVE_DIR={rel_dir}; "
         f"unset CLAUDECODE; "
-        f"{claude_part}; while true; do $SHELL; done"
+        f"{agent_part}; while true; do $SHELL; done"
     )
 
 
 def create_session_window(
     name: str, path: str, launch_cmd: str, is_first: bool,
+    shell_launch: str = "$SHELL",
+    repo_root: str = "",
 ) -> tuple[Optional[str], Optional[str]]:
     """Create a tmux window for a session, creating the tmux session if first.
 
@@ -130,7 +163,7 @@ def create_session_window(
         bash_window_id = None
         if cc_window_id:
             apply_server_global_config()
-            bash_window_id = create_bash_window(name, path)
+            bash_window_id = create_bash_window(name, path, shell_launch, repo_root)
             if apply_claude_inner_session_config(INNER_SESSION):
                 console.print(f"  [green]\u2713[/green] Applied workspace configuration")
             else:
@@ -140,7 +173,7 @@ def create_session_window(
         cc_window_id = create_tmux_window(INNER_SESSION, name, path, launch_cmd)
         bash_window_id = None
         if cc_window_id:
-            bash_window_id = create_bash_window(name, path)
+            bash_window_id = create_bash_window(name, path, shell_launch, repo_root)
         return cc_window_id, bash_window_id
 
 
@@ -202,6 +235,14 @@ def find_session_by_name(sessions: list, name: str):
     return None
 
 
+def _is_running_in_bash_pane(session_name: str) -> bool:
+    """Check if the current process is running in the bash pane of the given session."""
+    env_session = os.environ.get("CCMUX_SESSION")
+    if env_session != session_name:
+        return False
+    return get_current_tmux_session() == BASH_SESSION
+
+
 def auto_attach_if_outside_tmux(yes: bool = False) -> None:
     """Prompt and attach to tmux if not already inside tmux."""
     if "TMUX" not in os.environ:
@@ -252,13 +293,17 @@ def _validate_repo_context(path: Optional[str] = None) -> tuple[Path, str, Path]
     """Validate git repo and return (repo_root, default_branch, working_dir).
 
     When *path* is given, *working_dir* is the resolved path (which may be a
-    subdirectory inside the repo).  Otherwise *working_dir* equals *repo_root*.
+    subdirectory inside the repo).  Otherwise *working_dir* equals *repo_root*
+    — except for bare repo topologies where the original cwd's worktree root
+    is preserved so the caller can reuse an existing worktree.
     """
     if path is not None:
         resolved = Path(path).resolve()
         if not resolved.is_dir():
             raise InvalidArgumentError(f"Path is not a directory: {resolved}")
         os.chdir(resolved)
+
+    original_cwd = Path.cwd().resolve()
     repo_root = get_repo_root()
     if repo_root is None:
         raise NotInGitRepoError(path or "")
@@ -272,14 +317,44 @@ def _validate_repo_context(path: Optional[str] = None) -> tuple[Path, str, Path]
     if default_branch is None:
         raise DefaultBranchError()
 
-    working_dir = resolved if path is not None else repo_root
+    if path is not None:
+        working_dir = resolved
+    elif is_bare_repo(repo_root) and original_cwd != repo_root:
+        # Inside a bare repo topology — preserve the worktree root so the
+        # caller can reuse the existing worktree instead of creating one.
+        working_dir = get_worktree_root(original_cwd) or repo_root
+    else:
+        # For non-bare repos, preserve the worktree root if the user is
+        # inside a linked worktree (not the main working tree).  This lets
+        # _resolve_session_type detect duplicate sessions and offer to
+        # create a new worktree instead.
+        wt_root = get_worktree_root(original_cwd) if original_cwd != repo_root else None
+        working_dir = wt_root if (wt_root and wt_root != repo_root) else repo_root
     return repo_root, default_branch, working_dir
 
 
-def _resolve_session_type(repo_root: Path, worktree: bool, yes: bool) -> bool:
+def _resolve_session_type(repo_root: Path, worktree: bool, yes: bool,
+                          working_dir: Optional[Path] = None) -> bool:
     """Decide whether to create as worktree. Returns create_as_worktree flag."""
     if worktree:
         return True
+
+    # Inside an existing worktree (bare or non-bare) — check for duplicate session.
+    if working_dir is not None and working_dir != repo_root:
+        for sess in state.get_all_sessions():
+            if sess.session_path == str(working_dir):
+                console.print(f"[yellow]Warning:[/yellow] This directory already has a session: '{sess.name}'")
+                if yes or Confirm.ask("Create a new worktree instead?", default=True):
+                    return True
+                raise UserAbortedError("Directory already in use.")
+        # No existing session at this worktree — reuse it directly.
+        return False
+
+    if is_bare_repo(repo_root):
+        # At bare repo root — create a worktree.
+        console.print("[yellow]Bare repository detected — creating worktree session.[/yellow]")
+        return True
+
     existing_main = state.find_main_repo_session(str(repo_root))
     if existing_main:
         console.print(f"[yellow]Warning:[/yellow] Main repository already has a session: '{existing_main.name}'")
@@ -289,25 +364,27 @@ def _resolve_session_type(repo_root: Path, worktree: bool, yes: bool) -> bool:
     return False
 
 
-def session_name_exists(name: str, repo_root: Path) -> bool:
+def session_name_exists(name: str, repo_root: Path, worktrees_dir: Optional[Path] = None) -> bool:
     """Check if a session name is already in use (session state or worktree on disk)."""
     if state.get_session(name):
         return True
-    test_path = repo_root / WORKTREES_DIR_NAME / name
+    wt_dir = worktrees_dir if worktrees_dir is not None else WORKTREES_DIR_NAME
+    test_path = repo_root / wt_dir / name
     return worktree_exists(test_path, repo_root)
 
 
-def _generate_session_name(repo_root: Path, create_as_worktree: bool, name: Optional[str]) -> str:
+def _generate_session_name(repo_root: Path, create_as_worktree: bool, name: Optional[str],
+                           worktrees_dir: Optional[Path] = None) -> str:
     """Generate or sanitize session name."""
     if name is not None:
         sanitized = sanitize_name(name)
-        if session_name_exists(sanitized, repo_root):
+        if session_name_exists(sanitized, repo_root, worktrees_dir):
             raise SessionExistsError(sanitized)
         return sanitized
 
     for _ in range(20):
         candidate = sanitize_name(generate_animal_name())
-        if not session_name_exists(candidate, repo_root):
+        if not session_name_exists(candidate, repo_root, worktrees_dir):
             return candidate
 
     base = sanitize_name(generate_animal_name())
@@ -315,15 +392,13 @@ def _generate_session_name(repo_root: Path, create_as_worktree: bool, name: Opti
     return f"{base}-{suffix}"
 
 
-def _run_post_create_with_display(
-    repo_root: Path, session_path: Path, session_name: str
-) -> None:
-    """Run post_create hooks with live output streaming to the console."""
+def _display_hook_events(events: Generator, label: str) -> None:
+    """Stream hook command events to the console with a header label."""
     has_events = False
     failures = []
-    for event in run_post_create_commands(repo_root, session_path, session_name):
+    for event in events:
         if not has_events:
-            console.print("  [bold cyan]Running post_create hooks[/bold cyan]")
+            console.print(f"  [bold cyan]Running {label} hooks[/bold cyan]")
             has_events = True
         if event.event_type == "start":
             console.print(f"    [dim]$[/dim] {event.cmd}")
@@ -344,6 +419,44 @@ def _run_post_create_with_display(
         console.print(
             f"  [yellow]\u26a0 {len(failures)} hook(s) failed \u2014 session created anyway[/yellow]"
         )
+
+
+def _run_post_create_with_display(
+    repo_root: Path, session_path: Path, session_name: str
+) -> None:
+    """Run [worktree].post_create hooks with live output."""
+    _display_hook_events(
+        run_post_create_commands(repo_root, session_path, session_name),
+        "post_create",
+    )
+
+
+def _run_session_post_create_with_display(
+    repo_root: Path, session_path: Path, session_name: str
+) -> None:
+    """Run [session].post_create hooks with live output."""
+    _display_hook_events(
+        run_session_post_create_commands(repo_root, session_path, session_name),
+        "session post_create",
+    )
+
+
+def _run_repo_init_with_display(
+    repo_root: Path, session_path: Path, session_name: str
+) -> None:
+    """Run [repo].init hooks with live output."""
+    _display_hook_events(
+        run_repo_init_commands(repo_root, session_path, session_name),
+        "repo init",
+    )
+
+
+def _is_first_session_for_repo(repo_root: Path) -> bool:
+    """Return True if no sessions currently exist for this repo."""
+    repo_root_str = str(repo_root)
+    return not any(
+        sess.repo_path == repo_root_str for sess in state.get_all_sessions()
+    )
 
 
 def _setup_worktree(repo_root: Path, session_path: Path, default_branch: str, name: str, shallow: bool = False) -> None:
@@ -381,14 +494,18 @@ def _reactivate_single_orphan(sess) -> None:
     """Reactivate a single orphaned session."""
     name = sess.name
     path = sess.session_path
+    repo_root = Path(sess.repo_path)
     sess_type = sess.session_type + " repo" if not sess.is_worktree else "worktree"
 
+    session_path = Path(path)
+    agent_launch = get_agent_launch(repo_root, session_path)
+    shell_launch = get_bash_launch(repo_root, session_path)
     orphan_session_id = sess.claude_session_id or str(uuid.uuid4())
-    cmd = build_claude_command(name, path, orphan_session_id, resume=bool(sess.claude_session_id))
+    cmd = build_agent_command(name, orphan_session_id, repo_root=str(repo_root), session_path=path, agent_launch=agent_launch, resume=bool(sess.claude_session_id))
 
     cc_window_id = create_tmux_window(INNER_SESSION, name, path, cmd)
     if cc_window_id:
-        bash_window_id = create_bash_window(name, path)
+        bash_window_id = create_bash_window(name, path, shell_launch, str(repo_root))
         update_session_tmux_state(name, orphan_session_id, cc_window_id, bash_window_id)
         console.print(f"  [green]\u2713[/green] Reactivated '{name}'")
     else:
@@ -398,27 +515,41 @@ def _reactivate_single_orphan(sess) -> None:
 def do_session_new(name: Optional[str] = None, worktree: bool = False, shallow: bool = False, yes: bool = False, path: Optional[str] = None) -> None:
     """Create a new Claude Code session."""
     repo_root, default_branch, working_dir = _validate_repo_context(path)
-    create_as_worktree = _resolve_session_type(repo_root, worktree, yes)
-    name = _generate_session_name(repo_root, create_as_worktree, name)
+    create_as_worktree = _resolve_session_type(repo_root, worktree, yes, working_dir)
+    worktrees_dir = get_worktrees_dir(repo_root, working_dir)
+    name = _generate_session_name(repo_root, create_as_worktree, name, worktrees_dir)
 
     if create_as_worktree:
-        session_path = repo_root / WORKTREES_DIR_NAME / name
-        (repo_root / WORKTREES_DIR_NAME).mkdir(parents=True, exist_ok=True)
+        session_path = repo_root / worktrees_dir / name
+        (repo_root / worktrees_dir).mkdir(parents=True, exist_ok=True)
     else:
         session_path = working_dir
+
+    is_first_for_repo = _is_first_session_for_repo(repo_root)
 
     _print_creation_info(name, repo_root, create_as_worktree, session_path, default_branch)
 
     if create_as_worktree:
         _setup_worktree(repo_root, session_path, default_branch, name, shallow=shallow)
+    elif session_path != repo_root:
+        # Reusing an existing worktree (bare repo topology) — still run
+        # [worktree].post_create hooks since this is a new session.
+        _run_post_create_with_display(repo_root, session_path, name)
+
+    if is_first_for_repo:
+        _run_repo_init_with_display(repo_root, session_path, name)
+
+    _run_session_post_create_with_display(repo_root, session_path, name)
 
     is_first = not tmux_session_exists(INNER_SESSION)
 
+    agent_launch = get_agent_launch(repo_root, session_path)
+    shell_launch = get_bash_launch(repo_root, session_path)
     session_type = "worktree" if create_as_worktree else "main repo"
     claude_session_id = str(uuid.uuid4())
-    launch_cmd = build_claude_command(name, str(session_path), claude_session_id)
+    launch_cmd = build_agent_command(name, claude_session_id, repo_root=str(repo_root), session_path=str(session_path), agent_launch=agent_launch)
 
-    cc_window_id, bash_window_id = _create_new_session_window(name, str(session_path), launch_cmd, is_first)
+    cc_window_id, bash_window_id = _create_new_session_window(name, str(session_path), launch_cmd, is_first, shell_launch, str(repo_root))
 
     is_shallow = shallow and create_as_worktree
     _save_new_session_state(name, repo_root, session_path, create_as_worktree, claude_session_id, cc_window_id, bash_window_id, is_shallow=is_shallow)
@@ -445,14 +576,16 @@ def _print_creation_info(name: str, repo_root: Path, create_as_worktree: bool, s
         console.print(f"  Path:      {session_path}")
 
 
-def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: bool) -> tuple[Optional[str], Optional[str]]:
+def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: bool,
+                               shell_launch: str = "$SHELL",
+                               repo_root: str = "") -> tuple[Optional[str], Optional[str]]:
     """Create the tmux window for a new session. Returns (cc_window_id, bash_window_id)."""
     if is_first:
         cc_window_id = create_tmux_session(INNER_SESSION, name, path, launch_cmd)
         if cc_window_id is None:
             raise TmuxError("session creation")
         apply_server_global_config()
-        bash_window_id = create_bash_window(name, path)
+        bash_window_id = create_bash_window(name, path, shell_launch, repo_root)
         console.print(f"  [green]\u2713[/green] Created workspace with session '{name}'")
         if apply_claude_inner_session_config(INNER_SESSION):
             console.print(f"  [green]\u2713[/green] Applied workspace configuration")
@@ -464,7 +597,7 @@ def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: 
         cc_window_id = create_tmux_window(INNER_SESSION, name, path, launch_cmd)
         if cc_window_id is None:
             raise TmuxError("window creation")
-        bash_window_id = create_bash_window(name, path)
+        bash_window_id = create_bash_window(name, path, shell_launch, repo_root)
         select_window(INNER_SESSION, name)
         console.print(f"  [green]\u2713[/green] Created new window '{name}'")
 
@@ -571,9 +704,11 @@ def _rename_active_worktree(old_name: str, new_name: str, session_data) -> None:
         raise SessionExistsError(new_name)
     state.update_session(new_name, session_path=str(new_path))
 
-    new_cc_window_id = _create_renamed_window(new_name, new_path, session_data, migrated)
+    agent_launch = get_agent_launch(repo_path, new_path)
+    shell_launch = get_bash_launch(repo_path, new_path)
+    new_cc_window_id = _create_renamed_window(new_name, new_path, session_data, migrated, agent_launch, str(repo_path))
 
-    new_bash_window_id = create_bash_window(new_name, str(new_path))
+    new_bash_window_id = create_bash_window(new_name, str(new_path), shell_launch, str(repo_path))
 
     if new_cc_window_id:
         update_session_tmux_state(new_name,
@@ -594,13 +729,18 @@ def _migrate_session_data(session_data, old_path: Path, new_path: Path) -> bool:
     return False
 
 
-def _create_renamed_window(new_name: str, new_path: Path, session_data, migrated: bool) -> Optional[str]:
+def _create_renamed_window(new_name: str, new_path: Path, session_data, migrated: bool,
+                           agent_launch: str = "claude",
+                           repo_root: str = "") -> Optional[str]:
     """Create a new tmux window for the renamed session."""
     old_session_id = session_data.claude_session_id
     new_session_id = old_session_id if migrated else str(uuid.uuid4())
 
-    launch_cmd = build_claude_command(
-        new_name, str(new_path), new_session_id,
+    launch_cmd = build_agent_command(
+        new_name, new_session_id,
+        repo_root=repo_root,
+        session_path=str(new_path),
+        agent_launch=agent_launch,
         resume=bool(migrated and old_session_id),
     )
 
@@ -824,6 +964,7 @@ def _remove_all_sessions(sessions: list, yes: bool) -> None:
         console.print(f"{prefix}[green]\u2713[/green] Removed '{sess.name}' from tracking")
         removed += 1
 
+    uninstall_inner_hook()
     _kill_remove_all_sessions()
     console.print(f"\n[bold green]Success![/bold green] Removed {removed} session(s).")
 
@@ -880,17 +1021,32 @@ def _remove_single_session(name: str, sessions: list, yes: bool) -> None:
     state.remove_session(name)
     console.print(f"  [green]\u2713[/green] Removed '{name}' from tracking")
 
-    if is_active:
+    # Detect if we're running from the bash pane of the session being removed.
+    # If so, we must complete ALL cleanup before killing our own bash window,
+    # because that kill terminates this process via SIGHUP.
+    in_own_bash = is_active and _is_running_in_bash_pane(name)
+
+    if is_active and not in_own_bash:
         kill_session_windows(name, session.tmux_cc_window_id, session.tmux_bash_window_id)
         console.print(f"  [green]\u2713[/green] Deactivated '{name}'")
+    elif in_own_bash:
+        # Kill only the CC window — defer our own bash window kill to the end.
+        if session.tmux_cc_window_id:
+            kill_tmux_window(session.tmux_cc_window_id)
 
     notify_sidebars()
 
     remaining = state.get_all_sessions()
     if not remaining:
         uninstall_inner_hook()
-        kill_outer_session()
+        # Kill OUTER and INNER first (safe), then BASH last (kills us if in_own_bash).
+        kill_tmux_session(OUTER_SESSION)
         kill_tmux_session(INNER_SESSION)
+        kill_tmux_session(BASH_SESSION)
+    elif in_own_bash:
+        # Not the last session — kill only our own bash window (terminates us).
+        bash_target = session.tmux_bash_window_id or f"{BASH_SESSION}:{name}"
+        kill_tmux_window(bash_target)
 
     if is_main_repo:
         console.print(f"\n[bold green]Success![/bold green] Main repository '{name}' removed from tracking.")
@@ -1058,10 +1214,14 @@ def _activate_all(yes: bool = False) -> None:
         if sess.tmux_cc_window_id:
             state.clear_tmux_window_ids(sess.name)
         is_first = not inner_exists and i == 0
+        repo_root = Path(sess.repo_path)
+        sess_path = Path(sess.session_path)
+        agent_launch = get_agent_launch(repo_root, sess_path)
+        shell_launch = get_bash_launch(repo_root, sess_path)
         claude_session_id = sess.claude_session_id or str(uuid.uuid4())
-        launch_cmd = build_claude_command(sess.name, sess.session_path, claude_session_id, resume=bool(sess.claude_session_id))
+        launch_cmd = build_agent_command(sess.name, claude_session_id, repo_root=str(repo_root), session_path=sess.session_path, agent_launch=agent_launch, resume=bool(sess.claude_session_id))
 
-        cc_window_id, bash_window_id = create_session_window(sess.name, sess.session_path, launch_cmd, is_first)
+        cc_window_id, bash_window_id = create_session_window(sess.name, sess.session_path, launch_cmd, is_first, shell_launch, str(repo_root))
         if cc_window_id:
             if is_first:
                 inner_exists = True
@@ -1100,10 +1260,14 @@ def _activate_single(name: str, yes: bool = False) -> None:
     console.print(f"  Session: {session.session_path}")
 
     is_first = not tmux_session_exists(INNER_SESSION)
+    repo_root = Path(session.repo_path)
+    sess_path = Path(session.session_path)
+    agent_launch = get_agent_launch(repo_root, sess_path)
+    shell_launch = get_bash_launch(repo_root, sess_path)
     claude_session_id = session.claude_session_id or str(uuid.uuid4())
-    launch_cmd = build_claude_command(name, session.session_path, claude_session_id, resume=bool(session.claude_session_id))
+    launch_cmd = build_agent_command(name, claude_session_id, repo_root=str(repo_root), session_path=session.session_path, agent_launch=agent_launch, resume=bool(session.claude_session_id))
 
-    cc_window_id, bash_window_id = create_session_window(name, session.session_path, launch_cmd, is_first)
+    cc_window_id, bash_window_id = create_session_window(name, session.session_path, launch_cmd, is_first, shell_launch, str(repo_root))
 
     if cc_window_id is None:
         raise ActivationError(name)

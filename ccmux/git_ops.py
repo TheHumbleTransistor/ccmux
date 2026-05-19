@@ -34,23 +34,103 @@ def get_repo_root() -> Optional[Path]:
         if git_common_dir.name == ".git":
             return git_common_dir.parent
 
-        # Submodule: --git-common-dir points inside .git/modules/,
-        # not to a .git directory we can derive the working tree from.
-        # Use `git worktree list` to find the main worktree root — the
-        # first entry is always the main worktree, even when called from
-        # inside a linked worktree of the submodule.
+        # Not a simple .git directory — could be a bare repo topology
+        # or a submodule.  Parse ``git worktree list`` to distinguish.
         result = subprocess.run(
             ["git", "worktree", "list", "--porcelain"],
             capture_output=True,
             text=True,
             check=True,
         )
+
+        # Parse the first worktree stanza to detect bare repos.
+        first_worktree_path = None
+        is_bare = False
         for line in result.stdout.splitlines():
-            if line.startswith("worktree "):
-                return Path(line[9:])
-        return None
+            if line.startswith("worktree ") and first_worktree_path is None:
+                first_worktree_path = Path(line[9:])
+            elif line == "bare":
+                is_bare = True
+                break
+            elif line == "":
+                break  # end of first stanza
+
+        if first_worktree_path is None:
+            return None
+
+        if is_bare:
+            # Bare repo topology: the project root is the parent of the
+            # bare git directory, where the .git redirect file lives.
+            project_root = git_common_dir.parent
+            if (project_root / ".git").exists():
+                return project_root
+
+        # Submodule or other: first worktree entry is the main worktree.
+        return first_worktree_path
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
+
+
+def get_worktree_root(path: Path) -> Optional[Path]:
+    """Return the git worktree root for *path*, or None if not in a worktree.
+
+    Uses ``git rev-parse --show-toplevel`` which succeeds inside a worktree
+    but fails at a bare repo root or outside any repo.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return Path(result.stdout.strip())
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+def is_bare_repo(repo_path: Path) -> bool:
+    """Check if the repository at repo_path is a bare repo topology.
+
+    Returns True for:
+    - Standard bare repos (git clone --bare / git init --bare)
+    - Project root bare topologies where ``.git`` is a redirect file
+      pointing to a bare git directory (e.g. ``.bare/``)
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "rev-parse", "--is-bare-repository"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        if result.stdout.strip() == "true":
+            return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+    # Project root bare topology: .git is a redirect file to a bare git dir.
+    # In this case --is-bare-repository returns false because git follows the
+    # redirect and sees a normal worktree context.  Check the common dir.
+    git_file = repo_path / ".git"
+    if git_file.is_file():
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(repo_path), "rev-parse",
+                 "--path-format=absolute", "--git-common-dir"],
+                capture_output=True, text=True, check=True,
+            )
+            common_dir = Path(result.stdout.strip())
+            if common_dir.name != ".git":
+                result2 = subprocess.run(
+                    ["git", "-C", str(common_dir), "rev-parse",
+                     "--is-bare-repository"],
+                    capture_output=True, text=True, check=True,
+                )
+                return result2.stdout.strip() == "true"
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+    return False
 
 
 def get_default_branch() -> Optional[str]:
@@ -127,12 +207,12 @@ def branch_exists(branch_name: str) -> bool:
         return False
 
 
-def get_all_worktrees(repo_root: Path) -> list[dict[str, str]]:
+def get_all_worktrees(repo_root: Path, worktrees_dir_override: Optional[Path] = None) -> list[dict[str, str]]:
     """Get all worktrees in the ccmux worktrees directory.
 
     Returns a list of dicts with keys: name, path, branch
     """
-    worktrees_dir = repo_root / WORKTREES_DIR_NAME
+    worktrees_dir = repo_root / (worktrees_dir_override or WORKTREES_DIR_NAME)
     if not worktrees_dir.exists():
         return []
 
