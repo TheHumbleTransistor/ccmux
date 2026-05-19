@@ -1,6 +1,7 @@
 """Allow running sidebar as a module: python -m ccmux.ui.sidebar"""
 
 import atexit
+import signal
 import sys
 
 from ccmux.ui.sidebar.sidebar_app import DEMO_POLL_INTERVAL, SidebarApp
@@ -9,6 +10,12 @@ from ccmux.ui.sidebar.process_id import remove_pid_file, write_pid_file
 
 def main() -> None:
     """Entry point: python -m ccmux.ui.sidebar"""
+    # Ignore SIGUSR1 until the Textual event loop registers its async
+    # handler in on_mount().  Without this, a SIGUSR1 arriving during
+    # startup (e.g. from inner-session hooks triggered by pane splits)
+    # kills the process with the default "User defined signal 1" action.
+    signal.signal(signal.SIGUSR1, signal.SIG_IGN)
+
     if "--demo" in sys.argv:
         try:
             from tests.demo_sidebar import make_demo_provider

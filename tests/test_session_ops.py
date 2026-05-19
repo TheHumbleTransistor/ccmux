@@ -6,18 +6,29 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ccmux.exceptions import InvalidArgumentError, TmuxError
-from ccmux.naming import OUTER_SESSION
-from ccmux.session_ops import _validate_repo_context, do_reload, do_session_new
+from ccmux.exceptions import InvalidArgumentError, TmuxError, UserAbortedError
+from ccmux.naming import BASH_SESSION, INNER_SESSION, OUTER_SESSION
+from ccmux.session_ops import (
+    _is_running_in_bash_pane,
+    _remove_single_session,
+    _resolve_session_type,
+    _validate_repo_context,
+    do_reload,
+    do_session_new,
+)
 
 
 class TestValidateRepoContext:
     """Tests for _validate_repo_context()."""
 
+    @patch("ccmux.session_ops.get_worktree_root", return_value=None)
+    @patch("ccmux.session_ops.is_bare_repo", return_value=False)
     @patch("ccmux.session_ops.get_default_branch", return_value="main")
     @patch("ccmux.session_ops.get_repo_root", return_value=Path("/repo"))
     @patch("os.chdir")
-    def test_no_path_returns_repo_root_as_working_dir(self, mock_chdir, mock_root, mock_branch):
+    def test_no_path_returns_repo_root_as_working_dir(
+        self, mock_chdir, mock_root, mock_branch, mock_bare, mock_wt_root,
+    ):
         """When no path is given, working_dir equals repo_root."""
         repo_root, default_branch, working_dir = _validate_repo_context()
         assert working_dir == repo_root
@@ -133,3 +144,263 @@ class TestDoReload:
         mock_exists.side_effect = [True, False]  # inner exists, outer absent after create
         with pytest.raises(TmuxError, match="Failed to recreate"):
             do_reload()
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: Bare repo root detection
+# ---------------------------------------------------------------------------
+
+class TestBareRepoWorktreeCreation:
+    """Tests for _resolve_session_type with bare repos."""
+
+    @patch("ccmux.session_ops.is_bare_repo", return_value=True)
+    @patch("ccmux.session_ops.state.get_all_sessions", return_value=[])
+    def test_bare_repo_root_returns_worktree(self, mock_sessions, mock_bare):
+        """At bare repo root, _resolve_session_type returns True (create worktree)."""
+        result = _resolve_session_type(
+            Path("/bare-repo"), worktree=False, yes=False,
+            working_dir=Path("/bare-repo"),
+        )
+        assert result is True
+
+    @patch("ccmux.session_ops.get_worktree_root", return_value=None)
+    @patch("ccmux.session_ops.is_bare_repo", return_value=True)
+    @patch("ccmux.session_ops.get_default_branch", return_value="main")
+    @patch("ccmux.session_ops.get_repo_root", return_value=Path("/bare-repo"))
+    @patch("os.chdir")
+    def test_validate_context_bare_root_sets_working_dir(
+        self, mock_chdir, mock_root, mock_branch, mock_bare, mock_wt_root,
+    ):
+        """At bare repo root, _validate_repo_context sets working_dir = repo_root."""
+        with patch("ccmux.session_ops.Path") as MockPath:
+            MockPath.cwd.return_value.resolve.return_value = Path("/bare-repo")
+            # Path(path) shouldn't be called since path is None
+            repo_root, branch, working_dir = _validate_repo_context()
+        assert working_dir == Path("/bare-repo")
+        assert repo_root == Path("/bare-repo")
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: Detect existing session at worktree root
+# ---------------------------------------------------------------------------
+
+class TestSessionDetectionAtWorktreeRoot:
+    """Tests for detecting existing sessions when running from worktree root."""
+
+    @patch("ccmux.session_ops.get_worktree_root")
+    @patch("ccmux.session_ops.is_bare_repo", return_value=False)
+    @patch("ccmux.session_ops.get_default_branch", return_value="main")
+    @patch("ccmux.session_ops.get_repo_root", return_value=Path("/repo"))
+    @patch("os.chdir")
+    def test_nonbare_worktree_preserves_worktree_root(
+        self, mock_chdir, mock_root, mock_branch, mock_bare, mock_wt_root,
+    ):
+        """When cwd is inside a linked worktree, working_dir is the worktree root."""
+        wt_path = Path("/repo/.ccmux/worktrees/otter")
+        mock_wt_root.return_value = wt_path
+
+        with patch("ccmux.session_ops.Path") as MockPath:
+            MockPath.cwd.return_value.resolve.return_value = wt_path
+            repo_root, branch, working_dir = _validate_repo_context()
+
+        assert working_dir == wt_path
+
+    @patch("ccmux.session_ops.is_bare_repo", return_value=False)
+    @patch("ccmux.session_ops.get_default_branch", return_value="main")
+    @patch("ccmux.session_ops.get_repo_root", return_value=Path("/repo"))
+    @patch("os.chdir")
+    def test_at_repo_root_working_dir_is_repo_root(
+        self, mock_chdir, mock_root, mock_branch, mock_bare,
+    ):
+        """When cwd == repo_root, working_dir equals repo_root (no worktree check)."""
+        with patch("ccmux.session_ops.Path") as MockPath:
+            MockPath.cwd.return_value.resolve.return_value = Path("/repo")
+            repo_root, branch, working_dir = _validate_repo_context()
+
+        assert working_dir == Path("/repo")
+
+    @patch("ccmux.session_ops.get_worktree_root", return_value=Path("/repo"))
+    @patch("ccmux.session_ops.is_bare_repo", return_value=False)
+    @patch("ccmux.session_ops.get_default_branch", return_value="main")
+    @patch("ccmux.session_ops.get_repo_root", return_value=Path("/repo"))
+    @patch("os.chdir")
+    def test_subdirectory_of_main_repo_uses_repo_root(
+        self, mock_chdir, mock_root, mock_branch, mock_bare, mock_wt_root,
+    ):
+        """When inside a subdirectory of the main repo, working_dir is repo_root."""
+        with patch("ccmux.session_ops.Path") as MockPath:
+            MockPath.cwd.return_value.resolve.return_value = Path("/repo/src")
+            repo_root, branch, working_dir = _validate_repo_context()
+
+        assert working_dir == Path("/repo")
+
+    @patch("ccmux.session_ops.state.get_all_sessions")
+    @patch("ccmux.session_ops.is_bare_repo", return_value=False)
+    def test_resolve_type_detects_worktree_duplicate(self, mock_bare, mock_sessions):
+        """Detects existing worktree session and returns True (create new worktree)."""
+        mock_session = MagicMock()
+        mock_session.session_path = "/repo/.ccmux/worktrees/otter"
+        mock_sessions.return_value = [mock_session]
+
+        result = _resolve_session_type(
+            Path("/repo"), worktree=False, yes=True,
+            working_dir=Path("/repo/.ccmux/worktrees/otter"),
+        )
+        assert result is True
+
+    @patch("ccmux.session_ops.state.find_main_repo_session", return_value=None)
+    @patch("ccmux.session_ops.state.get_all_sessions", return_value=[])
+    @patch("ccmux.session_ops.is_bare_repo", return_value=False)
+    def test_resolve_type_no_duplicate_reuses_worktree(
+        self, mock_bare, mock_sessions, mock_main,
+    ):
+        """No existing session at worktree — returns False (reuse directly)."""
+        result = _resolve_session_type(
+            Path("/repo"), worktree=False, yes=False,
+            working_dir=Path("/repo/.ccmux/worktrees/otter"),
+        )
+        assert result is False
+
+    @patch("ccmux.session_ops.state.get_all_sessions")
+    @patch("ccmux.session_ops.is_bare_repo", return_value=False)
+    def test_resolve_type_duplicate_user_declines_raises(self, mock_bare, mock_sessions):
+        """User declining worktree creation raises UserAbortedError."""
+        mock_session = MagicMock()
+        mock_session.session_path = "/repo/.ccmux/worktrees/otter"
+        mock_sessions.return_value = [mock_session]
+
+        with patch("ccmux.session_ops.Confirm.ask", return_value=False):
+            with pytest.raises(UserAbortedError):
+                _resolve_session_type(
+                    Path("/repo"), worktree=False, yes=False,
+                    working_dir=Path("/repo/.ccmux/worktrees/otter"),
+                )
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: Remove from bash pane
+# ---------------------------------------------------------------------------
+
+class TestIsRunningInBashPane:
+    """Tests for _is_running_in_bash_pane()."""
+
+    @patch("ccmux.session_ops.get_current_tmux_session", return_value=BASH_SESSION)
+    @patch.dict("os.environ", {"CCMUX_SESSION": "otter"})
+    def test_returns_true_when_in_bash_pane(self, mock_tmux):
+        assert _is_running_in_bash_pane("otter") is True
+
+    @patch("ccmux.session_ops.get_current_tmux_session", return_value=BASH_SESSION)
+    @patch.dict("os.environ", {"CCMUX_SESSION": "fox"})
+    def test_returns_false_for_different_session(self, mock_tmux):
+        assert _is_running_in_bash_pane("otter") is False
+
+    @patch("ccmux.session_ops.get_current_tmux_session", return_value=INNER_SESSION)
+    @patch.dict("os.environ", {"CCMUX_SESSION": "otter"})
+    def test_returns_false_when_in_inner_session(self, mock_tmux):
+        assert _is_running_in_bash_pane("otter") is False
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_returns_false_when_no_env_var(self):
+        assert _is_running_in_bash_pane("otter") is False
+
+
+class TestRemoveSingleSessionFromBashPane:
+    """Tests for _remove_single_session when running from bash pane."""
+
+    def _make_session(self, name="otter"):
+        sess = MagicMock()
+        sess.name = name
+        sess.is_worktree = True
+        sess.session_path = f"/repo/.ccmux/worktrees/{name}"
+        sess.tmux_cc_window_id = "@1"
+        sess.tmux_bash_window_id = "@2"
+        return sess
+
+    @patch("ccmux.session_ops.notify_sidebars")
+    @patch("ccmux.session_ops.state.get_all_sessions", return_value=[])
+    @patch("ccmux.session_ops.state.remove_session")
+    @patch("ccmux.session_ops._delete_session_worktree")
+    @patch("ccmux.session_ops.kill_tmux_session", return_value=True)
+    @patch("ccmux.session_ops.kill_tmux_window", return_value=True)
+    @patch("ccmux.session_ops.uninstall_inner_hook")
+    @patch("ccmux.session_ops._is_running_in_bash_pane", return_value=True)
+    @patch("ccmux.session_ops.partition_sessions_by_active")
+    @patch("ccmux.session_ops.find_session_by_name")
+    @patch("ccmux.session_ops.worktree_status", return_value=[])
+    def test_last_session_from_bash_kills_bash_session_last(
+        self, mock_wt_status, mock_find, mock_partition, mock_in_bash,
+        mock_uninstall, mock_kill_window, mock_kill_session,
+        mock_delete_wt, mock_remove_state, mock_remaining, mock_notify,
+    ):
+        """When removing last session from bash pane, BASH_SESSION is killed last."""
+        session = self._make_session()
+        mock_find.return_value = session
+        mock_partition.return_value = ([session], [])
+
+        _remove_single_session("otter", [session], yes=True)
+
+        # CC window killed first (not bash window)
+        mock_kill_window.assert_called_once_with("@1")
+        # notify_sidebars was called (before any session kill)
+        mock_notify.assert_called_once()
+        # uninstall_inner_hook was called
+        mock_uninstall.assert_called_once()
+        # Sessions killed in correct order: OUTER, INNER, BASH
+        calls = [c[0][0] for c in mock_kill_session.call_args_list]
+        assert calls == [OUTER_SESSION, INNER_SESSION, BASH_SESSION]
+
+    @patch("ccmux.session_ops.notify_sidebars")
+    @patch("ccmux.session_ops.state.get_all_sessions")
+    @patch("ccmux.session_ops.state.remove_session")
+    @patch("ccmux.session_ops._delete_session_worktree")
+    @patch("ccmux.session_ops.kill_tmux_window", return_value=True)
+    @patch("ccmux.session_ops._is_running_in_bash_pane", return_value=True)
+    @patch("ccmux.session_ops.partition_sessions_by_active")
+    @patch("ccmux.session_ops.find_session_by_name")
+    @patch("ccmux.session_ops.worktree_status", return_value=[])
+    def test_non_last_session_from_bash_kills_own_bash_last(
+        self, mock_wt_status, mock_find, mock_partition, mock_in_bash,
+        mock_kill_window, mock_delete_wt, mock_remove_state,
+        mock_remaining, mock_notify,
+    ):
+        """When removing non-last session from bash, own bash window killed last."""
+        session = self._make_session()
+        other = self._make_session("fox")
+        mock_find.return_value = session
+        mock_partition.return_value = ([session], [])
+        mock_remaining.return_value = [other]
+
+        _remove_single_session("otter", [session, other], yes=True)
+
+        # CC window killed first, then own bash window last
+        calls = [c[0][0] for c in mock_kill_window.call_args_list]
+        assert calls[0] == "@1"  # CC window
+        assert calls[-1] == "@2"  # bash window (last)
+        mock_notify.assert_called_once()
+
+    @patch("ccmux.session_ops.notify_sidebars")
+    @patch("ccmux.session_ops.state.get_all_sessions", return_value=[])
+    @patch("ccmux.session_ops.state.remove_session")
+    @patch("ccmux.session_ops._delete_session_worktree")
+    @patch("ccmux.session_ops.kill_session_windows", return_value=True)
+    @patch("ccmux.session_ops.uninstall_inner_hook")
+    @patch("ccmux.session_ops.kill_tmux_session", return_value=True)
+    @patch("ccmux.session_ops._is_running_in_bash_pane", return_value=False)
+    @patch("ccmux.session_ops.partition_sessions_by_active")
+    @patch("ccmux.session_ops.find_session_by_name")
+    @patch("ccmux.session_ops.worktree_status", return_value=[])
+    def test_not_in_bash_pane_uses_kill_session_windows(
+        self, mock_wt_status, mock_find, mock_partition, mock_in_bash,
+        mock_kill_session, mock_uninstall, mock_kill_windows,
+        mock_delete_wt, mock_remove_state, mock_remaining, mock_notify,
+    ):
+        """When NOT in bash pane, kill_session_windows is called normally."""
+        session = self._make_session()
+        mock_find.return_value = session
+        mock_partition.return_value = ([session], [])
+
+        _remove_single_session("otter", [session], yes=True)
+
+        mock_kill_windows.assert_called_once_with(
+            "otter", "@1", "@2",
+        )
