@@ -1,6 +1,5 @@
 """Tests for ccmux.session_ops session creation helpers."""
 
-import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -17,13 +16,17 @@ from ccmux.exceptions import (
 )
 from ccmux.naming import BASH_SESSION, INNER_SESSION, OUTER_SESSION
 from ccmux.session_ops import (
+    _activate_single,
     _is_running_in_bash_pane,
     _remove_single_session,
     _resolve_session_type,
     _validate_repo_context,
+    claude_project_dir,
     do_reload,
     do_session_new,
     do_session_reset,
+    migrate_claude_project,
+    update_session_tmux_state,
 )
 from ccmux.state.session import MainRepoSession, WorktreeSession
 
@@ -604,3 +607,106 @@ class TestRemoveSingleSessionFromBashPane:
         mock_kill_windows.assert_called_once_with(
             "otter", "@1", "@2",
         )
+
+
+class TestClaudeProjectDir:
+    """Tests for claude_project_dir()."""
+
+    def test_encodes_non_alphanumerics_as_dashes(self):
+        with patch.object(Path, "home", return_value=Path("/home/u")):
+            result = claude_project_dir("/home/u/repo/.ccmux/worktrees/fox")
+        assert result == Path("/home/u/.claude/projects/-home-u-repo--ccmux-worktrees-fox")
+
+
+class TestMigrateClaudeProject:
+    """Tests for migrate_claude_project()."""
+
+    @staticmethod
+    def _project_dir_under(tmp_path):
+        return lambda p: tmp_path / p.strip("/").replace("/", "-")
+
+    def test_missing_old_dir_returns_false(self, tmp_path):
+        with patch("ccmux.session_ops.claude_project_dir", side_effect=self._project_dir_under(tmp_path)):
+            assert migrate_claude_project("/repo/old", "/repo/new") is False
+        assert not (tmp_path / "repo-new").exists()
+
+    def test_copies_transcripts_sidecars_and_memory_but_not_index(self, tmp_path):
+        old = tmp_path / "repo-old"
+        (old / "abc").mkdir(parents=True)
+        (old / "memory").mkdir()
+        (old / "abc.jsonl").write_text("transcript")
+        (old / "abc" / "sub.jsonl").write_text("subagent")
+        (old / "memory" / "MEMORY.md").write_text("notes")
+        (old / "sessions-index.json").write_text("{}")
+
+        with patch("ccmux.session_ops.claude_project_dir", side_effect=self._project_dir_under(tmp_path)):
+            assert migrate_claude_project("/repo/old", "/repo/new") is True
+
+        new = tmp_path / "repo-new"
+        assert (new / "abc.jsonl").read_text() == "transcript"
+        assert (new / "abc" / "sub.jsonl").read_text() == "subagent"
+        assert (new / "memory" / "MEMORY.md").read_text() == "notes"
+        assert not (new / "sessions-index.json").exists()
+        assert (old / "abc.jsonl").exists()
+
+    def test_merges_into_existing_new_dir(self, tmp_path):
+        old = tmp_path / "repo-old"
+        old.mkdir()
+        (old / "abc.jsonl").write_text("transcript")
+        new = tmp_path / "repo-new"
+        new.mkdir()
+        (new / "other.jsonl").write_text("keep me")
+
+        with patch("ccmux.session_ops.claude_project_dir", side_effect=self._project_dir_under(tmp_path)):
+            assert migrate_claude_project("/repo/old", "/repo/new") is True
+
+        assert (new / "abc.jsonl").read_text() == "transcript"
+        assert (new / "other.jsonl").read_text() == "keep me"
+
+
+class TestUpdateSessionTmuxState:
+    """Tests for update_session_tmux_state()."""
+
+    @patch("ccmux.session_ops.tag_window_with_session_id")
+    @patch("ccmux.session_ops.state.update_session")
+    @patch("ccmux.session_ops.state.update_tmux_ids")
+    @patch("ccmux.session_ops.get_session_id", return_value="$0")
+    def test_writes_tmux_ids_only(self, mock_sid, mock_update_tmux, mock_update_session, mock_tag):
+        update_session_tmux_state("fox", "@1", "@2")
+
+        mock_update_tmux.assert_called_once_with("fox", "$0", "@1", "@2")
+        mock_update_session.assert_not_called()
+        assert mock_tag.call_count == 2
+
+
+class TestActivateSingle:
+    """Tests for _activate_single()."""
+
+    @patch("ccmux.session_ops.auto_attach_if_outside_tmux")
+    @patch("ccmux.session_ops.notify_sidebars")
+    @patch("ccmux.session_ops.ensure_outer_session")
+    @patch("ccmux.session_ops.update_session_tmux_state")
+    @patch("ccmux.session_ops.select_window")
+    @patch("ccmux.session_ops.create_session_window", return_value=("@1", "@2"))
+    @patch("ccmux.session_ops.get_bash_launch", return_value="bash")
+    @patch("ccmux.session_ops.get_agent_launch", return_value="claude")
+    @patch("ccmux.session_ops.tmux_session_exists", return_value=True)
+    @patch("ccmux.session_ops.is_session_window_active", return_value=False)
+    @patch("ccmux.session_ops.state.get_all_sessions")
+    def test_launches_claude_continue(
+        self, mock_sessions, mock_active, mock_tmux_exists, mock_agent_launch,
+        mock_bash_launch, mock_create_window, mock_select, mock_update_state,
+        mock_ensure_outer, mock_notify, mock_auto_attach,
+    ):
+        mock_sessions.return_value = [WorktreeSession(
+            name="fox", repo_path="/repo", session_path="/repo/.ccmux/worktrees/fox", id=1,
+        )]
+
+        _activate_single("fox", yes=True)
+
+        launch_cmd = mock_create_window.call_args[0][2]
+        assert "claude --continue || claude" in launch_cmd
+        assert "--resume" not in launch_cmd
+        assert "--session-id" not in launch_cmd
+        assert "CCMUX_SESSION_RESUMING=1" in launch_cmd
+        mock_update_state.assert_called_once_with("fox", "@1", "@2")
