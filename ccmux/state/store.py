@@ -20,7 +20,8 @@ def _load_raw() -> dict:
     """Load raw state from disk, or return empty state if file doesn't exist.
 
     Handles migration from old nested format (sessions.default.instances)
-    to the new flat format (sessions at top level).
+    to the new flat format (sessions at top level), and drops the legacy
+    claude_session_id key.
     """
     if not STATE_FILE.exists():
         return {
@@ -67,6 +68,9 @@ def _load_raw() -> dict:
                 next_id += 1
         data["next_id"] = next_id
 
+    for sess_data in data.get("sessions", {}).values():
+        sess_data.pop("claude_session_id", None)
+
     return data
 
 
@@ -87,7 +91,6 @@ def add_session(
     tmux_cc_window_id: Optional[str] = None,
     tmux_bash_window_id: Optional[str] = None,
     is_worktree: bool = True,
-    claude_session_id: Optional[str] = None,
     is_shallow: bool = False,
 ):
     """Add a session to the state (can be main repo or worktree)."""
@@ -109,8 +112,6 @@ def add_session(
         },
         "id": session_id,
     }
-    if claude_session_id:
-        sess_data["claude_session_id"] = claude_session_id
     if is_shallow:
         sess_data["is_shallow"] = True
 

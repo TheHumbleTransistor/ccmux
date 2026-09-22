@@ -55,7 +55,7 @@ ccmux new         # create a new session from the current directory's repo
 | `new [NAME]` | Create a new session (add `-w` for worktree) |
 | `list` | List all sessions with status and branch info |
 | `attach` | Attach to the ccmux tmux session |
-| `activate [NAME]` | Reopen Claude Code in a session's tmux window |
+| `activate [NAME]` | Reopen Claude Code in a session's tmux window, continuing its most recent conversation |
 | `deactivate [NAME]` | Close tmux window (keeps session) |
 | `remove [NAME]` | Permanently delete a session |
 | `rename OLD NEW` | Rename a session |

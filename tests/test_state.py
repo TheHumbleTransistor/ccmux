@@ -354,110 +354,49 @@ def test_find_session_by_path_no_false_prefix(temp_state_dir):
     assert result is None
 
 
-# --- claude_session_id tests ---
+# --- legacy claude_session_id tests ---
 
-def test_add_session_with_claude_session_id(temp_state_dir):
-    """Test adding a session with claude_session_id."""
-    state.add_session(
-        session_name="feature-x",
-        repo_path="/repo",
-        session_path="/repo/.ccmux/worktrees/feature-x",
-        claude_session_id="abc-123",
-    )
-
-    loaded = state_store._load_raw()
-    sess = loaded["sessions"]["feature-x"]
-    assert sess["claude_session_id"] == "abc-123"
-
-
-def test_add_session_without_claude_session_id(temp_state_dir):
-    """Test adding a session without claude_session_id omits the field."""
-    state.add_session(
-        session_name="feature-x",
-        repo_path="/repo",
-        session_path="/repo/.ccmux/worktrees/feature-x",
-    )
-
-    loaded = state_store._load_raw()
-    sess = loaded["sessions"]["feature-x"]
-    assert "claude_session_id" not in sess
+def _write_legacy_state_with_claude_session_id(temp_state_dir):
+    legacy_state = {
+        "sessions": {
+            "fox": {
+                "repo_path": "/repo",
+                "session_path": "/repo/.ccmux/worktrees/fox",
+                "is_worktree": True,
+                "tmux_window_ids": {"claude_code": "@1", "bash_terminal": "@2"},
+                "id": 1,
+                "claude_session_id": "abc-123",
+            },
+        },
+        "next_id": 2,
+    }
+    with open(temp_state_dir / "state.json", 'w') as f:
+        json.dump(legacy_state, f)
 
 
-def test_claude_session_id_from_dict_present(temp_state_dir):
-    """Test Session.from_dict picks up claude_session_id when present."""
-    sess = state.Session.from_dict("test", {
-        "repo_path": "/repo",
-        "session_path": "/repo/.ccmux/worktrees/test",
-        "is_worktree": True,
-        "claude_session_id": "sess-456",
-    })
-    assert sess.claude_session_id == "sess-456"
-
-
-def test_claude_session_id_from_dict_missing(temp_state_dir):
-    """Test Session.from_dict defaults claude_session_id to None for legacy data."""
-    sess = state.Session.from_dict("test", {
-        "repo_path": "/repo",
-        "session_path": "/repo/.ccmux/worktrees/test",
-        "is_worktree": True,
-    })
-    assert sess.claude_session_id is None
-
-
-def test_claude_session_id_to_dict(temp_state_dir):
-    """Test Session.to_dict includes claude_session_id when set."""
-    sess = state.WorktreeSession(
-        name="test",
-        repo_path="/repo",
-        session_path="/repo/.ccmux/worktrees/test",
-        claude_session_id="sess-789",
-    )
-    d = sess.to_dict()
-    assert d["claude_session_id"] == "sess-789"
-
-
-def test_claude_session_id_to_dict_none(temp_state_dir):
-    """Test Session.to_dict omits claude_session_id when None."""
-    sess = state.WorktreeSession(
-        name="test",
-        repo_path="/repo",
-        session_path="/repo/.ccmux/worktrees/test",
-    )
-    d = sess.to_dict()
-    assert "claude_session_id" not in d
-
-
-def test_update_session_claude_session_id(temp_state_dir):
-    """Test updating claude_session_id via update_session."""
-    state.add_session(
-        session_name="feature-x",
-        repo_path="/repo",
-        session_path="/repo/.ccmux/worktrees/feature-x",
-    )
-
-    state.update_session("feature-x", claude_session_id="new-sess-id")
+def test_load_raw_strips_legacy_claude_session_id(temp_state_dir):
+    """Legacy claude_session_id is dropped on load and absent from Session objects."""
+    _write_legacy_state_with_claude_session_id(temp_state_dir)
 
     loaded = state_store._load_raw()
-    sess = loaded["sessions"]["feature-x"]
-    assert sess["claude_session_id"] == "new-sess-id"
+    assert "claude_session_id" not in loaded["sessions"]["fox"]
+
+    sess = state.get_session("fox")
+    assert sess is not None
+    assert sess.session_path == "/repo/.ccmux/worktrees/fox"
+    assert not hasattr(sess, "claude_session_id")
 
 
-def test_rename_preserves_claude_session_id(temp_state_dir):
-    """Test that renaming a session preserves claude_session_id."""
-    state.add_session(
-        session_name="old-name",
-        repo_path="/repo",
-        session_path="/repo/.ccmux/worktrees/old-name",
-        claude_session_id="preserved-id",
-    )
+def test_legacy_claude_session_id_dropped_on_write(temp_state_dir):
+    """Any state mutation rewrites the file without the legacy key."""
+    _write_legacy_state_with_claude_session_id(temp_state_dir)
 
-    assert state.rename_session("old-name", "new-name")
+    assert state.update_session("fox", note="hello")
 
-    loaded = state_store._load_raw()
-    sessions = loaded["sessions"]
-    assert "old-name" not in sessions
-    assert "new-name" in sessions
-    assert sessions["new-name"]["claude_session_id"] == "preserved-id"
+    with open(temp_state_dir / "state.json") as f:
+        on_disk = json.load(f)
+    assert "claude_session_id" not in on_disk["sessions"]["fox"]
+    assert on_disk["sessions"]["fox"]["note"] == "hello"
 
 
 # --- Migration tests ---

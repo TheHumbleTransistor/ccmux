@@ -12,7 +12,6 @@ class Session:
     session_path: str
     tmux_cc_window_id: Optional[str] = None
     tmux_bash_window_id: Optional[str] = None
-    claude_session_id: Optional[str] = None
     id: int = 0
     note: Optional[str] = None
     is_shallow: bool = False
@@ -36,8 +35,6 @@ class Session:
             },
             "id": self.id,
         }
-        if self.claude_session_id:
-            d["claude_session_id"] = self.claude_session_id
         if self.note:
             d["note"] = self.note
         if self.is_shallow:
@@ -54,7 +51,6 @@ class Session:
             session_path=data.get("session_path") or data.get("instance_path"),
             tmux_cc_window_id=window_ids.get("claude_code"),
             tmux_bash_window_id=window_ids.get("bash_terminal"),
-            claude_session_id=data.get("claude_session_id"),
             id=data.get("id", 0),
             note=data.get("note"),
             is_shallow=data.get("is_shallow", False),

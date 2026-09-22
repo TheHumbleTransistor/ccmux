@@ -9,7 +9,6 @@ import os
 import re
 import shutil
 import subprocess
-import uuid
 from pathlib import Path
 from typing import Generator, Optional
 
@@ -119,23 +118,17 @@ def stale_sessions_running() -> bool:
 # Shared helpers (extracted from duplicated patterns)
 # ---------------------------------------------------------------------------
 
-def build_agent_command(name: str, session_id: str,
-                        repo_root: str, session_path: str,
+def build_agent_command(name: str, repo_root: str, session_path: str,
                         agent_launch: str = "claude",
                         resume: bool = False) -> str:
     """Build the shell command to launch an AI agent in a tmux pane.
 
-    For the default 'claude' command, uses built-in --session-id/--resume flags.
-    For custom commands, exports env vars (CCMUX_AGENT_SESSION_ID,
-    CCMUX_SESSION_RESUMING, etc.) for the command to use.
+    The default 'claude' command continues the most recent conversation in
+    the session directory when resuming. Custom commands receive
+    CCMUX_SESSION_RESUMING and the other CCMUX_* env vars instead.
     """
-    is_default = (agent_launch == "claude")
-
-    if is_default:
-        if resume:
-            agent_part = f"claude --resume {session_id} || claude"
-        else:
-            agent_part = f"claude --session-id {session_id}"
+    if agent_launch == "claude":
+        agent_part = "claude --continue || claude" if resume else "claude"
     else:
         agent_part = agent_launch
 
@@ -145,7 +138,6 @@ def build_agent_command(name: str, session_id: str,
 
     return (
         f"export CCMUX_SESSION={name}; "
-        f"export CCMUX_AGENT_SESSION_ID={session_id}; "
         f"export CCMUX_SESSION_RESUMING={'1' if resume else '0'}; "
         f"export CCMUX_REPO_ROOT={repo_root}; "
         f"export CCMUX_SESSION_RELATIVE_DIR={rel_dir}; "
@@ -192,15 +184,14 @@ def tag_window_with_session_id(window_id: Optional[str], session_name: str) -> N
 
 
 def update_session_tmux_state(
-    name: str, claude_session_id: str,
+    name: str,
     cc_window_id: Optional[str] = None,
     bash_window_id: Optional[str] = None,
 ) -> None:
-    """Update tmux IDs and claude_session_id in state, then tag both windows."""
+    """Update tmux IDs in state, then tag both windows."""
     session_id = get_session_id(INNER_SESSION)
     if session_id and cc_window_id:
         state.update_tmux_ids(name, session_id, cc_window_id, bash_window_id)
-    state.update_session(name, claude_session_id=claude_session_id)
     tag_window_with_session_id(cc_window_id, name)
     tag_window_with_session_id(bash_window_id, name)
 
@@ -262,32 +253,21 @@ def claude_project_dir(session_path: str) -> Path:
     return Path.home() / ".claude" / "projects" / encoded
 
 
-def migrate_claude_session(old_path: str, new_path: str, session_id: str) -> bool:
-    """Copy Claude Code session data from old project dir to new.
+def migrate_claude_project(old_path: str, new_path: str) -> bool:
+    """Copy the Claude Code project dir for old_path to the one for new_path.
 
-    Returns True if anything was copied.
+    Returns True if the old project dir existed.
     """
     old_dir = claude_project_dir(old_path)
-    new_dir = claude_project_dir(new_path)
-    if not old_dir.exists():
+    if not old_dir.is_dir():
         return False
-
-    copied = False
-    new_dir.mkdir(parents=True, exist_ok=True)
-
-    jsonl_file = old_dir / f"{session_id}.jsonl"
-    if jsonl_file.exists():
-        shutil.copy2(str(jsonl_file), str(new_dir / f"{session_id}.jsonl"))
-        copied = True
-
-    session_subdir = old_dir / session_id
-    if session_subdir.is_dir():
-        dest_subdir = new_dir / session_id
-        if dest_subdir.exists():
-            shutil.rmtree(str(dest_subdir))
-        shutil.copytree(str(session_subdir), str(dest_subdir))
-        copied = True
-    return copied
+    # sessions-index.json embeds absolute paths to the old dir; Claude regenerates it.
+    shutil.copytree(
+        old_dir, claude_project_dir(new_path),
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("sessions-index.json"),
+    )
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -505,13 +485,12 @@ def _reactivate_single_orphan(sess) -> None:
     session_path = Path(path)
     agent_launch = get_agent_launch(repo_root, session_path)
     shell_launch = get_bash_launch(repo_root, session_path)
-    orphan_session_id = sess.claude_session_id or str(uuid.uuid4())
-    cmd = build_agent_command(name, orphan_session_id, repo_root=str(repo_root), session_path=path, agent_launch=agent_launch, resume=bool(sess.claude_session_id))
+    cmd = build_agent_command(name, repo_root=str(repo_root), session_path=path, agent_launch=agent_launch, resume=True)
 
     cc_window_id = create_tmux_window(INNER_SESSION, name, path, cmd)
     if cc_window_id:
         bash_window_id = create_bash_window(name, path, shell_launch, str(repo_root))
-        update_session_tmux_state(name, orphan_session_id, cc_window_id, bash_window_id)
+        update_session_tmux_state(name, cc_window_id, bash_window_id)
         console.print(f"  [green]\u2713[/green] Reactivated '{name}'")
     else:
         console.print(f"  [yellow]\u26a0[/yellow] Could not reactivate '{name}'")
@@ -551,13 +530,12 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, shallow: 
     agent_launch = get_agent_launch(repo_root, session_path)
     shell_launch = get_bash_launch(repo_root, session_path)
     session_type = "worktree" if create_as_worktree else "main repo"
-    claude_session_id = str(uuid.uuid4())
-    launch_cmd = build_agent_command(name, claude_session_id, repo_root=str(repo_root), session_path=str(session_path), agent_launch=agent_launch)
+    launch_cmd = build_agent_command(name, repo_root=str(repo_root), session_path=str(session_path), agent_launch=agent_launch)
 
     cc_window_id, bash_window_id = _create_new_session_window(name, str(session_path), launch_cmd, is_first, shell_launch, str(repo_root))
 
     is_shallow = shallow and create_as_worktree
-    _save_new_session_state(name, repo_root, session_path, create_as_worktree, claude_session_id, cc_window_id, bash_window_id, is_shallow=is_shallow)
+    _save_new_session_state(name, repo_root, session_path, create_as_worktree, cc_window_id, bash_window_id, is_shallow=is_shallow)
 
     notify_sidebars()
     if is_first:
@@ -612,7 +590,7 @@ def _create_new_session_window(name: str, path: str, launch_cmd: str, is_first: 
 
 def _save_new_session_state(
     name: str, repo_root: Path, session_path: Path, is_worktree: bool,
-    claude_session_id: str, cc_window_id: Optional[str],
+    cc_window_id: Optional[str],
     bash_window_id: Optional[str] = None,
     is_shallow: bool = False,
 ) -> None:
@@ -627,7 +605,6 @@ def _save_new_session_state(
         tmux_cc_window_id=cc_window_id,
         tmux_bash_window_id=bash_window_id,
         is_worktree=is_worktree,
-        claude_session_id=claude_session_id,
         is_shallow=is_shallow,
     )
     tag_window_with_session_id(cc_window_id, name)
@@ -701,7 +678,8 @@ def _rename_active_worktree(old_name: str, new_name: str, session_data) -> None:
         except subprocess.CalledProcessError as e:
             raise WorktreeError("move", str(e)) from e
 
-    migrated = _migrate_session_data(session_data, old_path, new_path)
+    if migrate_claude_project(str(old_path), str(new_path)):
+        console.print(f"  [green]\u2713[/green] Migrated Claude session data")
 
     if not state.rename_session(old_name, new_name):
         if not state.get_session(old_name):
@@ -711,42 +689,26 @@ def _rename_active_worktree(old_name: str, new_name: str, session_data) -> None:
 
     agent_launch = get_agent_launch(repo_path, new_path)
     shell_launch = get_bash_launch(repo_path, new_path)
-    new_cc_window_id = _create_renamed_window(new_name, new_path, session_data, migrated, agent_launch, str(repo_path))
+    new_cc_window_id = _create_renamed_window(new_name, new_path, agent_launch, str(repo_path))
 
     new_bash_window_id = create_bash_window(new_name, str(new_path), shell_launch, str(repo_path))
 
     if new_cc_window_id:
-        update_session_tmux_state(new_name,
-                                   session_data.claude_session_id if migrated else str(uuid.uuid4()),
-                                   new_cc_window_id, new_bash_window_id)
+        update_session_tmux_state(new_name, new_cc_window_id, new_bash_window_id)
 
     _kill_old_rename_windows(old_name, tmux_cc_window_id, new_name, new_cc_window_id)
 
 
-def _migrate_session_data(session_data, old_path: Path, new_path: Path) -> bool:
-    """Migrate Claude session data between paths. Returns True if migrated."""
-    old_session_id = session_data.claude_session_id
-    if old_session_id:
-        migrated = migrate_claude_session(str(old_path), str(new_path), old_session_id)
-        if migrated:
-            console.print(f"  [green]\u2713[/green] Migrated Claude session data")
-        return migrated
-    return False
-
-
-def _create_renamed_window(new_name: str, new_path: Path, session_data, migrated: bool,
+def _create_renamed_window(new_name: str, new_path: Path,
                            agent_launch: str = "claude",
                            repo_root: str = "") -> Optional[str]:
     """Create a new tmux window for the renamed session."""
-    old_session_id = session_data.claude_session_id
-    new_session_id = old_session_id if migrated else str(uuid.uuid4())
-
     launch_cmd = build_agent_command(
-        new_name, new_session_id,
+        new_name,
         repo_root=repo_root,
         session_path=str(new_path),
         agent_launch=agent_launch,
-        resume=bool(migrated and old_session_id),
+        resume=True,
     )
 
     window_id = create_tmux_window(INNER_SESSION, new_name, str(new_path), launch_cmd)
@@ -792,6 +754,9 @@ def _rename_inactive_worktree(old_name: str, new_name: str, session_data) -> Non
             console.print(f"  [green]\u2713[/green] Moved worktree directory: {old_path.name} -> {new_path.name}")
         except subprocess.CalledProcessError as e:
             raise WorktreeError("move", str(e)) from e
+
+    if migrate_claude_project(str(old_path), str(new_path)):
+        console.print(f"  [green]\u2713[/green] Migrated Claude session data")
 
     if not state.rename_session(old_name, new_name):
         if not state.get_session(old_name):
@@ -1339,8 +1304,7 @@ def _activate_all(yes: bool = False) -> None:
         sess_path = Path(sess.session_path)
         agent_launch = get_agent_launch(repo_root, sess_path)
         shell_launch = get_bash_launch(repo_root, sess_path)
-        claude_session_id = sess.claude_session_id or str(uuid.uuid4())
-        launch_cmd = build_agent_command(sess.name, claude_session_id, repo_root=str(repo_root), session_path=sess.session_path, agent_launch=agent_launch, resume=bool(sess.claude_session_id))
+        launch_cmd = build_agent_command(sess.name, repo_root=str(repo_root), session_path=sess.session_path, agent_launch=agent_launch, resume=True)
 
         cc_window_id, bash_window_id = create_session_window(sess.name, sess.session_path, launch_cmd, is_first, shell_launch, str(repo_root))
         if cc_window_id:
@@ -1349,7 +1313,7 @@ def _activate_all(yes: bool = False) -> None:
                 console.print(f"  [green]\u2713[/green] Created workspace and activated '{sess.name}'")
             else:
                 console.print(f"  [green]\u2713[/green] Activated '{sess.name}'")
-            update_session_tmux_state(sess.name, claude_session_id, cc_window_id, bash_window_id)
+            update_session_tmux_state(sess.name, cc_window_id, bash_window_id)
             activated += 1
         else:
             console.print(f"  [red]Error activating '{sess.name}'[/red]")
@@ -1385,8 +1349,7 @@ def _activate_single(name: str, yes: bool = False) -> None:
     sess_path = Path(session.session_path)
     agent_launch = get_agent_launch(repo_root, sess_path)
     shell_launch = get_bash_launch(repo_root, sess_path)
-    claude_session_id = session.claude_session_id or str(uuid.uuid4())
-    launch_cmd = build_agent_command(name, claude_session_id, repo_root=str(repo_root), session_path=session.session_path, agent_launch=agent_launch, resume=bool(session.claude_session_id))
+    launch_cmd = build_agent_command(name, repo_root=str(repo_root), session_path=session.session_path, agent_launch=agent_launch, resume=True)
 
     cc_window_id, bash_window_id = create_session_window(name, session.session_path, launch_cmd, is_first, shell_launch, str(repo_root))
 
@@ -1399,7 +1362,7 @@ def _activate_single(name: str, yes: bool = False) -> None:
         select_window(INNER_SESSION, name)
         console.print(f"  [green]\u2713[/green] Activated '{name}'")
 
-    update_session_tmux_state(name, claude_session_id, cc_window_id, bash_window_id)
+    update_session_tmux_state(name, cc_window_id, bash_window_id)
 
     ensure_outer_session()
     notify_sidebars()

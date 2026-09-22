@@ -112,7 +112,7 @@ def session_activate(
     *,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
 ) -> None:
-    """Activate Claude Code in a session (useful if its window was closed)."""
+    """Activate Claude Code in a session, continuing its most recent conversation (useful if its window was closed)."""
     do_session_activate(name=name, yes=yes)
 
 
