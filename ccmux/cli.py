@@ -7,7 +7,7 @@ from typing import Annotated, Optional
 
 import cyclopts
 from cyclopts import Parameter
-from rich.prompt import Confirm
+from rich.prompt import Prompt
 
 from ccmux import __version__
 from ccmux.display import console
@@ -167,7 +167,7 @@ def detach(
 
 @app.command(name="reload")
 def reload() -> None:
-    """Reload the workspace UI (kills and recreates the outer tmux session)."""
+    """Restart the sidebar and reapply tmux hooks in place (Claude Code sessions keep running)."""
     do_reload()
 
 
@@ -194,7 +194,7 @@ def main():
         console.print("\nFor more info: https://docs.anthropic.com/en/docs/claude-code")
         sys.exit(1)
 
-    if stale_sessions_running():
+    if stale_sessions_running() and sys.argv[1:2] != ["reload"]:
         stored = get_tmux_session_version()
         console.print()
         if stored:
@@ -211,11 +211,23 @@ def main():
             "The running workspace uses outdated hooks and may behave unexpectedly."
         )
         console.print(
-            "Killing them is safe — sessions will be recreated on "
+            "[bold]reload[/bold] restarts the sidebar and reapplies hooks in place; "
+            "Claude Code sessions keep running.\n"
+            "[bold]shutdown[/bold] kills the workspace; sessions are recreated on "
             "[bold]ccmux new[/bold] / [bold]ccmux activate[/bold].\n"
         )
 
-        if Confirm.ask("Shut down the stale workspace?", default=True):
+        choice = Prompt.ask(
+            "What would you like to do?",
+            choices=["reload", "shutdown", "keep"],
+            default="reload",
+        )
+        if choice == "reload":
+            try:
+                do_reload()
+            except CcmuxError as e:
+                console.print(f"[red]Error:[/red] {e}")
+        elif choice == "shutdown":
             kill_all_ccmux_sessions(OUTER_SESSION, OUTER_SESSION, INNER_SESSION, BASH_SESSION)
             console.print(
                 "[green]Done.[/green] Run [bold]ccmux new[/bold] or "

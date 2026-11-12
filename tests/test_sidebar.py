@@ -12,6 +12,7 @@ import pytest
 
 from ccmux import state
 from ccmux.state import store as state_store
+from ccmux.session_layout import reload_outer_session
 from textual.widgets import Static
 
 from ccmux.ui import (
@@ -985,6 +986,73 @@ class TestEnsureOuterSession:
         ensure_outer_session()
 
         mock_create.assert_not_called()
+
+
+class TestReloadOuterSession:
+    """Tests for reload_outer_session helper."""
+
+    @mock.patch("ccmux.session_layout._send_sigwinch_to_pane")
+    @mock.patch("ccmux.session_layout._rebind_detach_key")
+    @mock.patch("ccmux.session_layout.install_detach_hook")
+    @mock.patch("ccmux.session_layout.install_inner_hook")
+    @mock.patch("ccmux.session_layout.respawn_pane", return_value=True)
+    @mock.patch("ccmux.session_layout.apply_claude_inner_session_config")
+    @mock.patch("ccmux.session_layout.apply_outer_session_config")
+    @mock.patch("ccmux.session_layout.apply_server_global_config")
+    @mock.patch("ccmux.session_layout.create_outer_session")
+    @mock.patch("ccmux.session_layout.tmux_session_exists", return_value=True)
+    def test_reapplies_config_hooks_and_restarts_sidebar(
+        self, mock_exists, mock_create, mock_server_config, mock_outer_config,
+        mock_inner_config, mock_respawn, mock_inner_hook, mock_detach_hook,
+        mock_rebind, mock_sigwinch,
+    ):
+        """With the outer session running, config and hooks are reapplied and only the sidebar pane restarts."""
+        assert reload_outer_session() is True
+
+        mock_create.assert_not_called()
+        mock_server_config.assert_called_once()
+        mock_outer_config.assert_called_once_with("ccmux")
+        mock_inner_config.assert_called_once_with("ccmux-inner")
+        mock_inner_hook.assert_called_once()
+        mock_detach_hook.assert_called_once()
+        mock_rebind.assert_called_once()
+
+        mock_respawn.assert_called_once()
+        target, cmd = mock_respawn.call_args[0]
+        assert target == "ccmux:0.0"
+        assert "ccmux.ui.sidebar" in cmd
+        mock_sigwinch.assert_called_once_with("ccmux:0.0")
+
+    @mock.patch("ccmux.session_layout._send_sigwinch_to_pane")
+    @mock.patch("ccmux.session_layout.install_inner_hook")
+    @mock.patch("ccmux.session_layout.respawn_pane", return_value=False)
+    @mock.patch("ccmux.session_layout.apply_claude_inner_session_config")
+    @mock.patch("ccmux.session_layout.apply_outer_session_config")
+    @mock.patch("ccmux.session_layout.apply_server_global_config")
+    @mock.patch("ccmux.session_layout.tmux_session_exists", return_value=True)
+    def test_respawn_failure_returns_false(
+        self, mock_exists, mock_server_config, mock_outer_config, mock_inner_config,
+        mock_respawn, mock_hook, mock_sigwinch,
+    ):
+        """A failed respawn reports False and skips the resize signal."""
+        assert reload_outer_session() is False
+        mock_sigwinch.assert_not_called()
+
+    @mock.patch("ccmux.session_layout.respawn_pane")
+    @mock.patch("ccmux.session_layout.create_outer_session")
+    @mock.patch("ccmux.session_layout.tmux_session_exists")
+    def test_creates_outer_when_missing(self, mock_exists, mock_create, mock_respawn):
+        """Without an outer session, reload falls back to creating it."""
+        mock_exists.side_effect = [False, True]
+        assert reload_outer_session() is True
+        mock_create.assert_called_once()
+        mock_respawn.assert_not_called()
+
+    @mock.patch("ccmux.session_layout.create_outer_session")
+    @mock.patch("ccmux.session_layout.tmux_session_exists", return_value=False)
+    def test_create_failure_returns_false(self, mock_exists, mock_create):
+        """Reload reports False if the outer session could not be created."""
+        assert reload_outer_session() is False
 
 
 class TestSidebarRendering:

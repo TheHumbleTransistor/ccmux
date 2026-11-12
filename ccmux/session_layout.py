@@ -31,7 +31,11 @@ from ccmux.tmux_ops import (
     unset_hook,
 )
 from ccmux.ui.sidebar.process_id import SIDEBAR_PIDS_DIR
-from ccmux.ui.tmux import apply_outer_session_config, apply_server_global_config
+from ccmux.ui.tmux import (
+    apply_claude_inner_session_config,
+    apply_outer_session_config,
+    apply_server_global_config,
+)
 
 HOOKS_DIR = Path.home() / ".ccmux" / "hooks"
 
@@ -183,16 +187,49 @@ def _restore_detach_key() -> None:
 # Outer session management
 # ---------------------------------------------------------------------------
 
+def _sidebar_command() -> str:
+    python_exe = sys.executable or "python3"
+    return (
+        f"TERM=tmux-256color COLORTERM=truecolor {python_exe} -m ccmux.ui.sidebar ; "
+        f"echo 'Sidebar exited. Press enter to close.' ; read"
+    )
+
+
+def _install_outer_hooks() -> None:
+    install_inner_hook()
+    install_detach_hook()
+    _rebind_detach_key()
+
+
+def restart_sidebar() -> bool:
+    """Respawn the sidebar pane in place. Returns False if the respawn failed."""
+    target = f"{OUTER_SESSION}:0.0"
+    if not respawn_pane(target, _sidebar_command()):
+        return False
+    _send_sigwinch_to_pane(target)
+    return True
+
+
+def reload_outer_session() -> bool:
+    """Reapply tmux config and hooks and restart the sidebar, keeping clients attached.
+
+    Creates the outer session instead when it is not running. Returns False if
+    the sidebar could not be (re)started.
+    """
+    if not tmux_session_exists(OUTER_SESSION):
+        create_outer_session()
+        return tmux_session_exists(OUTER_SESSION)
+    apply_server_global_config()
+    apply_outer_session_config(OUTER_SESSION)
+    apply_claude_inner_session_config(INNER_SESSION)
+    _install_outer_hooks()
+    return restart_sidebar()
+
+
 def create_outer_session() -> None:
     """Create the outer tmux session with sidebar, inner client, and bash pane."""
     if tmux_session_exists(OUTER_SESSION) or not tmux_session_exists(INNER_SESSION):
         return
-
-    python_exe = sys.executable or "python3"
-    sidebar_cmd = (
-        f"TERM=tmux-256color COLORTERM=truecolor {python_exe} -m ccmux.ui.sidebar ; "
-        f"echo 'Sidebar exited. Press enter to close.' ; read"
-    )
 
     try:
         # Phase 1: Create session with placeholder, build pane layout.
@@ -209,16 +246,13 @@ def create_outer_session() -> None:
         resize_pane(f"{OUTER_SESSION}:0.0", SIDEBAR_WIDTH)
 
         # Phase 2: Layout is stable — start the real sidebar.
-        if not respawn_pane(f"{OUTER_SESSION}:0.0", sidebar_cmd):
+        if not restart_sidebar():
             print(
                 f"ccmux: failed to start sidebar in '{OUTER_SESSION}' (respawn-pane failed)",
                 file=sys.stderr,
             )
             return
-        _send_sigwinch_to_pane(f"{OUTER_SESSION}:0.0")
-        install_inner_hook()
-        install_detach_hook()
-        _rebind_detach_key()
+        _install_outer_hooks()
     except Exception as exc:
         print(
             f"ccmux: failed to create outer session '{OUTER_SESSION}': {exc}",

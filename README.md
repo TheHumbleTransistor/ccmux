@@ -62,6 +62,7 @@ ccmux new         # create a new session from the current directory's repo
 | `kill` | Kill entire ccmux session |
 | `which` | Print current session name (useful for scripting) |
 | `detach` | Detach from tmux |
+| `reload` | Restart the sidebar and reapply tmux hooks in place after upgrading ccmux |
 
 ## Worktree Configuration
 

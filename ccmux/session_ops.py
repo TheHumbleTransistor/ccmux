@@ -75,6 +75,7 @@ from ccmux.session_layout import (
     install_inner_hook,
     kill_outer_session,
     notify_sidebars,
+    reload_outer_session,
     uninstall_inner_hook,
 )
 from ccmux.tmux_ops import (
@@ -1417,36 +1418,30 @@ def do_session_kill(yes: bool = False) -> None:
 # ---------------------------------------------------------------------------
 
 def do_reload() -> None:
-    """Reload the workspace by killing and recreating the outer session.
+    """Reload the workspace UI in place after a ccmux upgrade.
 
-    Keeps ccmux-inner and ccmux-bash running so Claude Code sessions
-    and bash terminals are not interrupted.
+    Reapplies tmux config and hooks and restarts the sidebar. Attached
+    clients, Claude Code sessions, and bash terminals are not interrupted.
     """
     if not tmux_session_exists(INNER_SESSION):
         raise TmuxError("reload", "No active workspace to reload (inner session not running).")
 
     console.print("[bold cyan]Reloading workspace...[/bold cyan]")
 
-    killed = kill_tmux_session(OUTER_SESSION)
-    if killed:
-        console.print("  [green]\u2713[/green] Killed outer session")
+    outer_was_running = tmux_session_exists(OUTER_SESSION)
+    if not reload_outer_session():
+        raise TmuxError("reload", "Failed to restart the sidebar.")
+    state.set_tmux_session_version(__version__)
+
+    if outer_was_running:
+        console.print("  [green]\u2713[/green] Reapplied tmux configuration and hooks")
+        console.print("  [green]\u2713[/green] Restarted sidebar")
     else:
-        console.print("  [dim]Outer session was not running[/dim]")
-
-    create_outer_session()
-
-    if not tmux_session_exists(OUTER_SESSION):
-        raise TmuxError("reload", "Failed to recreate outer session.")
-
-    console.print("  [green]\u2713[/green] Recreated outer session")
-    notify_sidebars()
+        console.print("  [green]\u2713[/green] Created outer session")
 
     console.print("\n[bold green]Workspace reloaded.[/bold green]")
-
     if "TMUX" not in os.environ:
-        auto_attach_if_outside_tmux(yes=True)
-    else:
-        console.print(f"Re-attach with: [cyan]ccmux attach[/cyan]")
+        console.print(f"Attach with: [cyan]ccmux attach[/cyan]")
 
 
 # ---------------------------------------------------------------------------
