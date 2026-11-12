@@ -137,6 +137,10 @@ class SidebarApp(App):
         self._close_about()
         self._select_group(None)
 
+    def on_app_blur(self) -> None:
+        """Clear the repo group selection when the sidebar pane loses focus."""
+        self._select_group(None)
+
     async def _load_prefs(self) -> None:
         if not self._persist_prefs:
             return

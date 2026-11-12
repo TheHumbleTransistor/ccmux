@@ -193,6 +193,11 @@ def apply_server_global_config() -> bool:
             ["tmux", "set-option", "-g", "set-clipboard", "on"],
             check=True, capture_output=True,
         )
+        # Lets the sidebar see FocusOut when another pane is selected.
+        subprocess.run(
+            ["tmux", "set-option", "-s", "focus-events", "on"],
+            check=True, capture_output=True,
+        )
         return True
     except subprocess.CalledProcessError:
         return False

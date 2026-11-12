@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from textual import events
 
 from ccmux import state
 from ccmux.state import store as state_store
@@ -753,6 +754,7 @@ class TestApplyServerGlobalConfig:
         cmds = [call[0][0] for call in mock_run.call_args_list]
         assert ["tmux", "set-option", "-g", "default-terminal", "tmux-256color"] in cmds
         assert ["tmux", "show-options", "-g", "-v", "terminal-features"] in cmds
+        assert ["tmux", "set-option", "-s", "focus-events", "on"] in cmds
         # No -as append command
         for cmd in cmds:
             assert "-as" not in cmd, f"Unexpected append command: {cmd}"
@@ -1601,6 +1603,24 @@ class TestRepoGroupReorder:
             await pilot.click("#sess-hawk")
             await pilot.pause()
             assert not group.selected
+
+    @pytest.mark.asyncio
+    async def test_losing_focus_clears_selection(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            group = _group(pilot.app, "/fake/alpha")
+            await pilot.click(group.query_one(RepoHeader))
+            await pilot.pause()
+            assert group.selected
+
+            pilot.app.post_message(events.AppBlur())
+            await pilot.pause()
+            assert not group.selected
+            assert group._blink_timer is None
+            assert pilot.app._selection_timer is None
+
+            await pilot.press("down")
+            await pilot.pause()
+            assert _group_paths(pilot.app) == ["/fake/alpha", "/fake/beta", "/fake/gamma"]
 
     @pytest.mark.asyncio
     async def test_clicking_another_header_moves_selection(self, app):
