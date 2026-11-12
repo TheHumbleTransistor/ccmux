@@ -36,7 +36,7 @@ class RepoSessionsList(Vertical):
 
     def _header_text(self) -> str:
         if self.collapsed:
-            return f"\u25b8 {self.repo_name} ({len(self.sessions)})"
+            return f"\u25b8 {self.repo_name} [#666666 not bold]({len(self.sessions)})[/]"
         return f"\u25be {self.repo_name}"
 
     def compose(self) -> ComposeResult:

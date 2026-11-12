@@ -1379,7 +1379,7 @@ class TestRepoGroupCollapse:
             assert group.collapsed and group.has_class("collapsed")
             assert group.selected
             assert not any(row.display for row in rows)
-            assert str(group.query_one(RepoHeader).content) == "▸ alpha/ (2)"
+            assert str(group.query_one(RepoHeader).content) == "▸ alpha/ [#666666 not bold](2)[/]"
             assert not _group(pilot.app, "/fake/beta").collapsed
 
     @pytest.mark.asyncio
