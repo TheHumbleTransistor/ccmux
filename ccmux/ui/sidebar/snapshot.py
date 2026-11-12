@@ -6,6 +6,7 @@ import re
 import subprocess
 import time
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,6 +44,18 @@ class DerivedSessionState:
     snapshot: SessionSnapshot
     status: str  # "deactivated" | "idle" | "blocked" | "active"
     has_blocker_alert: bool
+
+
+_STATUS_PRIORITY = ("blocked", "active", "idle", "deactivated")
+
+
+def aggregate_status(statuses: Iterable[str]) -> str:
+    """Return the most urgent status present: blocked > active > idle > deactivated."""
+    present = set(statuses)
+    for status in _STATUS_PRIORITY:
+        if status in present:
+            return status
+    return "deactivated"
 
 
 def group_by_repo(

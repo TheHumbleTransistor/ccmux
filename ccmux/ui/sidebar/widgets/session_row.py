@@ -10,6 +10,23 @@ from textual.widgets import Static, TextArea
 
 EDIT_INACTIVITY_TIMEOUT = 10  # seconds before auto-saving an open note editor
 
+# Breathing animation: dot color steps for one full cycle (grey→green→grey).
+# Uses exact 256-color palette entries to avoid rounding artifacts in tmux.
+#   247=#9e9e9e  108=#87af87  71=#5faf5f  77=#5fd75f  40=#00d700  46=#00ff00
+BREATH_COLORS = [
+    "#9e9e9e",  # 247 — grey (rest)
+    "#87af87",  # 108
+    "#5faf5f",  #  71
+    "#5fd75f",  #  77
+    "#00d700",  #  40
+    "#00ff00",  #  46 — green (peak)
+    "#00d700",  #  40
+    "#5fd75f",  #  77
+    "#5faf5f",  #  71
+    "#87af87",  # 108
+]
+BREATH_INTERVAL = 0.2  # seconds between color steps (10 × 0.2s = 2s cycle)
+
 
 class NoteInput(TextArea):
     """Multi-line note editor: Tab submits, double-click submits."""
@@ -48,23 +65,6 @@ class NoteInput(TextArea):
 
 class SessionRow(Vertical):
     """A clickable 4-line row showing tree hierarchy, session status, name, and git info."""
-
-    # Breathing animation: dot color steps for one full cycle (grey→green→grey).
-    # Uses exact 256-color palette entries to avoid rounding artifacts in tmux.
-    #   247=#9e9e9e  108=#87af87  71=#5faf5f  77=#5fd75f  40=#00d700  46=#00ff00
-    _BREATH_COLORS = [
-        "#9e9e9e",  # 247 — grey (rest)
-        "#87af87",  # 108
-        "#5faf5f",  #  71
-        "#5fd75f",  #  77
-        "#00d700",  #  40
-        "#00ff00",  #  46 — green (peak)
-        "#00d700",  #  40
-        "#5fd75f",  #  77
-        "#5faf5f",  #  71
-        "#87af87",  # 108
-    ]
-    _BREATH_INTERVAL = 0.2  # seconds between color steps (10 × 0.2s = 2s cycle)
 
     class Selected(Message):
         """Posted when the user clicks a session row."""
@@ -121,7 +121,7 @@ class SessionRow(Vertical):
         self._edit_timeout_timer = None
         self._breath_timer = None
         self._breath_frame = 0
-        self._breath_offset = hash(session_name) % len(self._BREATH_COLORS)
+        self._breath_offset = hash(session_name) % len(BREATH_COLORS)
         if is_current:
             self.add_class("current")
         self._apply_blocker_alert_class(has_blocker_alert)
@@ -142,7 +142,7 @@ class SessionRow(Vertical):
         elif self.status == "blocked":
             indicator = "[#d70000]\u25cf[/]"  # ● static red
         elif self.status == "active" and self._breath_timer is not None:
-            color = self._BREATH_COLORS[(self._breath_frame + self._breath_offset) % len(self._BREATH_COLORS)]
+            color = BREATH_COLORS[(self._breath_frame + self._breath_offset) % len(BREATH_COLORS)]
             indicator = f"[{color}]\u25cf[/]"  # ● animated green
         else:
             indicator = "\u25cf"  # ● grey (idle)
@@ -215,7 +215,7 @@ class SessionRow(Vertical):
         should_breathe = self.status == "active"
         if should_breathe and self._breath_timer is None:
             self._breath_timer = self.set_interval(
-                self._BREATH_INTERVAL, self._advance_breath
+                BREATH_INTERVAL, self._advance_breath
             )
         elif not should_breathe and self._breath_timer is not None:
             self._breath_timer.stop()
@@ -228,7 +228,7 @@ class SessionRow(Vertical):
 
     def _advance_breath(self) -> None:
         """Advance the breathing animation by one frame."""
-        self._breath_frame = (self._breath_frame + 1) % len(self._BREATH_COLORS)
+        self._breath_frame = (self._breath_frame + 1) % len(BREATH_COLORS)
         try:
             self.query_one(".name", Static).update(self._format_name_text())
         except Exception:

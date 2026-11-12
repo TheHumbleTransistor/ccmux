@@ -195,6 +195,18 @@ RepoHeader {
     padding: 0 1;
     color: #d7af5f;
     text-style: bold;
+}
+
+RepoHeader .toggle {
+    width: 2;
+}
+
+RepoHeader .toggle:hover {
+    color: #ffd787;
+}
+
+RepoHeader .title {
+    width: 1fr;
     text-wrap: nowrap;
     text-overflow: clip;
 }
@@ -205,6 +217,10 @@ RepoHeader:hover {
 
 RepoSessionsList.selected RepoHeader {
     background: #3a3a3a;
+}
+
+RepoSessionsList.selected.selected-flash RepoHeader {
+    background: #1e1e1e;
 }
 
 RepoSessionsList.blocker-alert RepoHeader {

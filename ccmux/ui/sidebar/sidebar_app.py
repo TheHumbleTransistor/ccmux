@@ -29,6 +29,7 @@ from ccmux.ui.sidebar.widgets import (
 
 POLL_INTERVAL = 1.0
 DEMO_POLL_INTERVAL = 1.0
+SELECTION_INACTIVITY_TIMEOUT = 10  # seconds before a selected repo group deselects itself
 POST_SELECTION_ACTIVITY_DEBOUNCE = 0.5  # seconds to ignore misleading activity caused by returning focus to the Claude Code window
 
 # --- Logging ---
@@ -77,6 +78,7 @@ class SidebarApp(App):
         self._repo_order: list[str] = []
         self._collapsed_repos: set[str] = set()
         self._selected_repo: str | None = None
+        self._selection_timer = None
         self._last_derived: list[DerivedSessionState] | None = None
         self._blocked_sessions: set[str] = set()
         self._blocker_alerted_sessions: set[str] = set()
@@ -159,6 +161,20 @@ class SidebarApp(App):
         self._selected_repo = repo_path
         for group in self._groups():
             group.set_selected(group.repo_path == repo_path)
+        self._reset_selection_timeout()
+
+    def _reset_selection_timeout(self) -> None:
+        if self._selection_timer is not None:
+            self._selection_timer.stop()
+            self._selection_timer = None
+        if self._selected_repo is not None:
+            self._selection_timer = self.set_timer(
+                SELECTION_INACTIVITY_TIMEOUT, self._on_selection_timeout,
+            )
+
+    def _on_selection_timeout(self) -> None:
+        self._selection_timer = None
+        self._select_group(None)
 
     async def _set_group_collapsed(self, repo_path: str, collapsed: bool) -> None:
         if collapsed:
@@ -170,18 +186,24 @@ class SidebarApp(App):
                 group.set_collapsed(collapsed)
         await self._save_prefs()
 
-    async def on_repo_header_clicked(self, message: RepoHeader.Clicked) -> None:
-        """Select the clicked repo group and toggle its collapsed state."""
+    def on_repo_header_clicked(self, message: RepoHeader.Clicked) -> None:
+        """Select the repo group whose title was clicked."""
         self.set_focus(None)
         self._select_group(message.repo_path)
+
+    async def on_repo_header_toggle_clicked(self, message: RepoHeader.ToggleClicked) -> None:
+        """Toggle the collapsed state of the repo group whose arrow was clicked."""
+        self.set_focus(None)
         await self._set_group_collapsed(
             message.repo_path, message.repo_path not in self._collapsed_repos,
         )
+        self._reset_selection_timeout()
 
     async def action_collapse_group(self, collapsed: bool) -> None:
         """Collapse or expand the selected repo group."""
         if self._selected_repo is not None:
             await self._set_group_collapsed(self._selected_repo, collapsed)
+            self._reset_selection_timeout()
 
     async def action_move_group(self, delta: int) -> None:
         """Move the selected repo group up (delta < 0) or down (delta > 0)."""
@@ -201,6 +223,7 @@ class SidebarApp(App):
             self._session_list.move_child(groups[idx], after=groups[new_idx])
         paths.insert(new_idx, paths.pop(idx))
         self._repo_order = paths
+        self._reset_selection_timeout()
         await self._save_prefs()
 
     def _fix_nested_tmux_resize(self) -> None:
@@ -438,7 +461,8 @@ class SidebarApp(App):
         for row in self.query(SessionRow):
             if row._editing and row not in event.widget.ancestors_with_self:
                 row.save_and_close_editor()
-        if self._selected_repo is not None and not isinstance(event.widget, RepoHeader):
+        inside_header = any(isinstance(node, RepoHeader) for node in event.widget.ancestors_with_self)
+        if self._selected_repo is not None and not inside_header:
             self._select_group(None)
 
     async def on_session_row_selected(self, message: SessionRow.Selected) -> None:
