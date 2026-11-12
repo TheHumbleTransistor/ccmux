@@ -199,6 +199,18 @@ RepoHeader {
     text-overflow: clip;
 }
 
+RepoHeader:hover {
+    background: #2c2c2c;
+}
+
+RepoSessionsList.selected RepoHeader {
+    background: #3a3a3a;
+}
+
+RepoSessionsList.blocker-alert RepoHeader {
+    background: #711d1d;
+}
+
 /* RepoSessionsList */
 
 RepoSessionsList {

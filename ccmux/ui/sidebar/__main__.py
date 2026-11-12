@@ -36,7 +36,7 @@ def main() -> None:
     write_pid_file()
     atexit.register(remove_pid_file)
 
-    app = SidebarApp()
+    app = SidebarApp(persist_prefs=True)
     app.run()
 
 

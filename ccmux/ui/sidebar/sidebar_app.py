@@ -19,7 +19,13 @@ from ccmux import state
 from ccmux.naming import INNER_SESSION
 from ccmux.ui.sidebar import snapshot
 from ccmux.ui.sidebar.snapshot import DerivedSessionState, SessionSnapshot
-from ccmux.ui.sidebar.widgets import SessionRow, RepoSessionsList, TitleBanner, AboutPanel
+from ccmux.ui.sidebar.widgets import (
+    AboutPanel,
+    RepoHeader,
+    RepoSessionsList,
+    SessionRow,
+    TitleBanner,
+)
 
 POLL_INTERVAL = 1.0
 DEMO_POLL_INTERVAL = 1.0
@@ -48,18 +54,29 @@ class SidebarApp(App):
 
     CSS_PATH = "sidebar.tcss"
     ALLOW_SELECT = False
-    BINDINGS = [("escape", "close_about", "Close about panel")]
+    BINDINGS = [
+        ("escape", "escape", "Close about panel / clear selection"),
+        ("up", "move_group(-1)", "Move selected repo group up"),
+        ("down", "move_group(1)", "Move selected repo group down"),
+        ("left", "collapse_group(True)", "Collapse selected repo group"),
+        ("right", "collapse_group(False)", "Expand selected repo group"),
+    ]
 
     def __init__(
         self,
         snapshot_fn: Callable[[], Awaitable[list[SessionSnapshot]]] | None = None,
         poll_interval: float = POLL_INTERVAL,
         on_select: Callable[[str], None] | None = None,
+        persist_prefs: bool = False,
     ) -> None:
         super().__init__()
         self._snapshot_fn = snapshot_fn
         self._poll_interval = poll_interval
         self._on_select = on_select
+        self._persist_prefs = persist_prefs
+        self._repo_order: list[str] = []
+        self._collapsed_repos: set[str] = set()
+        self._selected_repo: str | None = None
         self._last_derived: list[DerivedSessionState] | None = None
         self._blocked_sessions: set[str] = set()
         self._blocker_alerted_sessions: set[str] = set()
@@ -76,6 +93,7 @@ class SidebarApp(App):
 
     async def on_mount(self) -> None:
         self._fix_nested_tmux_resize()
+        await self._load_prefs()
         await self._refresh_sessions(caller="mount")
         self.set_interval(self._poll_interval, self._poll_refresh)
         self._register_signal_handler()
@@ -112,9 +130,78 @@ class SidebarApp(App):
         """Handle back button click in the about panel."""
         self._close_about()
 
-    def action_close_about(self) -> None:
-        """Close the about panel via Escape key."""
+    def action_escape(self) -> None:
+        """Close the about panel and clear any repo group selection."""
         self._close_about()
+        self._select_group(None)
+
+    async def _load_prefs(self) -> None:
+        if not self._persist_prefs:
+            return
+        prefs = await asyncio.to_thread(state.get_sidebar_prefs)
+        self._repo_order = prefs["repo_order"]
+        self._collapsed_repos = set(prefs["collapsed_repos"])
+
+    async def _save_prefs(self) -> None:
+        if not self._persist_prefs:
+            return
+        await asyncio.to_thread(
+            state.update_sidebar_prefs,
+            repo_order=list(self._repo_order),
+            collapsed_repos=sorted(self._collapsed_repos),
+        )
+
+    def _groups(self) -> list[RepoSessionsList]:
+        """Repo group widgets in display order."""
+        return list(self.query(RepoSessionsList))
+
+    def _select_group(self, repo_path: str | None) -> None:
+        self._selected_repo = repo_path
+        for group in self._groups():
+            group.set_selected(group.repo_path == repo_path)
+
+    async def _set_group_collapsed(self, repo_path: str, collapsed: bool) -> None:
+        if collapsed:
+            self._collapsed_repos.add(repo_path)
+        else:
+            self._collapsed_repos.discard(repo_path)
+        for group in self._groups():
+            if group.repo_path == repo_path:
+                group.set_collapsed(collapsed)
+        await self._save_prefs()
+
+    async def on_repo_header_clicked(self, message: RepoHeader.Clicked) -> None:
+        """Select the clicked repo group and toggle its collapsed state."""
+        self.set_focus(None)
+        self._select_group(message.repo_path)
+        await self._set_group_collapsed(
+            message.repo_path, message.repo_path not in self._collapsed_repos,
+        )
+
+    async def action_collapse_group(self, collapsed: bool) -> None:
+        """Collapse or expand the selected repo group."""
+        if self._selected_repo is not None:
+            await self._set_group_collapsed(self._selected_repo, collapsed)
+
+    async def action_move_group(self, delta: int) -> None:
+        """Move the selected repo group up (delta < 0) or down (delta > 0)."""
+        if self._selected_repo is None or self._session_list is None:
+            return
+        groups = self._groups()
+        paths = [group.repo_path for group in groups]
+        if self._selected_repo not in paths:
+            return
+        idx = paths.index(self._selected_repo)
+        new_idx = idx + delta
+        if not 0 <= new_idx < len(groups):
+            return
+        if delta < 0:
+            self._session_list.move_child(groups[idx], before=groups[new_idx])
+        else:
+            self._session_list.move_child(groups[idx], after=groups[new_idx])
+        paths.insert(new_idx, paths.pop(idx))
+        self._repo_order = paths
+        await self._save_prefs()
 
     def _fix_nested_tmux_resize(self) -> None:
         """Work around Textual resize being broken inside nested tmux.
@@ -271,13 +358,20 @@ class SidebarApp(App):
 
             log.debug("refresh REBUILD caller=%s", caller)
             container = self._session_list
-            if not derived:
+            grouped = snapshot.order_groups(snapshot.group_by_repo(derived), self._repo_order)
+            if self._selected_repo not in grouped:
+                self._selected_repo = None
+            if not grouped:
                 new_widgets = [Static("  No sessions")]
             else:
-                grouped = snapshot.group_by_repo(derived)
                 display_names = snapshot.build_repo_display_names(grouped)
                 new_widgets = [
-                    RepoSessionsList(display_names[repo_path], entries, id=f"repo-group-{idx}")
+                    RepoSessionsList(
+                        repo_path, display_names[repo_path], entries,
+                        collapsed=repo_path in self._collapsed_repos,
+                        selected=repo_path == self._selected_repo,
+                        id=f"repo-group-{idx}",
+                    )
                     for idx, (repo_path, entries) in enumerate(grouped.items())
                 ]
             await container.remove_children()
@@ -298,6 +392,7 @@ class SidebarApp(App):
             (d.snapshot.repo_path, d.snapshot.session_name) for d in new_derived
         ]:
             return False
+        touched_groups: list[RepoSessionsList] = []
         for old_d, new_d in zip(old_derived, new_derived):
             if old_d != new_d:
                 entry = new_d.snapshot
@@ -310,6 +405,11 @@ class SidebarApp(App):
                     entry.note,
                     entry.is_shallow,
                 )
+                group = row.parent
+                if isinstance(group, RepoSessionsList) and group not in touched_groups:
+                    touched_groups.append(group)
+        for group in touched_groups:
+            group.refresh_header()
         return True
 
     async def _poll_refresh(self) -> None:
@@ -334,10 +434,12 @@ class SidebarApp(App):
         )
 
     def on_click(self, event: events.Click) -> None:
-        """Close any open note editor when clicking outside the editing row."""
+        """Close any open note editor and clear the group selection when clicking elsewhere."""
         for row in self.query(SessionRow):
             if row._editing and row not in event.widget.ancestors_with_self:
                 row.save_and_close_editor()
+        if self._selected_repo is not None and not isinstance(event.widget, RepoHeader):
+            self._select_group(None)
 
     async def on_session_row_selected(self, message: SessionRow.Selected) -> None:
         """Switch to the clicked session's tmux window and clear blocker alert."""

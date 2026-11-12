@@ -13,6 +13,7 @@ import pytest
 from ccmux import state
 from ccmux.state import store as state_store
 from ccmux.session_layout import reload_outer_session
+from ccmux.ui.sidebar.snapshot import SessionSnapshot, order_groups
 from textual.widgets import Static
 
 from ccmux.ui import (
@@ -20,6 +21,7 @@ from ccmux.ui import (
     AboutPanel,
     SessionRow,
     RepoHeader,
+    RepoSessionsList,
     write_pid_file,
     remove_pid_file,
     SIDEBAR_PIDS_DIR,
@@ -1306,3 +1308,263 @@ class TestSnapshotOwnershipValidation:
             and str(sess_id) == wid_flags.get("sid", "")
         )
         assert is_active is True
+
+
+class TestOrderGroups:
+    """Tests for order_groups repo group ordering."""
+
+    def test_follows_repo_order(self):
+        grouped = _mock_grouped({"/a": [1], "/b": [2], "/c": [3]})
+        assert list(order_groups(grouped, ["/c", "/a", "/b"])) == ["/c", "/a", "/b"]
+
+    def test_unlisted_repos_keep_order_at_end(self):
+        grouped = _mock_grouped({"/a": [1], "/b": [2], "/c": [3], "/d": [4]})
+        assert list(order_groups(grouped, ["/c"])) == ["/c", "/a", "/b", "/d"]
+
+    def test_empty_order_is_identity(self):
+        grouped = _mock_grouped({"/b": [1], "/a": [2]})
+        assert list(order_groups(grouped, [])) == ["/b", "/a"]
+
+    def test_stale_entries_ignored(self):
+        grouped = _mock_grouped({"/a": [1], "/b": [2]})
+        assert list(order_groups(grouped, ["/gone", "/b", "/a"])) == ["/b", "/a"]
+
+
+class _ListProvider:
+    """Snapshot provider over a mutable list of (session_name, repo_name) pairs."""
+
+    def __init__(self, entries: list[tuple[str, str]]) -> None:
+        self.entries = list(entries)
+        self.alerts: dict[str, str | None] = {}
+
+    async def __call__(self):
+        return [
+            SessionSnapshot(
+                repo, f"/fake/{repo}", name, "worktree", True, False,
+                self.alerts.get(name), session_id=sid,
+            )
+            for sid, (name, repo) in enumerate(self.entries, 1)
+        ]
+
+
+def _group_paths(app) -> list[str]:
+    return [group.repo_path for group in app.query(RepoSessionsList)]
+
+
+def _group(app, repo_path: str):
+    return next(g for g in app.query(RepoSessionsList) if g.repo_path == repo_path)
+
+
+class TestRepoGroupCollapse:
+    """Headless pilot tests for collapsing repo groups via header clicks and arrow keys."""
+
+    @pytest.fixture
+    def provider(self):
+        return _ListProvider([("fox", "alpha"), ("bear", "alpha"), ("hawk", "beta")])
+
+    @pytest.fixture
+    def app(self, provider):
+        return SidebarApp(snapshot_fn=provider, poll_interval=60.0, on_select=lambda name: None)
+
+    @pytest.mark.asyncio
+    async def test_header_click_collapses_and_selects(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            group = _group(pilot.app, "/fake/alpha")
+            rows = list(group.query(SessionRow))
+            assert len(rows) == 2 and all(row.display for row in rows)
+
+            await pilot.click(group.query_one(RepoHeader))
+            await pilot.pause()
+
+            assert group.collapsed and group.has_class("collapsed")
+            assert group.selected
+            assert not any(row.display for row in rows)
+            assert str(group.query_one(RepoHeader).content) == "▸ alpha/ (2)"
+            assert not _group(pilot.app, "/fake/beta").collapsed
+
+    @pytest.mark.asyncio
+    async def test_second_click_expands(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            group = _group(pilot.app, "/fake/alpha")
+            await pilot.click(group.query_one(RepoHeader))
+            await pilot.pause()
+            await pilot.click(group.query_one(RepoHeader))
+            await pilot.pause()
+
+            assert not group.collapsed
+            assert group.selected
+            assert all(row.display for row in group.query(SessionRow))
+            assert str(group.query_one(RepoHeader).content) == "▾ alpha/"
+
+    @pytest.mark.asyncio
+    async def test_left_right_collapse_and_expand_selected(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            group = _group(pilot.app, "/fake/alpha")
+            await pilot.click(group.query_one(RepoHeader))
+            await pilot.pause()
+            assert group.collapsed
+
+            await pilot.press("right")
+            await pilot.pause()
+            assert not group.collapsed
+
+            await pilot.press("left")
+            await pilot.pause()
+            assert group.collapsed
+
+    @pytest.mark.asyncio
+    async def test_collapsed_state_survives_rebuild(self, app, provider):
+        async with app.run_test(size=(80, 60)) as pilot:
+            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(RepoHeader))
+            await pilot.pause()
+
+            provider.entries.append(("wolf", "beta"))
+            await pilot.app._refresh_sessions(caller="test")
+            await pilot.pause()
+
+            group = _group(pilot.app, "/fake/alpha")
+            assert group.collapsed and group.selected
+            assert not any(row.display for row in group.query(SessionRow))
+            assert pilot.app.query_one("#sess-wolf", SessionRow).display
+
+    @pytest.mark.asyncio
+    async def test_collapsed_header_reflects_blocker_alert(self, app, provider):
+        async with app.run_test(size=(80, 60)) as pilot:
+            group = _group(pilot.app, "/fake/alpha")
+            await pilot.click(group.query_one(RepoHeader))
+            await pilot.pause()
+            assert not group.has_class("blocker-alert")
+
+            provider.alerts["fox"] = "bell"
+            await pilot.app._refresh_sessions(caller="test")
+            await pilot.pause()
+            assert group.has_class("blocker-alert")
+
+            await pilot.press("right")
+            await pilot.pause()
+            assert not group.has_class("blocker-alert")
+
+
+class TestRepoGroupReorder:
+    """Headless pilot tests for reordering repo groups with up/down arrows."""
+
+    @pytest.fixture
+    def provider(self):
+        return _ListProvider([("fox", "alpha"), ("bear", "beta"), ("hawk", "gamma")])
+
+    @pytest.fixture
+    def app(self, provider):
+        return SidebarApp(snapshot_fn=provider, poll_interval=60.0, on_select=lambda name: None)
+
+    @pytest.mark.asyncio
+    async def test_down_and_up_move_selected_group(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            assert _group_paths(pilot.app) == ["/fake/alpha", "/fake/beta", "/fake/gamma"]
+            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(RepoHeader))
+            await pilot.pause()
+
+            await pilot.press("down")
+            await pilot.pause()
+            assert _group_paths(pilot.app) == ["/fake/beta", "/fake/alpha", "/fake/gamma"]
+
+            await pilot.press("down")
+            await pilot.pause()
+            assert _group_paths(pilot.app) == ["/fake/beta", "/fake/gamma", "/fake/alpha"]
+
+            await pilot.press("down")
+            await pilot.pause()
+            assert _group_paths(pilot.app) == ["/fake/beta", "/fake/gamma", "/fake/alpha"]
+
+            await pilot.press("up")
+            await pilot.pause()
+            assert _group_paths(pilot.app) == ["/fake/beta", "/fake/alpha", "/fake/gamma"]
+            assert _group(pilot.app, "/fake/alpha").selected
+
+    @pytest.mark.asyncio
+    async def test_arrows_without_selection_are_noops(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            await pilot.press("down")
+            await pilot.press("up")
+            await pilot.pause()
+            assert _group_paths(pilot.app) == ["/fake/alpha", "/fake/beta", "/fake/gamma"]
+
+    @pytest.mark.asyncio
+    async def test_escape_clears_selection(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            group = _group(pilot.app, "/fake/alpha")
+            await pilot.click(group.query_one(RepoHeader))
+            await pilot.pause()
+            assert group.selected
+
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not group.selected
+
+            await pilot.press("down")
+            await pilot.pause()
+            assert _group_paths(pilot.app) == ["/fake/alpha", "/fake/beta", "/fake/gamma"]
+
+    @pytest.mark.asyncio
+    async def test_click_elsewhere_clears_selection(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            group = _group(pilot.app, "/fake/alpha")
+            await pilot.click(group.query_one(RepoHeader))
+            await pilot.pause()
+            assert group.selected
+
+            await pilot.click("#sess-hawk")
+            await pilot.pause()
+            assert not group.selected
+
+    @pytest.mark.asyncio
+    async def test_order_survives_rebuild(self, app, provider):
+        async with app.run_test(size=(80, 60)) as pilot:
+            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(RepoHeader))
+            await pilot.pause()
+            await pilot.press("down")
+            await pilot.pause()
+
+            provider.entries.append(("wolf", "delta"))
+            await pilot.app._refresh_sessions(caller="test")
+            await pilot.pause()
+            assert _group_paths(pilot.app) == [
+                "/fake/beta", "/fake/alpha", "/fake/gamma", "/fake/delta",
+            ]
+
+
+class TestSidebarPrefsPersistence:
+    """Collapsed state and group order persist in state.json when persist_prefs is set."""
+
+    @pytest.mark.asyncio
+    async def test_prefs_saved_and_restored(self, temp_state_dir):
+        provider = _ListProvider([("fox", "alpha"), ("bear", "beta")])
+        app = SidebarApp(snapshot_fn=provider, poll_interval=60.0, persist_prefs=True)
+        async with app.run_test(size=(80, 60)) as pilot:
+            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(RepoHeader))
+            await pilot.pause()
+            await pilot.press("down")
+            await pilot.pause()
+
+        assert state.get_sidebar_prefs() == {
+            "repo_order": ["/fake/beta", "/fake/alpha"],
+            "collapsed_repos": ["/fake/alpha"],
+        }
+
+        app2 = SidebarApp(snapshot_fn=provider, poll_interval=60.0, persist_prefs=True)
+        async with app2.run_test(size=(80, 60)) as pilot:
+            assert _group_paths(pilot.app) == ["/fake/beta", "/fake/alpha"]
+            assert _group(pilot.app, "/fake/alpha").collapsed
+            assert not _group(pilot.app, "/fake/beta").collapsed
+
+    @pytest.mark.asyncio
+    async def test_no_persistence_by_default(self, temp_state_dir):
+        provider = _ListProvider([("fox", "alpha"), ("bear", "beta")])
+        app = SidebarApp(snapshot_fn=provider, poll_interval=60.0)
+        async with app.run_test(size=(80, 60)) as pilot:
+            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(RepoHeader))
+            await pilot.pause()
+            await pilot.press("down")
+            await pilot.pause()
+            assert _group_paths(pilot.app) == ["/fake/beta", "/fake/alpha"]
+
+        assert not (temp_state_dir / "state.json").exists()

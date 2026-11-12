@@ -591,3 +591,24 @@ def test_update_tmux_ids_with_bash(temp_state_dir):
     sess = state.get_session("fox")
     assert sess.tmux_cc_window_id == "@5"
     assert sess.tmux_bash_window_id == "@6"
+
+
+class TestSidebarPrefs:
+    """Tests for sidebar UI preference storage."""
+
+    def test_defaults_when_unset(self, temp_state_dir):
+        assert state.get_sidebar_prefs() == {"repo_order": [], "collapsed_repos": []}
+
+    def test_partial_updates_merge(self, temp_state_dir):
+        state.update_sidebar_prefs(repo_order=["/a", "/b"])
+        state.update_sidebar_prefs(collapsed_repos=["/b"])
+        assert state.get_sidebar_prefs() == {
+            "repo_order": ["/a", "/b"],
+            "collapsed_repos": ["/b"],
+        }
+
+    def test_prefs_do_not_disturb_sessions(self, temp_state_dir):
+        state.add_session("fox", "/repo", "/repo/fox", tmux_cc_window_id="@1")
+        state.update_sidebar_prefs(repo_order=["/repo"])
+        assert [s.name for s in state.get_all_sessions()] == ["fox"]
+        assert state.get_sidebar_prefs()["repo_order"] == ["/repo"]

@@ -59,6 +59,16 @@ def group_by_repo(
     return repos
 
 
+def order_groups(
+    grouped: dict[str, list[DerivedSessionState]],
+    repo_order: list[str],
+) -> dict[str, list[DerivedSessionState]]:
+    """Reorder repo groups to follow repo_order; unlisted repos keep their order at the end."""
+    rank = {path: i for i, path in enumerate(repo_order)}
+    unranked = len(rank)
+    return dict(sorted(grouped.items(), key=lambda item: rank.get(item[0], unranked)))
+
+
 def build_repo_display_names(
     grouped: dict[str, list[DerivedSessionState]],
 ) -> dict[str, str]:

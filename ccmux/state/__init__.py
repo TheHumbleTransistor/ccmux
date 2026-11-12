@@ -15,6 +15,8 @@ from ccmux.state.store import (
     update_session,
     get_tmux_session_version,
     set_tmux_session_version,
+    get_sidebar_prefs,
+    update_sidebar_prefs,
     STATE_DIR,
     STATE_FILE,
 )
@@ -36,6 +38,8 @@ __all__ = [
     "update_session",
     "get_tmux_session_version",
     "set_tmux_session_version",
+    "get_sidebar_prefs",
+    "update_sidebar_prefs",
     "STATE_DIR",
     "STATE_FILE",
 ]

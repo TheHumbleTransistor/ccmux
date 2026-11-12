@@ -291,3 +291,21 @@ def find_session_by_path(path: str) -> Optional[tuple[str, Session]]:
                 best_len = len(sp)
                 best = (sess.name, sess)
     return best
+
+
+# --- Sidebar preferences ---
+
+def get_sidebar_prefs() -> dict:
+    """Return sidebar UI preferences: repo_order (repo paths) and collapsed_repos."""
+    prefs = _load_raw().get("sidebar", {})
+    return {
+        "repo_order": list(prefs.get("repo_order", [])),
+        "collapsed_repos": list(prefs.get("collapsed_repos", [])),
+    }
+
+
+def update_sidebar_prefs(**fields) -> None:
+    """Update sidebar UI preference fields in state."""
+    state = _load_raw()
+    state.setdefault("sidebar", {}).update(fields)
+    _save_raw(state)

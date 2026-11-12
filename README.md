@@ -47,6 +47,19 @@ ccmux             # auto-creates a session for the current directory or attaches
 ccmux new         # create a new session from the current directory's repo
 ```
 
+## Sidebar
+
+| Action | Effect |
+|--------|--------|
+| Click a session | Switch to it |
+| Double-click a session | Edit its note |
+| Click a repo header | Collapse or expand the group and select it |
+| `↑` / `↓` | Move the selected group up or down |
+| `←` / `→` | Collapse / expand the selected group |
+| `Esc` | Clear the selection |
+
+Group order and collapsed state are remembered across restarts.
+
 ## Commands
 
 | Command | Description |
