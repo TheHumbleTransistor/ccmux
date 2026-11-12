@@ -57,19 +57,16 @@ class RepoSessionsList(Vertical):
             return "[#9e9e9e]\u25cb[/]"
         return "[#9e9e9e]\u25cf[/]"
 
-    def _toggle_text(self) -> str:
-        return "\u25b8" if self.collapsed else "\u25be"
-
-    def _title_text(self) -> str:
+    def _header_text(self) -> str:
         if not self.collapsed:
-            return self.repo_name
+            return f"\u25be {self._status_indicator()} {self.repo_name}"
         return (
-            f"{self._status_indicator()} {self.repo_name} "
+            f"\u25b8 {self._status_indicator()} {self.repo_name} "
             f"[#666666 not bold]({len(self.sessions)})[/]"
         )
 
     def compose(self) -> ComposeResult:
-        yield RepoHeader(self.repo_path, self._toggle_text(), self._title_text())
+        yield RepoHeader(self._header_text(), repo_path=self.repo_path)
         last_idx = len(self.sessions) - 1
         for i, derived in enumerate(self.sessions):
             entry = derived.snapshot
@@ -108,9 +105,9 @@ class RepoSessionsList(Vertical):
         self.refresh_header()
 
     def refresh_header(self) -> None:
-        """Sync the header arrow, title, status dot, and alert highlight with the row states."""
+        """Sync the header text, status dot, and alert highlight with the row states."""
         self._update_breathing()
-        self.query_one(RepoHeader).update(self._toggle_text(), self._title_text())
+        self.query_one(RepoHeader).update(self._header_text())
         alert = self.collapsed and any(row.has_blocker_alert for row in self.query(SessionRow))
         self.set_class(alert, "blocker-alert")
 
@@ -126,7 +123,7 @@ class RepoSessionsList(Vertical):
         self.toggle_class("selected-flash")
 
     def _update_breathing(self) -> None:
-        should_breathe = self.collapsed and aggregate_status(self._statuses()) == "active"
+        should_breathe = aggregate_status(self._statuses()) == "active"
         if should_breathe and self._breath_timer is None:
             self._breath_timer = self.set_interval(BREATH_INTERVAL, self._advance_breath)
         elif not should_breathe and self._breath_timer is not None:
@@ -136,4 +133,4 @@ class RepoSessionsList(Vertical):
 
     def _advance_breath(self) -> None:
         self._breath_frame = (self._breath_frame + 1) % len(BREATH_COLORS)
-        self.query_one(RepoHeader).update(self._toggle_text(), self._title_text())
+        self.query_one(RepoHeader).update(self._header_text())

@@ -186,18 +186,13 @@ class SidebarApp(App):
                 group.set_collapsed(collapsed)
         await self._save_prefs()
 
-    def on_repo_header_clicked(self, message: RepoHeader.Clicked) -> None:
-        """Select the repo group whose title was clicked."""
+    async def on_repo_header_clicked(self, message: RepoHeader.Clicked) -> None:
+        """Select the clicked repo group and toggle its collapsed state."""
         self.set_focus(None)
         self._select_group(message.repo_path)
-
-    async def on_repo_header_toggle_clicked(self, message: RepoHeader.ToggleClicked) -> None:
-        """Toggle the collapsed state of the repo group whose arrow was clicked."""
-        self.set_focus(None)
         await self._set_group_collapsed(
             message.repo_path, message.repo_path not in self._collapsed_repos,
         )
-        self._reset_selection_timeout()
 
     async def action_collapse_group(self, collapsed: bool) -> None:
         """Collapse or expand the selected repo group."""
