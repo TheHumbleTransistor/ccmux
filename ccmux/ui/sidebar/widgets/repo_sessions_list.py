@@ -59,7 +59,7 @@ class RepoSessionsList(Vertical):
 
     def _header_text(self) -> str:
         if not self.collapsed:
-            return f"\u25be {self._status_indicator()} {self.repo_name}"
+            return f"\u25be [#9e9e9e]\u25cf[/] {self.repo_name}"
         return (
             f"\u25b8 {self._status_indicator()} {self.repo_name} "
             f"[#666666 not bold]({len(self.sessions)})[/]"
@@ -123,7 +123,7 @@ class RepoSessionsList(Vertical):
         self.toggle_class("selected-flash")
 
     def _update_breathing(self) -> None:
-        should_breathe = aggregate_status(self._statuses()) == "active"
+        should_breathe = self.collapsed and aggregate_status(self._statuses()) == "active"
         if should_breathe and self._breath_timer is None:
             self._breath_timer = self.set_interval(BREATH_INTERVAL, self._advance_breath)
         elif not should_breathe and self._breath_timer is not None:

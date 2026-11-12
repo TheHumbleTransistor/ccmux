@@ -1471,31 +1471,35 @@ class TestRepoGroupCollapse:
             await pilot.press("right")
             await pilot.pause()
             assert not group.has_class("blocker-alert")
-            assert _header_text(group) == "▾ [#d70000]●[/] alpha/"
+            assert _header_text(group) == "▾ [#9e9e9e]●[/] alpha/"
 
     @pytest.mark.asyncio
-    async def test_header_dot_follows_group_status(self, app, provider):
+    async def test_header_dot_reflects_group_status_only_when_collapsed(self, app, provider):
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
             assert _header_text(group) == "▾ [#9e9e9e]●[/] alpha/"
-            assert group._breath_timer is None
 
             provider.alerts["fox"] = "activity"
             await pilot.app._refresh_sessions(caller="test")
             await pilot.pause()
+            assert group._breath_timer is None
+            assert _header_text(group) == "▾ [#9e9e9e]●[/] alpha/"
+
+            await pilot.click(group.query_one(RepoHeader))
+            await pilot.pause()
             assert group._breath_timer is not None
-            assert _header_text(group).startswith("▾ [")
+            assert _header_text(group).startswith("▸ [")
             assert "●[/] alpha/" in _header_text(group)
 
             provider.alerts["fox"] = "bell"
             await pilot.app._refresh_sessions(caller="test")
             await pilot.pause()
             assert group._breath_timer is None
-            assert _header_text(group) == "▾ [#d70000]●[/] alpha/"
-
-            await pilot.click(group.query_one(RepoHeader))
-            await pilot.pause()
             assert _header_text(group) == "▸ [#d70000]●[/] alpha/ [#666666 not bold](2)[/]"
+
+            await pilot.press("right")
+            await pilot.pause()
+            assert _header_text(group) == "▾ [#9e9e9e]●[/] alpha/"
 
     @pytest.mark.asyncio
     async def test_selection_times_out(self, app, monkeypatch):
