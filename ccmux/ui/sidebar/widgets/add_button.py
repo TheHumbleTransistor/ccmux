@@ -3,7 +3,7 @@
 from textual.message import Message
 from textual.widgets import Static
 
-PLUS = "+"
+PLUS = "\u254b"
 
 
 class AddButton(Static):
