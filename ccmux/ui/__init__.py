@@ -3,6 +3,8 @@
 from ccmux.ui.sidebar import (  # noqa: F401
     SIDEBAR_PIDS_DIR,
     AboutPanel,
+    AddButton,
+    NewSessionPanel,
     SessionRow,
     RepoHeader,
     RepoSessionsList,

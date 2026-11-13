@@ -18,6 +18,7 @@ from ccmux.session_ops import (
     do_detach,
     do_reload,
     do_session_activate,
+    do_session_clone,
     do_session_deactivate,
     do_session_info,
     do_session_init,
@@ -63,9 +64,21 @@ def session_new(
     worktree: Annotated[bool, Parameter(name=["-w", "--worktree"])] = False,
     shallow: Annotated[bool, Parameter(name=["-s", "--shallow"])] = False,
     yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
+    init: Annotated[bool, Parameter(name=["--init"], negative="")] = False,
 ) -> None:
-    """Create a new Claude Code session in main repo or as a git worktree."""
-    do_session_new(name=name, worktree=worktree, shallow=shallow, yes=yes, path=path)
+    """Create a new Claude Code session in main repo or as a git worktree (--init first creates an empty repo at PATH)."""
+    do_session_new(name=name, worktree=worktree, shallow=shallow, yes=yes, path=path, init=init)
+
+
+@app.command(name="clone")
+def session_clone(
+    url: str,
+    *,
+    into: Annotated[Optional[str], Parameter(name=["--into"])] = None,
+    yes: Annotated[bool, Parameter(name=["-y", "--yes"], negative="")] = False,
+) -> None:
+    """Clone a repository into a workspace directory and create a session for it."""
+    do_session_clone(url=url, into=into, yes=yes)
 
 
 @app.command(name="list")

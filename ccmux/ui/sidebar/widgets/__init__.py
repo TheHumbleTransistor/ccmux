@@ -1,6 +1,8 @@
 """Sidebar widget classes."""
 
 from ccmux.ui.sidebar.widgets.about_panel import AboutPanel
+from ccmux.ui.sidebar.widgets.add_button import AddButton
+from ccmux.ui.sidebar.widgets.new_session_panel import NewSessionPanel
 from ccmux.ui.sidebar.widgets.session_row import SessionRow
 from ccmux.ui.sidebar.widgets.repo_header import RepoHeader
 from ccmux.ui.sidebar.widgets.repo_sessions_list import RepoSessionsList

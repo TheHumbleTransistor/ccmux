@@ -2,9 +2,13 @@
 
 import subprocess
 from pathlib import Path
+import pytest
 from unittest.mock import patch
 
 from ccmux.git_ops import (
+    clone_repo,
+    init_repo,
+    repo_name_from_url,
     check_for_common_default_branches,
     checkout_detached,
     create_worktree,
@@ -361,3 +365,32 @@ class TestCreateWorktree:
             ["git", "-C", str(repo), "worktree", "add", "--detach", str(wt), "HEAD"],
             check=True,
         )
+
+
+class TestRepoNameFromUrl:
+    @pytest.mark.parametrize("url,name", [
+        ("https://github.com/org/proj.git", "proj"),
+        ("https://github.com/org/proj", "proj"),
+        ("git@github.com:org/proj.git", "proj"),
+        ("git@github.com:proj.git", "proj"),
+        ("https://host/org/proj/", "proj"),
+    ])
+    def test_names(self, url, name):
+        assert repo_name_from_url(url) == name
+
+
+class TestCloneAndInit:
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_clone_repo_runs_git_clone_into_dest(self, mock_run, tmp_path):
+        result = clone_repo("https://x/org/proj.git", tmp_path)
+        assert result == tmp_path / "proj"
+        assert mock_run.call_args[0][0] == ["git", "clone", "https://x/org/proj.git", str(tmp_path / "proj")]
+
+    @patch("ccmux.git_ops.subprocess.run")
+    def test_init_repo_creates_dir_inits_and_commits(self, mock_run, tmp_path):
+        target = tmp_path / "newproj"
+        init_repo(target)
+        assert target.is_dir()
+        cmds = [c[0][0] for c in mock_run.call_args_list]
+        assert cmds[0][:6] == ["git", "-C", str(target), "init", "-q", "-b"]
+        assert "--allow-empty" in cmds[1]

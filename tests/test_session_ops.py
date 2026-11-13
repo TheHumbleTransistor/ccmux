@@ -1,5 +1,6 @@
 """Tests for ccmux.session_ops session creation helpers."""
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +9,7 @@ import pytest
 from ccmux import __version__
 from ccmux.exceptions import (
     DefaultBranchError,
+    GitError,
     InvalidArgumentError,
     NotInCcmuxSessionError,
     SessionNotFoundError,
@@ -24,6 +26,7 @@ from ccmux.session_ops import (
     _validate_repo_context,
     claude_project_dir,
     do_reload,
+    do_session_clone,
     do_session_new,
     do_session_reset,
     migrate_claude_project,
@@ -695,3 +698,65 @@ class TestActivateSingle:
         assert "--session-id" not in launch_cmd
         assert "CCMUX_SESSION_RESUMING=1" in launch_cmd
         mock_update_state.assert_called_once_with("fox", "@1", "@2")
+
+
+class TestDoSessionClone:
+    """Tests for do_session_clone()."""
+
+    @patch("ccmux.session_ops.do_session_new")
+    @patch("ccmux.session_ops.clone_repo")
+    def test_explicit_into(self, mock_clone, mock_new, tmp_path):
+        mock_clone.return_value = tmp_path / "proj"
+        do_session_clone("https://x/proj.git", into=str(tmp_path), yes=True)
+        mock_clone.assert_called_once_with("https://x/proj.git", tmp_path)
+        mock_new.assert_called_once_with(yes=True, path=str(tmp_path / "proj"))
+
+    @patch("ccmux.session_ops.do_session_new")
+    @patch("ccmux.session_ops.clone_repo")
+    @patch("ccmux.session_ops.get_workspace_dirs")
+    def test_single_workspace_dir_is_default(self, mock_dirs, mock_clone, mock_new, tmp_path):
+        mock_dirs.return_value = [tmp_path]
+        mock_clone.return_value = tmp_path / "proj"
+        do_session_clone("https://x/proj.git")
+        mock_clone.assert_called_once_with("https://x/proj.git", tmp_path)
+
+    @patch("ccmux.session_ops.get_workspace_dirs")
+    def test_multiple_workspace_dirs_require_into(self, mock_dirs, tmp_path):
+        mock_dirs.return_value = [tmp_path, tmp_path / "x"]
+        with pytest.raises(InvalidArgumentError, match="--into"):
+            do_session_clone("https://x/proj.git")
+
+    def test_missing_into_dir_raises(self, tmp_path):
+        with pytest.raises(InvalidArgumentError, match="Not a directory"):
+            do_session_clone("https://x/proj.git", into=str(tmp_path / "nope"))
+
+    @patch(
+        "ccmux.session_ops.clone_repo",
+        side_effect=subprocess.CalledProcessError(128, "git", stderr="fatal: repository not found"),
+    )
+    def test_clone_failure_raises_git_error(self, mock_clone, tmp_path):
+        with pytest.raises(GitError, match="repository not found"):
+            do_session_clone("https://x/proj.git", into=str(tmp_path))
+
+
+class TestDoSessionNewInit:
+    """Tests for do_session_new(init=True)."""
+
+    @patch("ccmux.session_ops._validate_repo_context", side_effect=InvalidArgumentError("stop"))
+    @patch("ccmux.session_ops.init_repo")
+    def test_init_creates_repo_before_validation(self, mock_init, mock_validate, tmp_path):
+        target = tmp_path / "newproj"
+        with pytest.raises(InvalidArgumentError, match="stop"):
+            do_session_new(path=str(target), init=True, yes=True)
+        mock_init.assert_called_once_with(target)
+
+    def test_init_requires_path(self):
+        with pytest.raises(InvalidArgumentError, match="--init"):
+            do_session_new(init=True)
+
+    @patch("ccmux.session_ops.init_repo")
+    def test_init_refuses_non_empty_dir(self, mock_init, tmp_path):
+        (tmp_path / "file").write_text("x")
+        with pytest.raises(InvalidArgumentError, match="not empty"):
+            do_session_new(path=str(tmp_path), init=True)
+        mock_init.assert_not_called()

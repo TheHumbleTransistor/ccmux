@@ -257,6 +257,36 @@ def create_worktree(repo_path: Path, worktree_path: Path, base_ref: str) -> None
     )
 
 
+def repo_name_from_url(url: str) -> str:
+    """Derive the checkout directory name git clone would use for url."""
+    tail = url.rstrip("/").rsplit("/", 1)[-1]
+    tail = tail.rsplit(":", 1)[-1]
+    return tail[:-4] if tail.endswith(".git") else tail
+
+
+def clone_repo(url: str, dest_dir: Path) -> Path:
+    """Clone url into dest_dir and return the new repository path."""
+    target = dest_dir / repo_name_from_url(url)
+    subprocess.run(
+        ["git", "clone", url, str(target)],
+        check=True, capture_output=True, text=True,
+    )
+    return target
+
+
+def init_repo(path: Path) -> None:
+    """Create path as a git repository on main with an empty initial commit."""
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "-C", str(path), "init", "-q", "-b", "main"],
+        check=True, capture_output=True, text=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-q", "--allow-empty", "-m", "Initial commit"],
+        check=True, capture_output=True, text=True,
+    )
+
+
 def move_worktree(repo_path: Path, old_path: Path, new_path: Path) -> None:
     """Move a git worktree to a new location."""
     subprocess.run(

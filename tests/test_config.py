@@ -6,12 +6,15 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
+from ccmux import config as config_module
 from ccmux.config import (
     CommandEvent,
     get_agent_launch,
     get_bash_launch,
+    get_workspace_dirs,
     get_worktrees_dir,
     load_repo_config,
+    load_user_config,
     run_post_create_commands,
     run_repo_init_commands,
     run_session_post_create_commands,
@@ -575,3 +578,33 @@ class TestIsFirstSessionForRepo:
         existing.repo_path = "/repo"
         mock_state.get_all_sessions.return_value = [existing]
         assert _is_first_session_for_repo(Path("/repo")) is False
+
+
+class TestUserConfig:
+    """Tests for ~/.ccmux/config.toml loading and workspace dirs."""
+
+    def test_missing_file_is_empty(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config_module, "USER_CONFIG_FILE", tmp_path / "config.toml")
+        assert load_user_config() == {}
+        assert get_workspace_dirs() == []
+
+    def test_invalid_toml_is_empty(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "config.toml"
+        cfg.write_text("not = [valid")
+        monkeypatch.setattr(config_module, "USER_CONFIG_FILE", cfg)
+        assert load_user_config() == {}
+
+    def test_workspace_dirs_expand_home_and_skip_missing(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        (home / "work").mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(f'[sidebar]\nworkspace_dirs = ["~/work", "~/missing", "{tmp_path}"]\n')
+        monkeypatch.setattr(config_module, "USER_CONFIG_FILE", cfg)
+        assert get_workspace_dirs() == [home / "work", tmp_path]
+
+    def test_workspace_dirs_accepts_single_string(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(f'[sidebar]\nworkspace_dirs = "{tmp_path}"\n')
+        monkeypatch.setattr(config_module, "USER_CONFIG_FILE", cfg)
+        assert get_workspace_dirs() == [tmp_path]

@@ -1,5 +1,6 @@
 """Demo snapshot builder for sidebar testing."""
 
+import asyncio
 import random
 
 from ccmux.ui.sidebar.snapshot import SessionSnapshot
@@ -63,6 +64,14 @@ class DemoProvider:
                     self._states[name] = ["bell", 0]
             else:
                 self._states[name] = [state, ttl]
+
+    async def run_cli(self, args: list[str]) -> tuple[int, str]:
+        """Pretend to run a ccmux command; succeeds after a short delay."""
+        await asyncio.sleep(1.0)
+        return 0, ""
+
+    def workspace_dirs(self) -> list:
+        return []
 
     def select(self, session_name: str) -> None:
         """Set the current session (called on click)."""

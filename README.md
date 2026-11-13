@@ -57,6 +57,7 @@ ccmux new         # create a new session from the current directory's repo
 | `↑` / `↓` | Move the selected group up or down |
 | `←` / `→` | Collapse / expand the selected group |
 | `Esc` | Clear the selection |
+| `+ new session` (bottom) | Open a repo from your workspace directories, clone a URL, or start a new project |
 
 Group order and collapsed state are remembered across restarts.
 
@@ -65,8 +66,9 @@ Group order and collapsed state are remembered across restarts.
 | Command | Description |
 |---------|-------------|
 | *(default)* | Auto-attach to existing session or create one |
-| `new [NAME]` | Create a new session (add `-w` for worktree) |
+| `new [PATH]` | Create a new session (add `-w` for worktree, `--init` to create a new repo at PATH) |
 | `list` | List all sessions with status and branch info |
+| `clone URL` | Clone a repo into a workspace directory (`--into DIR`) and create a session |
 | `attach` | Attach to the ccmux tmux session |
 | `activate [NAME]` | Reopen Claude Code in a session's tmux window, continuing its most recent conversation |
 | `deactivate [NAME]` | Close tmux window (keeps session) |
@@ -76,6 +78,20 @@ Group order and collapsed state are remembered across restarts.
 | `which` | Print current session name (useful for scripting) |
 | `detach` | Detach from tmux |
 | `reload` | Restart the sidebar and reapply tmux hooks in place after upgrading ccmux |
+
+## Workspace Directories
+
+The sidebar's `+ new session` button looks for repositories one level under your
+workspace directories. Set them in `~/.ccmux/config.toml`:
+
+```toml
+[sidebar]
+workspace_dirs = ["~/work", "~/Git_Repos"]
+```
+
+Without this setting, the parent directories of repos that already have sessions
+are searched. `ccmux clone` uses the same list when `--into` is omitted and exactly
+one directory is configured.
 
 ## Worktree Configuration
 

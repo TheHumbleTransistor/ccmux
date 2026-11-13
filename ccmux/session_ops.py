@@ -18,6 +18,7 @@ from ccmux import __version__, state
 from ccmux.config import (
     get_agent_launch,
     get_bash_launch,
+    get_workspace_dirs,
     get_worktrees_dir,
     run_post_create_commands,
     run_repo_init_commands,
@@ -25,6 +26,7 @@ from ccmux.config import (
 )
 from ccmux.display import console, display_session_table, show_session_info
 from ccmux.exceptions import (
+    GitError,
     ActivationError,
     AttachError,
     DefaultBranchError,
@@ -42,6 +44,7 @@ from ccmux.exceptions import (
 from ccmux.git_ops import (
     check_for_common_default_branches,
     checkout_detached,
+    clone_repo,
     create_worktree,
     discard_all_changes,
     fetch_origin,
@@ -49,6 +52,7 @@ from ccmux.git_ops import (
     get_most_recently_used_branch,
     get_repo_root,
     get_worktree_root,
+    init_repo,
     is_bare_repo,
     move_worktree,
     remote_ref_exists,
@@ -497,8 +501,10 @@ def _reactivate_single_orphan(sess) -> None:
         console.print(f"  [yellow]\u26a0[/yellow] Could not reactivate '{name}'")
 
 
-def do_session_new(name: Optional[str] = None, worktree: bool = False, shallow: bool = False, yes: bool = False, path: Optional[str] = None) -> None:
-    """Create a new Claude Code session."""
+def do_session_new(name: Optional[str] = None, worktree: bool = False, shallow: bool = False, yes: bool = False, path: Optional[str] = None, init: bool = False) -> None:
+    """Create a new Claude Code session, first creating an empty repo at path when init is set."""
+    if init:
+        _init_new_repo(path)
     repo_root, default_branch, working_dir = _validate_repo_context(path)
     create_as_worktree = _resolve_session_type(repo_root, worktree, yes, working_dir)
     worktrees_dir = get_worktrees_dir(repo_root, working_dir)
@@ -545,6 +551,43 @@ def do_session_new(name: Optional[str] = None, worktree: bool = False, shallow: 
     console.print(f"\n[bold green]Success![/bold green] Claude Code is running.")
     console.print(f"Attach with: [cyan]ccmux attach[/cyan]")
     auto_attach_if_outside_tmux(yes)
+
+
+def _init_new_repo(path: Optional[str]) -> None:
+    """Create an empty git repository at path for a brand-new project."""
+    if not path:
+        raise InvalidArgumentError("--init requires the path of the project to create.")
+    target = Path(path).expanduser()
+    if target.exists() and any(target.iterdir()):
+        raise InvalidArgumentError(f"Directory already exists and is not empty: {target}")
+    console.print(f"[bold cyan]Initializing repository:[/bold cyan] {target}")
+    try:
+        init_repo(target)
+    except subprocess.CalledProcessError as exc:
+        raise GitError("init", (exc.stderr or "").strip())
+
+
+def do_session_clone(url: str, into: Optional[str] = None, yes: bool = False) -> None:
+    """Clone url into a workspace directory and create a session for the result.
+
+    Without --into, uses the single configured workspace dir, or the current
+    directory when none is configured.
+    """
+    if into is not None:
+        dest = Path(into).expanduser()
+    else:
+        dirs = get_workspace_dirs()
+        if len(dirs) > 1:
+            raise InvalidArgumentError("Several workspace dirs are configured; pass --into DIR.")
+        dest = dirs[0] if dirs else Path.cwd()
+    if not dest.is_dir():
+        raise InvalidArgumentError(f"Not a directory: {dest}")
+    console.print(f"[bold cyan]Cloning[/bold cyan] {url} into {dest}")
+    try:
+        repo_path = clone_repo(url, dest)
+    except subprocess.CalledProcessError as exc:
+        raise GitError("clone", (exc.stderr or "").strip())
+    do_session_new(yes=yes, path=str(repo_path))
 
 
 def _print_creation_info(name: str, repo_root: Path, create_as_worktree: bool, session_path: Path, default_branch: str) -> None:

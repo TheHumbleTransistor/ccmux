@@ -16,7 +16,7 @@ from ccmux.state import store as state_store
 from ccmux.session_layout import reload_outer_session
 from ccmux.ui.sidebar import sidebar_app as sidebar_app_module
 from ccmux.ui.sidebar.snapshot import SessionSnapshot, aggregate_status, order_groups
-from textual.widgets import Static
+from textual.widgets import Checkbox, Input, OptionList, Static
 
 from ccmux.ui import (
     SidebarApp,
@@ -24,6 +24,7 @@ from ccmux.ui import (
     SessionRow,
     RepoHeader,
     RepoSessionsList,
+    NewSessionPanel,
     write_pid_file,
     remove_pid_file,
     SIDEBAR_PIDS_DIR,
@@ -1505,14 +1506,14 @@ class TestRepoGroupCollapse:
 
     @pytest.mark.asyncio
     async def test_selection_times_out(self, app, monkeypatch):
-        monkeypatch.setattr(sidebar_app_module, "SELECTION_INACTIVITY_TIMEOUT", 0.2)
+        monkeypatch.setattr(sidebar_app_module, "SELECTION_INACTIVITY_TIMEOUT", 0.8)
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
             await pilot.click(group.query_one(RepoHeader))
             await pilot.pause()
             assert group.selected
 
-            await pilot.pause(0.6)
+            await pilot.pause(1.5)
             assert not group.selected
             assert group._blink_timer is None
             assert pilot.app._selection_timer is None
@@ -1520,16 +1521,16 @@ class TestRepoGroupCollapse:
 
     @pytest.mark.asyncio
     async def test_keyboard_activity_resets_timeout(self, app, monkeypatch):
-        monkeypatch.setattr(sidebar_app_module, "SELECTION_INACTIVITY_TIMEOUT", 0.6)
+        monkeypatch.setattr(sidebar_app_module, "SELECTION_INACTIVITY_TIMEOUT", 1.0)
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
             await pilot.click(group.query_one(RepoHeader))
-            await pilot.pause(0.4)
+            await pilot.pause(0.5)
             await pilot.press("down")
-            await pilot.pause(0.4)
+            await pilot.pause(0.8)
             assert group.selected
 
-            await pilot.pause(0.6)
+            await pilot.pause(1.2)
             assert not group.selected
 
 
@@ -1688,3 +1689,182 @@ class TestSidebarPrefsPersistence:
             assert _group_paths(pilot.app) == ["/fake/beta", "/fake/alpha"]
 
         assert not (temp_state_dir / "state.json").exists()
+
+
+class _Runner:
+    """Fake ccmux CLI runner that records the arguments it is asked to run."""
+
+    def __init__(self, returncode: int = 0, output: str = "") -> None:
+        self.calls: list[list[str]] = []
+        self.returncode = returncode
+        self.output = output
+
+    async def __call__(self, args: list[str]) -> tuple[int, str]:
+        self.calls.append(list(args))
+        return self.returncode, self.output
+
+
+def _workspace(tmp_path) -> Path:
+    ws = tmp_path / "ws"
+    for name in ("alpha", "alpine", "beta"):
+        (ws / name / ".git").mkdir(parents=True)
+    return ws
+
+
+class TestNewSessionPanel:
+    """Headless pilot tests for the "+ new session" panel."""
+
+    @pytest.fixture
+    def ws(self, tmp_path):
+        return _workspace(tmp_path)
+
+    @pytest.fixture
+    def runner(self):
+        return _Runner()
+
+    def _make_app(self, ws, runner):
+        async def provider():
+            return [SessionSnapshot("alpha", str(ws / "alpha"), "fox", "main", True, False, None, session_id=1)]
+
+        return SidebarApp(
+            snapshot_fn=provider, poll_interval=60.0, on_select=lambda name: None,
+            cli_runner=runner, workspace_dirs_fn=lambda: [ws],
+        )
+
+    @pytest.fixture
+    def app(self, ws, runner):
+        return self._make_app(ws, runner)
+
+    async def _open(self, pilot):
+        await pilot.click("#add-button")
+        await pilot.pause()
+
+    @pytest.mark.asyncio
+    async def test_button_opens_panel_and_back_closes(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._open(pilot)
+            assert pilot.app.query_one("#new-session-panel").display
+            assert not pilot.app.query_one("#instance-list").display
+            assert not pilot.app.query_one("#add-button").display
+            assert pilot.app.query_one(NewSessionPanel).mode is None
+
+            await pilot.click("#new-back")
+            await pilot.pause()
+            assert not pilot.app.query_one("#new-session-panel").display
+            assert pilot.app.query_one("#instance-list").display
+            assert pilot.app.query_one("#add-button").display
+
+    @pytest.mark.asyncio
+    async def test_existing_repo_filters_and_submits(self, app, runner, ws):
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._open(pilot)
+            await pilot.press("enter")
+            await pilot.pause()
+            panel = pilot.app.query_one(NewSessionPanel)
+            assert panel.mode == "existing"
+            choices = pilot.app.query_one("#new-choices", OptionList)
+            assert choices.option_count == 3
+
+            await pilot.press(*"alp")
+            await pilot.pause()
+            assert choices.option_count == 2
+
+            await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert runner.calls == [["new", str(ws / "alpine"), "-y"]]
+            assert not pilot.app.query_one("#new-session-panel").display
+            assert pilot.app.query_one("#instance-list").display
+            assert pilot.app.focused is None
+
+    @pytest.mark.asyncio
+    async def test_shallow_checkbox_adds_flag(self, app, runner, ws):
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._open(pilot)
+            await pilot.press("enter")
+            await pilot.pause()
+            pilot.app.query_one("#new-shallow", Checkbox).value = True
+            await pilot.click("#new-choices")
+            await pilot.pause()
+            assert runner.calls == [["new", str(ws / "alpha"), "-y", "-s"]]
+
+    @pytest.mark.asyncio
+    async def test_typed_path_wins_over_list(self, app, runner, ws):
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._open(pilot)
+            await pilot.press("enter")
+            await pilot.pause()
+            pilot.app.query_one("#new-input", Input).value = str(ws / "beta")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert runner.calls == [["new", str(ws / "beta"), "-y"]]
+
+    @pytest.mark.asyncio
+    async def test_clone_mode_submits_clone_command(self, app, runner, ws):
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._open(pilot)
+            await pilot.press("down", "enter")
+            await pilot.pause()
+            assert pilot.app.query_one(NewSessionPanel).mode == "clone"
+            pilot.app.query_one("#new-input", Input).value = "https://x/org/proj.git"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert runner.calls == [["clone", "https://x/org/proj.git", "--into", str(ws), "-y"]]
+
+    @pytest.mark.asyncio
+    async def test_new_project_mode_submits_init_command(self, app, runner, ws):
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._open(pilot)
+            await pilot.press("down", "down", "enter")
+            await pilot.pause()
+            assert pilot.app.query_one(NewSessionPanel).mode == "new"
+            await pilot.press(*"proj")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert runner.calls == [["new", str(ws / "proj"), "--init", "-y"]]
+
+    @pytest.mark.asyncio
+    async def test_failure_shows_error_and_keeps_panel_open(self, ws):
+        runner = _Runner(returncode=1, output="Creating...\nError: boom\n")
+        app = self._make_app(ws, runner)
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._open(pilot)
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert len(runner.calls) == 1
+            panel = pilot.app.query_one(NewSessionPanel)
+            assert pilot.app.query_one("#new-session-panel").display
+            assert not panel.busy
+            assert "Error: boom" in str(pilot.app.query_one("#new-status", Static).content)
+
+    @pytest.mark.asyncio
+    async def test_escape_steps_back_then_closes(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._open(pilot)
+            await pilot.press("enter")
+            await pilot.pause()
+            panel = pilot.app.query_one(NewSessionPanel)
+            assert panel.mode == "existing"
+
+            await pilot.press("escape")
+            await pilot.pause()
+            assert panel.mode is None
+            assert pilot.app.query_one("#new-session-panel").display
+
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not pilot.app.query_one("#new-session-panel").display
+            assert pilot.app.query_one("#instance-list").display
+
+    @pytest.mark.asyncio
+    async def test_about_panel_hides_button(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            await pilot.click("#title")
+            await pilot.pause()
+            assert not pilot.app.query_one("#add-button").display
+            await pilot.click("#title")
+            await pilot.pause()
+            assert pilot.app.query_one("#add-button").display

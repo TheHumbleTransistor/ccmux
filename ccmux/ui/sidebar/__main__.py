@@ -28,6 +28,8 @@ def main() -> None:
             snapshot_fn=provider,
             poll_interval=DEMO_POLL_INTERVAL,
             on_select=provider.select,
+            cli_runner=provider.run_cli,
+            workspace_dirs_fn=provider.workspace_dirs,
         )
         app.run()
         return

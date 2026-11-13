@@ -91,6 +91,18 @@ class WorktreeError(CcmuxError):
         super().__init__(msg)
 
 
+class GitError(CcmuxError):
+    """A git operation failed."""
+
+    def __init__(self, operation: str, detail: str = ""):
+        self.operation = operation
+        self.detail = detail
+        msg = f"Git {operation} failed."
+        if detail:
+            msg = f"Git {operation} failed: {detail}"
+        super().__init__(msg)
+
+
 class InvalidArgumentError(CcmuxError):
     """Invalid or missing CLI arguments."""
 

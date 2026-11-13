@@ -1,4 +1,4 @@
-"""Configuration file handling for ccmux - loads and executes ccmux.toml."""
+"""Configuration file handling for ccmux - loads ccmux.toml and ~/.ccmux/config.toml."""
 
 import os
 import subprocess
@@ -10,6 +10,9 @@ try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib
+
+
+USER_CONFIG_FILE = Path.home() / ".ccmux" / "config.toml"
 
 
 @dataclass
@@ -50,6 +53,28 @@ def load_repo_config(repo_root: Path, session_path: Optional[Path] = None) -> Op
             except Exception:
                 continue
     return None
+
+
+def load_user_config() -> dict:
+    """Load the user-level config file, or return {} if it is missing or invalid."""
+    try:
+        with open(USER_CONFIG_FILE, "rb") as f:
+            return tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
+def get_workspace_dirs() -> list[Path]:
+    """Return the existing directories listed in [sidebar].workspace_dirs, with ~ expanded."""
+    raw = load_user_config().get("sidebar", {}).get("workspace_dirs", [])
+    if isinstance(raw, str):
+        raw = [raw]
+    dirs: list[Path] = []
+    for entry in raw:
+        path = Path(str(entry)).expanduser()
+        if path.is_dir() and path not in dirs:
+            dirs.append(path)
+    return dirs
 
 
 def _warn_deprecated_key(section: str, old_key: str, new_key: str) -> None:

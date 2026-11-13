@@ -17,10 +17,12 @@ from textual.widgets import Static
 
 from ccmux import state
 from ccmux.naming import INNER_SESSION
-from ccmux.ui.sidebar import snapshot
+from ccmux.ui.sidebar import repos, snapshot
 from ccmux.ui.sidebar.snapshot import DerivedSessionState, SessionSnapshot
 from ccmux.ui.sidebar.widgets import (
     AboutPanel,
+    AddButton,
+    NewSessionPanel,
     RepoHeader,
     RepoSessionsList,
     SessionRow,
@@ -69,12 +71,17 @@ class SidebarApp(App):
         poll_interval: float = POLL_INTERVAL,
         on_select: Callable[[str], None] | None = None,
         persist_prefs: bool = False,
+        cli_runner: Callable[[list[str]], Awaitable[tuple[int, str]]] | None = None,
+        workspace_dirs_fn: Callable[[], list[Path]] | None = None,
     ) -> None:
         super().__init__()
         self._snapshot_fn = snapshot_fn
         self._poll_interval = poll_interval
         self._on_select = on_select
         self._persist_prefs = persist_prefs
+        self._cli_runner = cli_runner or self._run_ccmux
+        self._workspace_dirs_fn = workspace_dirs_fn or repos.resolve_workspace_dirs
+        self._view = "list"
         self._repo_order: list[str] = []
         self._collapsed_repos: set[str] = set()
         self._selected_repo: str | None = None
@@ -92,6 +99,8 @@ class SidebarApp(App):
         self._session_list = Vertical(id="instance-list")
         yield self._session_list
         yield AboutPanel(id="about-panel")
+        yield NewSessionPanel(id="new-session-panel")
+        yield AddButton()
 
     async def on_mount(self) -> None:
         self._fix_nested_tmux_resize()
@@ -113,16 +122,25 @@ class SidebarApp(App):
             pass
 
 
+    def _show_view(self, view: str) -> None:
+        """Show one sidebar view: "list", "about", or "new"."""
+        self._view = view
+        self._about_visible = view == "about"
+        self.query_one("#instance-list").display = view == "list"
+        self.query_one("#add-button").display = view == "list"
+        self.query_one("#about-panel").display = view == "about"
+        self.query_one("#new-session-panel").display = view == "new"
+        if view == "list":
+            self.set_focus(None)
+
     def _toggle_about(self) -> None:
         """Toggle between the session list and the about panel."""
-        self._about_visible = not self._about_visible
-        self.query_one("#about-panel").display = self._about_visible
-        self.query_one("#instance-list").display = not self._about_visible
+        self._show_view("list" if self._about_visible else "about")
 
     def _close_about(self) -> None:
         """Close the about panel if it is currently visible."""
         if self._about_visible:
-            self._toggle_about()
+            self._show_view("list")
 
     def on_title_banner_clicked(self) -> None:
         """Handle title banner click by toggling the about panel."""
@@ -133,9 +151,40 @@ class SidebarApp(App):
         self._close_about()
 
     def action_escape(self) -> None:
-        """Close the about panel and clear any repo group selection."""
-        self._close_about()
+        """Close any open panel and clear any repo group selection."""
+        if self._view != "list":
+            self._show_view("list")
         self._select_group(None)
+
+    async def on_add_button_clicked(self) -> None:
+        """Open the new-session panel with fresh repo candidates."""
+        self._select_group(None)
+        dirs = await asyncio.to_thread(self._workspace_dirs_fn)
+        known = {d.snapshot.repo_path for d in (self._last_derived or [])}
+        candidates = await asyncio.to_thread(repos.discover_repos, dirs, known)
+        self._show_view("new")
+        self.query_one(NewSessionPanel).open(candidates, dirs)
+
+    def on_new_session_panel_closed(self) -> None:
+        self._show_view("list")
+
+    async def on_new_session_panel_submitted(self, message: NewSessionPanel.Submitted) -> None:
+        """Run the requested ccmux command; close the panel on success, show the error otherwise."""
+        panel = self.query_one(NewSessionPanel)
+        returncode, output = await self._cli_runner(message.args)
+        if returncode == 0:
+            panel.finish()
+            self._show_view("list")
+            await self._refresh_sessions(caller="new_session")
+        else:
+            panel.show_error(output)
+
+    @staticmethod
+    async def _run_ccmux(args: list[str]) -> tuple[int, str]:
+        result = await asyncio.to_thread(
+            subprocess.run, ["ccmux", *args], capture_output=True, text=True,
+        )
+        return result.returncode, f"{result.stdout}\n{result.stderr}".strip()
 
     def on_app_blur(self) -> None:
         """Clear the repo group selection when the sidebar pane loses focus."""
