@@ -48,16 +48,13 @@ Screen {
 #add-button {
     dock: bottom;
     width: 100%;
-    height: 5;
-    content-align: center middle;
+    height: 1;
     text-align: center;
     color: #9e9e9e;
-    background: #2c2c2c;
 }
 
 #add-button:hover {
     color: #d7af5f;
-    background: #3a3a3a;
 }
 
 #new-session-panel {

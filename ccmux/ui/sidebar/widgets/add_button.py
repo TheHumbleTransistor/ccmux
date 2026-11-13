@@ -1,13 +1,9 @@
-"""AddButton — bottom-docked banner showing a large "+" for creating a session."""
+"""AddButton — bottom-docked "+" line for creating a session."""
 
 from textual.message import Message
 from textual.widgets import Static
 
-PLUS = (
-    "  \u2588\u2588  \n"
-    "\u2588\u2588\u2588\u2588\u2588\u2588\n"
-    "  \u2588\u2588  "
-)
+PLUS = "+"
 
 
 class AddButton(Static):
