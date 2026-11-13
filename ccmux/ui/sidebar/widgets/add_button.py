@@ -4,9 +4,9 @@ from textual.message import Message
 from textual.widgets import Static
 
 PLUS = (
-    "  \u2588\u2588  \n"
+    "  \u2584\u2584  \n"
     "\u2588\u2588\u2588\u2588\u2588\u2588\n"
-    "  \u2588\u2588  "
+    "  \u2580\u2580  "
 )
 
 
