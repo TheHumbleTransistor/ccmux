@@ -48,8 +48,8 @@ Screen {
 #add-button {
     dock: bottom;
     width: 100%;
-    height: 1;
-    padding: 0 2;
+    height: 3;
+    text-align: center;
     color: #666666;
 }
 
