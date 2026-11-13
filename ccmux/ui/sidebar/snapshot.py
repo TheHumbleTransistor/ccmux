@@ -35,6 +35,7 @@ class SessionSnapshot:
     activity_ts: float = 0.0
     note: str = ""
     is_shallow: bool = False
+    session_path: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +117,18 @@ def resolve_alert_state(flags: dict | None) -> str | None:
     if flags.get("recently_active"):
         return "activity"
     return None
+
+
+def count_uncommitted_changes(session_path: str) -> int | None:
+    """Number of changed or untracked files in session_path, or None if git cannot tell."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", session_path, "status", "--porcelain"],
+            capture_output=True, text=True, check=True, timeout=10,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    return sum(1 for line in result.stdout.splitlines() if line.strip())
 
 
 async def get_current_window_id() -> str | None:
@@ -296,5 +309,6 @@ async def build_snapshot() -> list[SessionSnapshot]:
             activity_ts=activity_ts,
             note=sess.note or "",
             is_shallow=sess.is_shallow,
+            session_path=sess.session_path,
         ))
     return snapshot

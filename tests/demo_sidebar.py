@@ -89,6 +89,7 @@ class DemoProvider:
                 name == self._current, self._states[name][0],
                 session_id=sid, branch=branch, short_sha=sha,
                 lines_added=added, lines_removed=removed,
+                session_path=f"/fake/{repo}/{name}",
             ))
 
         self._advance_states()

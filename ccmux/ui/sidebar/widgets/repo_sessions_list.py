@@ -83,6 +83,7 @@ class RepoSessionsList(Vertical):
                 session_id=entry.session_id,
                 note=entry.note,
                 is_shallow=entry.is_shallow,
+                session_path=entry.session_path,
                 id=f"sess-{entry.session_name}",
             )
             row.display = not self.collapsed
@@ -91,10 +92,16 @@ class RepoSessionsList(Vertical):
     def on_mount(self) -> None:
         self._update_breathing()
         self._update_selection_blink()
+        self._update_removable()
 
     def set_selected(self, selected: bool) -> None:
         self.set_class(selected, "selected")
         self._update_selection_blink()
+        self._update_removable()
+
+    def _update_removable(self) -> None:
+        for row in self.query(SessionRow):
+            row.set_removable(self.selected)
 
     def set_collapsed(self, collapsed: bool) -> None:
         """Show or hide the session rows and update the header to match."""

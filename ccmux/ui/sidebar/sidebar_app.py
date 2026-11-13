@@ -227,7 +227,39 @@ class SidebarApp(App):
 
     def _on_selection_timeout(self) -> None:
         self._selection_timer = None
+        if any(row.remove_pending for row in self.query(SessionRow)):
+            self._reset_selection_timeout()
+            return
         self._select_group(None)
+
+    async def on_session_row_remove_requested(self, message: SessionRow.RemoveRequested) -> None:
+        """Remove a session right away, or ask first when a worktree has uncommitted changes."""
+        self._reset_selection_timeout()
+        row = self.query_one(f"#sess-{message.session_name}", SessionRow)
+        if message.session_type == "worktree":
+            count = await asyncio.to_thread(snapshot.count_uncommitted_changes, message.session_path)
+            if count is None:
+                row.show_remove_confirmation(
+                    "Could not check for uncommitted changes. The worktree will be deleted.",
+                )
+                return
+            if count:
+                noun = "change" if count == 1 else "changes"
+                row.show_remove_confirmation(f"{count} uncommitted {noun} will be lost.")
+                return
+        await self._remove_session(row)
+
+    async def on_session_row_remove_confirmed(self, message: SessionRow.RemoveConfirmed) -> None:
+        self._reset_selection_timeout()
+        await self._remove_session(self.query_one(f"#sess-{message.session_name}", SessionRow))
+
+    async def _remove_session(self, row: SessionRow) -> None:
+        returncode, output = await self._cli_runner(["remove", row.session_name, "-y"])
+        if returncode == 0:
+            await self._refresh_sessions(caller="remove")
+            return
+        lines = [line for line in output.strip().splitlines() if line.strip()]
+        row.show_remove_confirmation("\n".join(lines[-2:]) or "Remove failed")
 
     async def _set_group_collapsed(self, repo_path: str, collapsed: bool) -> None:
         if collapsed:

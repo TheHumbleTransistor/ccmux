@@ -15,6 +15,7 @@ from ccmux import state
 from ccmux.state import store as state_store
 from ccmux.session_layout import reload_outer_session
 from ccmux.ui.sidebar import sidebar_app as sidebar_app_module
+from ccmux.ui.sidebar import snapshot as snapshot_module
 from ccmux.ui.sidebar.snapshot import SessionSnapshot, aggregate_status, order_groups
 from textual.widgets import Checkbox, Input, OptionList, Static
 
@@ -1868,3 +1869,156 @@ class TestNewSessionPanel:
             await pilot.click("#title")
             await pilot.pause()
             assert pilot.app.query_one("#add-button").display
+
+
+class TestCountUncommittedChanges:
+    @mock.patch("ccmux.ui.sidebar.snapshot.subprocess.run")
+    def test_counts_status_lines(self, mock_run):
+        mock_run.return_value = mock.Mock(stdout=" M a.py\n?? new.txt\n\n")
+        assert snapshot_module.count_uncommitted_changes("/repo/wt") == 2
+        assert mock_run.call_args[0][0] == ["git", "-C", "/repo/wt", "status", "--porcelain"]
+
+    @mock.patch("ccmux.ui.sidebar.snapshot.subprocess.run", side_effect=subprocess.CalledProcessError(128, "git"))
+    def test_failure_is_none(self, mock_run):
+        assert snapshot_module.count_uncommitted_changes("/nope") is None
+
+
+class TestSessionRemoval:
+    """Pilot tests for the trash icons on a selected repo group's session rows."""
+
+    @pytest.fixture
+    def runner(self):
+        return _Runner()
+
+    def _make_app(self, runner):
+        async def provider():
+            return [
+                SessionSnapshot("alpha", "/fake/alpha", "fox", "main", True, False, None,
+                                session_id=1, session_path="/fake/alpha"),
+                SessionSnapshot("alpha", "/fake/alpha", "bear", "worktree", True, False, None,
+                                session_id=2, session_path="/fake/alpha/.ccmux/worktrees/bear"),
+                SessionSnapshot("beta", "/fake/beta", "hawk", "worktree", True, False, None,
+                                session_id=3, session_path="/fake/beta/.ccmux/worktrees/hawk"),
+            ]
+
+        return SidebarApp(snapshot_fn=provider, poll_interval=60.0, on_select=lambda name: None, cli_runner=runner)
+
+    @pytest.fixture
+    def app(self, runner):
+        return self._make_app(runner)
+
+    async def _select_expanded(self, pilot, repo_path):
+        header = _group(pilot.app, repo_path).query_one(RepoHeader)
+        await pilot.click(header)
+        await pilot.pause()
+        await pilot.click(header)
+        await pilot.pause()
+
+    def _trash(self, pilot, name):
+        return pilot.app.query_one(f"#sess-{name}", SessionRow).query_one(".trash")
+
+    @pytest.mark.asyncio
+    async def test_trash_icons_follow_selection(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            assert not self._trash(pilot, "fox").display
+            await self._select_expanded(pilot, "/fake/alpha")
+            assert self._trash(pilot, "fox").display
+            assert self._trash(pilot, "bear").display
+            assert not self._trash(pilot, "hawk").display
+
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not self._trash(pilot, "fox").display
+            assert not self._trash(pilot, "bear").display
+
+    @pytest.mark.asyncio
+    async def test_clean_worktree_removes_immediately(self, app, runner, monkeypatch):
+        monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: 0)
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._select_expanded(pilot, "/fake/alpha")
+            await pilot.click(self._trash(pilot, "bear"))
+            await pilot.pause()
+            assert runner.calls == [["remove", "bear", "-y"]]
+            assert not pilot.app.query_one("#sess-bear", SessionRow).remove_pending
+            assert _group(pilot.app, "/fake/alpha").selected
+
+    @pytest.mark.asyncio
+    async def test_main_session_skips_the_check(self, app, runner, monkeypatch):
+        def boom(path):
+            raise AssertionError("main sessions should not be checked")
+
+        monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", boom)
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._select_expanded(pilot, "/fake/alpha")
+            await pilot.click(self._trash(pilot, "fox"))
+            await pilot.pause()
+            assert runner.calls == [["remove", "fox", "-y"]]
+
+    @pytest.mark.asyncio
+    async def test_dirty_worktree_asks_first(self, app, runner, monkeypatch):
+        monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: 3)
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._select_expanded(pilot, "/fake/alpha")
+            row = pilot.app.query_one("#sess-bear", SessionRow)
+            await pilot.click(self._trash(pilot, "bear"))
+            await pilot.pause()
+            assert row.remove_pending
+            assert "3 uncommitted changes" in str(row.query_one(".confirm-text", Static).content)
+            assert runner.calls == []
+
+            await pilot.click(row.query_one(".confirm-no"))
+            await pilot.pause()
+            assert not row.remove_pending
+            assert runner.calls == []
+
+            await pilot.click(self._trash(pilot, "bear"))
+            await pilot.pause()
+            await pilot.click(row.query_one(".confirm-yes"))
+            await pilot.pause()
+            assert runner.calls == [["remove", "bear", "-y"]]
+
+    @pytest.mark.asyncio
+    async def test_unknown_status_asks(self, app, runner, monkeypatch):
+        monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: None)
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._select_expanded(pilot, "/fake/alpha")
+            row = pilot.app.query_one("#sess-bear", SessionRow)
+            await pilot.click(self._trash(pilot, "bear"))
+            await pilot.pause()
+            assert row.remove_pending
+            assert "Could not check" in str(row.query_one(".confirm-text", Static).content)
+            assert runner.calls == []
+
+    @pytest.mark.asyncio
+    async def test_failed_remove_shows_error(self, monkeypatch):
+        runner = _Runner(returncode=1, output="Removing...\nError: nope\n")
+        app = self._make_app(runner)
+        monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: 0)
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._select_expanded(pilot, "/fake/alpha")
+            row = pilot.app.query_one("#sess-bear", SessionRow)
+            await pilot.click(self._trash(pilot, "bear"))
+            await pilot.pause()
+            assert len(runner.calls) == 1
+            assert row.remove_pending
+            assert "Error: nope" in str(row.query_one(".confirm-text", Static).content)
+
+    @pytest.mark.asyncio
+    async def test_pending_confirmation_keeps_selection_alive(self, app, monkeypatch):
+        monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: 1)
+        monkeypatch.setattr(sidebar_app_module, "SELECTION_INACTIVITY_TIMEOUT", 0.5)
+        async with app.run_test(size=(80, 60)) as pilot:
+            await self._select_expanded(pilot, "/fake/alpha")
+            row = pilot.app.query_one("#sess-bear", SessionRow)
+            await pilot.click(self._trash(pilot, "bear"))
+            await pilot.pause()
+            assert row.remove_pending
+
+            await pilot.pause(1.2)
+            assert _group(pilot.app, "/fake/alpha").selected
+            assert row.remove_pending
+
+            await pilot.click(row.query_one(".confirm-no"))
+            await pilot.pause(1.2)
+            assert not _group(pilot.app, "/fake/alpha").selected
+            assert not self._trash(pilot, "bear").display
