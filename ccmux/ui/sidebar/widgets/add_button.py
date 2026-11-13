@@ -4,14 +4,14 @@ from textual.message import Message
 from textual.widgets import Static
 
 PLUS = (
-    "  \u2584\u2584  \n"
+    "  \u2588\u2588  \n"
     "\u2588\u2588\u2588\u2588\u2588\u2588\n"
-    "  \u2580\u2580  "
+    "  \u2588\u2588  "
 )
 
 
 class AddButton(Static):
-    """Clickable three-row "+" banner docked to the bottom of the sidebar."""
+    """Clickable "+" banner docked to the bottom of the sidebar."""
 
     class Clicked(Message):
         """Posted when the banner is clicked."""
