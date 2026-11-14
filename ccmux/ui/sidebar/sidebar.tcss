@@ -55,7 +55,8 @@ Screen {
 }
 
 #add-button:hover {
-    color: #d7af5f;
+    background: #d7af5f;
+    color: #1e1e1e;
 }
 
 #new-session-panel {
