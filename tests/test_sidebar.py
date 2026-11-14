@@ -1378,12 +1378,16 @@ class TestAggregateStatus:
         assert aggregate_status([]) == "deactivated"
 
 
-def _header_text(group) -> str:
-    return str(group.query_one(RepoHeader).content)
+def _toggle_text(group) -> str:
+    return str(group.query_one(RepoHeader).query_one(".toggle", Static).content)
+
+
+def _title_text(group) -> str:
+    return str(group.query_one(RepoHeader).query_one(".title", Static).content)
 
 
 class TestRepoGroupCollapse:
-    """Headless pilot tests for collapsing repo groups via header clicks and arrow keys."""
+    """Headless pilot tests for collapsing repo groups via the header arrow and arrow keys."""
 
     @pytest.fixture
     def provider(self):
@@ -1394,42 +1398,57 @@ class TestRepoGroupCollapse:
         return SidebarApp(snapshot_fn=provider, poll_interval=60.0, on_select=lambda name: None)
 
     @pytest.mark.asyncio
-    async def test_header_click_collapses_and_selects(self, app):
+    async def test_arrow_click_collapses_without_selecting(self, app):
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
             rows = list(group.query(SessionRow))
             assert len(rows) == 2 and all(row.display for row in rows)
 
-            await pilot.click(group.query_one(RepoHeader))
+            await pilot.click(group.query_one(".toggle"))
             await pilot.pause()
 
             assert group.collapsed and group.has_class("collapsed")
-            assert group.selected
-            assert group._blink_timer is not None
-            assert pilot.app._selection_timer is not None
+            assert not group.selected
             assert not any(row.display for row in rows)
-            assert _header_text(group) == "▸ [#9e9e9e]●[/] alpha/ [#666666 not bold](2)[/]"
+            assert _toggle_text(group) == "▸"
+            assert _title_text(group) == "[#9e9e9e]●[/] alpha/ [#666666 not bold](2)[/]"
             assert not _group(pilot.app, "/fake/beta").collapsed
 
     @pytest.mark.asyncio
-    async def test_second_click_expands(self, app):
+    async def test_second_arrow_click_expands(self, app):
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
-            await pilot.click(group.query_one(RepoHeader))
+            await pilot.click(group.query_one(".toggle"))
             await pilot.pause()
-            await pilot.click(group.query_one(RepoHeader))
+            await pilot.click(group.query_one(".toggle"))
             await pilot.pause()
 
             assert not group.collapsed
-            assert group.selected
+            assert not group.selected
             assert all(row.display for row in group.query(SessionRow))
-            assert _header_text(group) == "▾ [#9e9e9e]●[/] alpha/"
+            assert _toggle_text(group) == "▾"
+            assert _title_text(group) == "[#9e9e9e]●[/] alpha/"
+
+    @pytest.mark.asyncio
+    async def test_title_click_selects_without_collapsing(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            group = _group(pilot.app, "/fake/alpha")
+            await pilot.click(group.query_one(".title"))
+            await pilot.pause()
+
+            assert group.selected
+            assert not group.collapsed
+            assert group._blink_timer is not None
+            assert pilot.app._selection_timer is not None
 
     @pytest.mark.asyncio
     async def test_left_right_collapse_and_expand_selected(self, app):
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
-            await pilot.click(group.query_one(RepoHeader))
+            await pilot.click(group.query_one(".title"))
+            await pilot.pause()
+
+            await pilot.press("left")
             await pilot.pause()
             assert group.collapsed
 
@@ -1437,14 +1456,10 @@ class TestRepoGroupCollapse:
             await pilot.pause()
             assert not group.collapsed
 
-            await pilot.press("left")
-            await pilot.pause()
-            assert group.collapsed
-
     @pytest.mark.asyncio
     async def test_collapsed_state_survives_rebuild(self, app, provider):
         async with app.run_test(size=(80, 60)) as pilot:
-            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(RepoHeader))
+            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(".toggle"))
             await pilot.pause()
 
             provider.entries.append(("wolf", "beta"))
@@ -1452,8 +1467,7 @@ class TestRepoGroupCollapse:
             await pilot.pause()
 
             group = _group(pilot.app, "/fake/alpha")
-            assert group.collapsed and group.selected
-            assert group._blink_timer is not None
+            assert group.collapsed
             assert not any(row.display for row in group.query(SessionRow))
             assert pilot.app.query_one("#sess-wolf", SessionRow).display
 
@@ -1461,7 +1475,7 @@ class TestRepoGroupCollapse:
     async def test_collapsed_header_reflects_blocker_alert(self, app, provider):
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
-            await pilot.click(group.query_one(RepoHeader))
+            await pilot.click(group.query_one(".toggle"))
             await pilot.pause()
             assert not group.has_class("blocker-alert")
 
@@ -1469,47 +1483,47 @@ class TestRepoGroupCollapse:
             await pilot.app._refresh_sessions(caller="test")
             await pilot.pause()
             assert group.has_class("blocker-alert")
-            assert _header_text(group).startswith("▸ [#d70000]●[/] alpha/")
+            assert _title_text(group).startswith("[#d70000]●[/] alpha/")
 
-            await pilot.press("right")
+            await pilot.click(group.query_one(".toggle"))
             await pilot.pause()
             assert not group.has_class("blocker-alert")
-            assert _header_text(group) == "▾ [#9e9e9e]●[/] alpha/"
+            assert _title_text(group) == "[#9e9e9e]●[/] alpha/"
 
     @pytest.mark.asyncio
     async def test_header_dot_reflects_group_status_only_when_collapsed(self, app, provider):
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
-            assert _header_text(group) == "▾ [#9e9e9e]●[/] alpha/"
+            assert _title_text(group) == "[#9e9e9e]●[/] alpha/"
 
             provider.alerts["fox"] = "activity"
             await pilot.app._refresh_sessions(caller="test")
             await pilot.pause()
             assert group._breath_timer is None
-            assert _header_text(group) == "▾ [#9e9e9e]●[/] alpha/"
+            assert _title_text(group) == "[#9e9e9e]●[/] alpha/"
 
-            await pilot.click(group.query_one(RepoHeader))
+            await pilot.click(group.query_one(".toggle"))
             await pilot.pause()
             assert group._breath_timer is not None
-            assert _header_text(group).startswith("▸ [")
-            assert "●[/] alpha/" in _header_text(group)
+            assert _title_text(group).startswith("[")
+            assert "●[/] alpha/" in _title_text(group)
 
             provider.alerts["fox"] = "bell"
             await pilot.app._refresh_sessions(caller="test")
             await pilot.pause()
             assert group._breath_timer is None
-            assert _header_text(group) == "▸ [#d70000]●[/] alpha/ [#666666 not bold](2)[/]"
+            assert _title_text(group) == "[#d70000]●[/] alpha/ [#666666 not bold](2)[/]"
 
-            await pilot.press("right")
+            await pilot.click(group.query_one(".toggle"))
             await pilot.pause()
-            assert _header_text(group) == "▾ [#9e9e9e]●[/] alpha/"
+            assert _title_text(group) == "[#9e9e9e]●[/] alpha/"
 
     @pytest.mark.asyncio
     async def test_selection_times_out(self, app, monkeypatch):
         monkeypatch.setattr(sidebar_app_module, "SELECTION_INACTIVITY_TIMEOUT", 0.8)
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
-            await pilot.click(group.query_one(RepoHeader))
+            await pilot.click(group.query_one(".title"))
             await pilot.pause()
             assert group.selected
 
@@ -1517,14 +1531,13 @@ class TestRepoGroupCollapse:
             assert not group.selected
             assert group._blink_timer is None
             assert pilot.app._selection_timer is None
-            assert group.collapsed
 
     @pytest.mark.asyncio
     async def test_keyboard_activity_resets_timeout(self, app, monkeypatch):
         monkeypatch.setattr(sidebar_app_module, "SELECTION_INACTIVITY_TIMEOUT", 1.0)
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
-            await pilot.click(group.query_one(RepoHeader))
+            await pilot.click(group.query_one(".title"))
             await pilot.pause(0.5)
             await pilot.press("down")
             await pilot.pause(0.8)
@@ -1549,7 +1562,7 @@ class TestRepoGroupReorder:
     async def test_down_and_up_move_selected_group(self, app):
         async with app.run_test(size=(80, 60)) as pilot:
             assert _group_paths(pilot.app) == ["/fake/alpha", "/fake/beta", "/fake/gamma"]
-            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(RepoHeader))
+            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(".title"))
             await pilot.pause()
 
             await pilot.press("down")
@@ -1581,7 +1594,7 @@ class TestRepoGroupReorder:
     async def test_escape_clears_selection(self, app):
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
-            await pilot.click(group.query_one(RepoHeader))
+            await pilot.click(group.query_one(".title"))
             await pilot.pause()
             assert group.selected
 
@@ -1597,7 +1610,7 @@ class TestRepoGroupReorder:
     async def test_click_elsewhere_clears_selection(self, app):
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
-            await pilot.click(group.query_one(RepoHeader))
+            await pilot.click(group.query_one(".title"))
             await pilot.pause()
             assert group.selected
 
@@ -1609,7 +1622,7 @@ class TestRepoGroupReorder:
     async def test_losing_focus_clears_selection(self, app):
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
-            await pilot.click(group.query_one(RepoHeader))
+            await pilot.click(group.query_one(".title"))
             await pilot.pause()
             assert group.selected
 
@@ -1624,23 +1637,37 @@ class TestRepoGroupReorder:
             assert _group_paths(pilot.app) == ["/fake/alpha", "/fake/beta", "/fake/gamma"]
 
     @pytest.mark.asyncio
-    async def test_clicking_another_header_moves_selection(self, app):
+    async def test_clicking_another_title_moves_selection(self, app):
         async with app.run_test(size=(80, 60)) as pilot:
             alpha = _group(pilot.app, "/fake/alpha")
             beta = _group(pilot.app, "/fake/beta")
-            await pilot.click(alpha.query_one(RepoHeader))
+            await pilot.click(alpha.query_one(".title"))
             await pilot.pause()
-            await pilot.click(beta.query_one(RepoHeader))
+            await pilot.click(beta.query_one(".title"))
             await pilot.pause()
 
-            assert beta.selected and beta.collapsed
-            assert not alpha.selected and alpha.collapsed
+            assert beta.selected
+            assert not alpha.selected
             assert alpha._blink_timer is None
+            assert not alpha.collapsed and not beta.collapsed
+
+    @pytest.mark.asyncio
+    async def test_arrow_click_keeps_selection(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            alpha = _group(pilot.app, "/fake/alpha")
+            beta = _group(pilot.app, "/fake/beta")
+            await pilot.click(alpha.query_one(".title"))
+            await pilot.pause()
+            await pilot.click(beta.query_one(".toggle"))
+            await pilot.pause()
+
+            assert alpha.selected
+            assert beta.collapsed and not beta.selected
 
     @pytest.mark.asyncio
     async def test_order_survives_rebuild(self, app, provider):
         async with app.run_test(size=(80, 60)) as pilot:
-            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(RepoHeader))
+            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(".title"))
             await pilot.pause()
             await pilot.press("down")
             await pilot.pause()
@@ -1661,7 +1688,10 @@ class TestSidebarPrefsPersistence:
         provider = _ListProvider([("fox", "alpha"), ("bear", "beta")])
         app = SidebarApp(snapshot_fn=provider, poll_interval=60.0, persist_prefs=True)
         async with app.run_test(size=(80, 60)) as pilot:
-            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(RepoHeader))
+            alpha = _group(pilot.app, "/fake/alpha")
+            await pilot.click(alpha.query_one(".toggle"))
+            await pilot.pause()
+            await pilot.click(alpha.query_one(".title"))
             await pilot.pause()
             await pilot.press("down")
             await pilot.pause()
@@ -1682,7 +1712,7 @@ class TestSidebarPrefsPersistence:
         provider = _ListProvider([("fox", "alpha"), ("bear", "beta")])
         app = SidebarApp(snapshot_fn=provider, poll_interval=60.0)
         async with app.run_test(size=(80, 60)) as pilot:
-            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(RepoHeader))
+            await pilot.click(_group(pilot.app, "/fake/alpha").query_one(".title"))
             await pilot.pause()
             await pilot.press("down")
             await pilot.pause()

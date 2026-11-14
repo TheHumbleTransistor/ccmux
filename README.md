@@ -53,7 +53,8 @@ ccmux new         # create a new session from the current directory's repo
 |--------|--------|
 | Click a session | Switch to it |
 | Double-click a session | Edit its note |
-| Click a repo header | Collapse or expand the group and select it (highlight blinks, clears after 10 s idle) |
+| Click the arrow on a repo header | Collapse or expand the group |
+| Click a repo name | Select the group (highlight blinks, clears after 10 s idle) |
 | `↑` / `↓` | Move the selected group up or down |
 | `←` / `→` | Collapse / expand the selected group |
 | `Esc` | Clear the selection |
