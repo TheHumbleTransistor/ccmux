@@ -1914,7 +1914,7 @@ class TestCountUncommittedChanges:
 
 
 class TestSessionRemoval:
-    """Pilot tests for the trash icons on a selected repo group's session rows."""
+    """Pilot tests for the slide-in Remove box on a selected repo group's session rows."""
 
     @pytest.fixture
     def runner(self):
@@ -1939,34 +1939,41 @@ class TestSessionRemoval:
 
     async def _select(self, pilot, repo_path):
         await pilot.click(_group(pilot.app, repo_path).query_one(".title"))
+        await pilot.pause(0.5)
+
+    def _row(self, pilot, name):
+        return pilot.app.query_one(f"#sess-{name}", SessionRow)
+
+    async def _click_remove(self, pilot, name):
+        await pilot.click(self._row(pilot, name).query_one(".remove"))
         await pilot.pause()
 
-    def _trash(self, pilot, name):
-        return pilot.app.query_one(f"#sess-{name}", SessionRow).query_one(".trash")
-
     @pytest.mark.asyncio
-    async def test_trash_icons_follow_selection(self, app):
+    async def test_remove_boxes_follow_selection(self, app):
         async with app.run_test(size=(80, 60)) as pilot:
-            assert not self._trash(pilot, "fox").display
+            assert not self._row(pilot, "fox").remove_shown
             await self._select(pilot, "/fake/alpha")
-            assert self._trash(pilot, "fox").display
-            assert self._trash(pilot, "bear").display
-            assert not self._trash(pilot, "hawk").display
+            assert self._row(pilot, "fox").remove_shown
+            assert self._row(pilot, "bear").remove_shown
+            assert not self._row(pilot, "hawk").remove_shown
+            assert self._row(pilot, "fox").size.height == 4
+            box = self._row(pilot, "fox").query_one(".remove")
+            assert box.region.height == 4
+            assert box.region.right == self._row(pilot, "fox").content_region.right
 
             await pilot.press("escape")
-            await pilot.pause()
-            assert not self._trash(pilot, "fox").display
-            assert not self._trash(pilot, "bear").display
+            await pilot.pause(0.5)
+            assert not self._row(pilot, "fox").remove_shown
+            assert not self._row(pilot, "bear").remove_shown
 
     @pytest.mark.asyncio
     async def test_clean_worktree_removes_immediately(self, app, runner, monkeypatch):
         monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: 0)
         async with app.run_test(size=(80, 60)) as pilot:
             await self._select(pilot, "/fake/alpha")
-            await pilot.click(self._trash(pilot, "bear"))
-            await pilot.pause()
+            await self._click_remove(pilot, "bear")
             assert runner.calls == [["remove", "bear", "-y"]]
-            assert not pilot.app.query_one("#sess-bear", SessionRow).remove_pending
+            assert not self._row(pilot, "bear").remove_pending
             assert _group(pilot.app, "/fake/alpha").selected
 
     @pytest.mark.asyncio
@@ -1977,8 +1984,7 @@ class TestSessionRemoval:
         monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", boom)
         async with app.run_test(size=(80, 60)) as pilot:
             await self._select(pilot, "/fake/alpha")
-            await pilot.click(self._trash(pilot, "fox"))
-            await pilot.pause()
+            await self._click_remove(pilot, "fox")
             assert runner.calls == [["remove", "fox", "-y"]]
 
     @pytest.mark.asyncio
@@ -1986,22 +1992,22 @@ class TestSessionRemoval:
         monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: 3)
         async with app.run_test(size=(80, 60)) as pilot:
             await self._select(pilot, "/fake/alpha")
-            row = pilot.app.query_one("#sess-bear", SessionRow)
-            await pilot.click(self._trash(pilot, "bear"))
-            await pilot.pause()
+            row = self._row(pilot, "bear")
+            await self._click_remove(pilot, "bear")
             assert row.remove_pending
-            assert "3 uncommitted changes" in str(row.query_one(".confirm-text", Static).content)
+            assert "3 uncommitted changes" in str(row.query_one(".remove", Static).content)
             assert runner.calls == []
 
-            await pilot.click(row.query_one(".confirm-no"))
-            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause(0.5)
             assert not row.remove_pending
+            assert not row.remove_shown
             assert runner.calls == []
 
-            await pilot.click(self._trash(pilot, "bear"))
-            await pilot.pause()
-            await pilot.click(row.query_one(".confirm-yes"))
-            await pilot.pause()
+            await self._select(pilot, "/fake/alpha")
+            await self._click_remove(pilot, "bear")
+            assert row.remove_pending
+            await self._click_remove(pilot, "bear")
             assert runner.calls == [["remove", "bear", "-y"]]
 
     @pytest.mark.asyncio
@@ -2009,11 +2015,10 @@ class TestSessionRemoval:
         monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: None)
         async with app.run_test(size=(80, 60)) as pilot:
             await self._select(pilot, "/fake/alpha")
-            row = pilot.app.query_one("#sess-bear", SessionRow)
-            await pilot.click(self._trash(pilot, "bear"))
-            await pilot.pause()
+            row = self._row(pilot, "bear")
+            await self._click_remove(pilot, "bear")
             assert row.remove_pending
-            assert "Could not check" in str(row.query_one(".confirm-text", Static).content)
+            assert "Could not check" in str(row.query_one(".remove", Static).content)
             assert runner.calls == []
 
     @pytest.mark.asyncio
@@ -2023,29 +2028,27 @@ class TestSessionRemoval:
         monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: 0)
         async with app.run_test(size=(80, 60)) as pilot:
             await self._select(pilot, "/fake/alpha")
-            row = pilot.app.query_one("#sess-bear", SessionRow)
-            await pilot.click(self._trash(pilot, "bear"))
-            await pilot.pause()
+            row = self._row(pilot, "bear")
+            await self._click_remove(pilot, "bear")
             assert len(runner.calls) == 1
             assert row.remove_pending
-            assert "Error: nope" in str(row.query_one(".confirm-text", Static).content)
+            assert "Error: nope" in str(row.query_one(".remove", Static).content)
 
     @pytest.mark.asyncio
     async def test_pending_confirmation_keeps_selection_alive(self, app, monkeypatch):
         monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: 1)
-        monkeypatch.setattr(sidebar_app_module, "SELECTION_INACTIVITY_TIMEOUT", 0.5)
+        monkeypatch.setattr(sidebar_app_module, "SELECTION_INACTIVITY_TIMEOUT", 1.5)
         async with app.run_test(size=(80, 60)) as pilot:
             await self._select(pilot, "/fake/alpha")
-            row = pilot.app.query_one("#sess-bear", SessionRow)
-            await pilot.click(self._trash(pilot, "bear"))
-            await pilot.pause()
+            row = self._row(pilot, "bear")
+            await self._click_remove(pilot, "bear")
             assert row.remove_pending
 
-            await pilot.pause(1.2)
+            await pilot.pause(2.5)
             assert _group(pilot.app, "/fake/alpha").selected
             assert row.remove_pending
 
-            await pilot.click(row.query_one(".confirm-no"))
-            await pilot.pause(1.2)
+            await pilot.press("escape")
+            await pilot.pause(0.5)
             assert not _group(pilot.app, "/fake/alpha").selected
-            assert not self._trash(pilot, "bear").display
+            assert not row.remove_shown

@@ -2,13 +2,22 @@
 
 import time
 
+from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
+from textual.css.scalar import Scalar, ScalarOffset, Unit
 from textual.message import Message
 from textual.widgets import Static, TextArea
 
 EDIT_INACTIVITY_TIMEOUT = 10  # seconds before auto-saving an open note editor
+REMOVE_SLIDE_DURATION = 0.2  # seconds for the Remove box to slide in or out
+REMOVE_BOX_WIDTH = 10
+REMOVE_CONFIRM_WIDTH = 28
+
+
+def _cells_offset(x: int) -> ScalarOffset:
+    return ScalarOffset(Scalar(x, Unit.CELLS, Unit.CELLS), Scalar(0, Unit.CELLS, Unit.CELLS))
 
 # Breathing animation: dot color steps for one full cycle (grey→green→grey).
 # Uses exact 256-color palette entries to avoid rounding artifacts in tmux.
@@ -98,24 +107,16 @@ class SessionRow(Vertical):
             super().__init__()
             self.session_name = session_name
 
-    class _TrashIcon(Static):
+    class _RemoveBox(Static):
         def on_click(self, event: events.Click) -> None:
             event.stop()
             row = next(node for node in self.ancestors if isinstance(node, SessionRow))
-            self.post_message(SessionRow.RemoveRequested(row.session_name, row.session_path, row.session_type))
-
-    class _ConfirmButton(Static):
-        def __init__(self, label: str, confirm: bool, **kwargs) -> None:
-            super().__init__(label, **kwargs)
-            self.confirm = confirm
-
-        def on_click(self, event: events.Click) -> None:
-            event.stop()
-            row = next(node for node in self.ancestors if isinstance(node, SessionRow))
-            if self.confirm:
+            if row.remove_pending:
                 self.post_message(SessionRow.RemoveConfirmed(row.session_name))
             else:
-                row.hide_remove_confirmation()
+                self.post_message(
+                    SessionRow.RemoveRequested(row.session_name, row.session_path, row.session_type),
+                )
 
     def __init__(
         self,
@@ -140,6 +141,8 @@ class SessionRow(Vertical):
         self.session_name = session_name
         self.session_id = session_id
         self.session_path = session_path
+        self._remove_shown = False
+        self._remove_pending = False
         self.note = note
         self._last_click_time: float = 0
         self._editing: bool = False
@@ -210,9 +213,6 @@ class SessionRow(Vertical):
             if self.session_type == "worktree":
                 suffix = " (worktree, shallow)" if self.is_shallow else " (worktree)"
                 yield Static(suffix, classes="worktree-suffix")
-            trash = self._TrashIcon("\U0001f5d1", classes="trash")
-            trash.display = False
-            yield trash
         with Horizontal(classes="line3"):
             yield Static(self._tree_prefix(), classes="tree-prefix")
             yield Static(self._format_branch_text(), classes="branch")
@@ -234,36 +234,44 @@ class SessionRow(Vertical):
         if not self.note:
             note_input.display = False
         yield note_input
-        confirm = Vertical(
-            Static("", classes="confirm-text"),
-            Horizontal(
-                self._ConfirmButton("Remove anyway", True, classes="confirm-yes"),
-                self._ConfirmButton("Keep", False, classes="confirm-no"),
-                classes="confirm-actions",
-            ),
-            classes="confirm",
-        )
-        confirm.display = False
-        yield confirm
         yield Static(tail, classes="line4")
+        remove_box = self._RemoveBox("Remove", classes="remove")
+        remove_box.styles.offset = (REMOVE_CONFIRM_WIDTH, 0)
+        yield remove_box
 
-    def set_removable(self, removable: bool) -> None:
-        """Show or hide the trash icon; hiding also closes any open confirmation."""
-        self.query_one(".trash").display = removable
-        if not removable:
-            self.hide_remove_confirmation()
+    @property
+    def remove_shown(self) -> bool:
+        return self._remove_shown
 
     @property
     def remove_pending(self) -> bool:
-        return self.query_one(".confirm").display
+        return self._remove_pending
+
+    def set_removable(self, removable: bool) -> None:
+        """Slide the Remove box in from the right, or back out, dropping any pending confirmation."""
+        if removable == self._remove_shown:
+            return
+        self._remove_shown = removable
+        box = self.query_one(".remove", Static)
+        if removable:
+            box.styles.animate("offset", value=_cells_offset(0), duration=REMOVE_SLIDE_DURATION)
+        else:
+            self.hide_remove_confirmation()
+            box.styles.animate("offset", value=_cells_offset(REMOVE_CONFIRM_WIDTH), duration=REMOVE_SLIDE_DURATION)
 
     def show_remove_confirmation(self, text: str) -> None:
-        """Expand the row with a message and Remove/Keep buttons."""
-        self.query_one(".confirm-text", Static).update(text)
-        self.query_one(".confirm").display = True
+        """Widen the Remove box with the reason removal needs confirming; the next click confirms."""
+        self._remove_pending = True
+        self._set_remove_box(f"{text}\nRemove anyway", REMOVE_CONFIRM_WIDTH)
 
     def hide_remove_confirmation(self) -> None:
-        self.query_one(".confirm").display = False
+        self._remove_pending = False
+        self._set_remove_box("Remove", REMOVE_BOX_WIDTH)
+
+    def _set_remove_box(self, text: str, width: int) -> None:
+        box = self.query_one(".remove", Static)
+        box.update(Text(text))
+        box.styles.width = width
 
     def _toggle_flash(self) -> None:
         """Toggle the blocker-alert-flash CSS class for the flash animation."""

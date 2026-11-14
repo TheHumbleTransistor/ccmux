@@ -58,7 +58,7 @@ ccmux new         # create a new session from the current directory's repo
 | `↑` / `↓` | Move the selected group up or down |
 | `←` / `→` | Collapse / expand the selected group |
 | `Esc` | Clear the selection |
-| Trash icon on a selected group's sessions | Remove that session; asks first if a worktree has uncommitted changes |
+| Remove box on a selected group's sessions | Slides in from the right; removes that session, asking first if a worktree has uncommitted changes |
 | `Add +` (bottom) | Open a repo from your workspace directories, clone a URL, or start a new project |
 
 Group order and collapsed state are remembered across restarts.
