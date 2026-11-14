@@ -58,7 +58,7 @@ ccmux new         # create a new session from the current directory's repo
 | `↑` / `↓` | Move the selected group up or down |
 | `←` / `→` | Collapse / expand the selected group |
 | `Esc` | Clear the selection |
-| `+` banner (bottom) | Open a repo from your workspace directories, clone a URL, or start a new project |
+| `Add +` (bottom) | Open a repo from your workspace directories, clone a URL, or start a new project |
 
 Group order and collapsed state are remembered across restarts.
 
@@ -82,7 +82,7 @@ Group order and collapsed state are remembered across restarts.
 
 ## Workspace Directories
 
-The sidebar's `+` button looks for repositories one level under your
+The sidebar's `Add +` button looks for repositories one level under your
 workspace directories. Set them in `~/.ccmux/config.toml`:
 
 ```toml
