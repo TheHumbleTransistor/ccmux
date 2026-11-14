@@ -1937,11 +1937,8 @@ class TestSessionRemoval:
     def app(self, runner):
         return self._make_app(runner)
 
-    async def _select_expanded(self, pilot, repo_path):
-        header = _group(pilot.app, repo_path).query_one(RepoHeader)
-        await pilot.click(header)
-        await pilot.pause()
-        await pilot.click(header)
+    async def _select(self, pilot, repo_path):
+        await pilot.click(_group(pilot.app, repo_path).query_one(".title"))
         await pilot.pause()
 
     def _trash(self, pilot, name):
@@ -1951,7 +1948,7 @@ class TestSessionRemoval:
     async def test_trash_icons_follow_selection(self, app):
         async with app.run_test(size=(80, 60)) as pilot:
             assert not self._trash(pilot, "fox").display
-            await self._select_expanded(pilot, "/fake/alpha")
+            await self._select(pilot, "/fake/alpha")
             assert self._trash(pilot, "fox").display
             assert self._trash(pilot, "bear").display
             assert not self._trash(pilot, "hawk").display
@@ -1965,7 +1962,7 @@ class TestSessionRemoval:
     async def test_clean_worktree_removes_immediately(self, app, runner, monkeypatch):
         monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: 0)
         async with app.run_test(size=(80, 60)) as pilot:
-            await self._select_expanded(pilot, "/fake/alpha")
+            await self._select(pilot, "/fake/alpha")
             await pilot.click(self._trash(pilot, "bear"))
             await pilot.pause()
             assert runner.calls == [["remove", "bear", "-y"]]
@@ -1979,7 +1976,7 @@ class TestSessionRemoval:
 
         monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", boom)
         async with app.run_test(size=(80, 60)) as pilot:
-            await self._select_expanded(pilot, "/fake/alpha")
+            await self._select(pilot, "/fake/alpha")
             await pilot.click(self._trash(pilot, "fox"))
             await pilot.pause()
             assert runner.calls == [["remove", "fox", "-y"]]
@@ -1988,7 +1985,7 @@ class TestSessionRemoval:
     async def test_dirty_worktree_asks_first(self, app, runner, monkeypatch):
         monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: 3)
         async with app.run_test(size=(80, 60)) as pilot:
-            await self._select_expanded(pilot, "/fake/alpha")
+            await self._select(pilot, "/fake/alpha")
             row = pilot.app.query_one("#sess-bear", SessionRow)
             await pilot.click(self._trash(pilot, "bear"))
             await pilot.pause()
@@ -2011,7 +2008,7 @@ class TestSessionRemoval:
     async def test_unknown_status_asks(self, app, runner, monkeypatch):
         monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: None)
         async with app.run_test(size=(80, 60)) as pilot:
-            await self._select_expanded(pilot, "/fake/alpha")
+            await self._select(pilot, "/fake/alpha")
             row = pilot.app.query_one("#sess-bear", SessionRow)
             await pilot.click(self._trash(pilot, "bear"))
             await pilot.pause()
@@ -2025,7 +2022,7 @@ class TestSessionRemoval:
         app = self._make_app(runner)
         monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: 0)
         async with app.run_test(size=(80, 60)) as pilot:
-            await self._select_expanded(pilot, "/fake/alpha")
+            await self._select(pilot, "/fake/alpha")
             row = pilot.app.query_one("#sess-bear", SessionRow)
             await pilot.click(self._trash(pilot, "bear"))
             await pilot.pause()
@@ -2038,7 +2035,7 @@ class TestSessionRemoval:
         monkeypatch.setattr(snapshot_module, "count_uncommitted_changes", lambda path: 1)
         monkeypatch.setattr(sidebar_app_module, "SELECTION_INACTIVITY_TIMEOUT", 0.5)
         async with app.run_test(size=(80, 60)) as pilot:
-            await self._select_expanded(pilot, "/fake/alpha")
+            await self._select(pilot, "/fake/alpha")
             row = pilot.app.query_one("#sess-bear", SessionRow)
             await pilot.click(self._trash(pilot, "bear"))
             await pilot.pause()
