@@ -1,22 +1,47 @@
-"""RepoHeader — clickable section header for a repository group."""
+"""RepoHeader — section header for a repository group: collapse arrow plus clickable title."""
 
+from textual.app import ComposeResult
+from textual.containers import Horizontal
 from textual.message import Message
 from textual.widgets import Static
 
 
-class RepoHeader(Static):
-    """Clickable section header for a repository group."""
+class RepoHeader(Horizontal):
+    """Section header for a repository group: a collapse arrow and a clickable title."""
 
-    class Clicked(Message):
-        """Posted when the user clicks a repo group header."""
+    class ToggleClicked(Message):
+        """Posted when the user clicks the collapse arrow."""
 
         def __init__(self, repo_path: str) -> None:
             super().__init__()
             self.repo_path = repo_path
 
-    def __init__(self, *args, repo_path: str = "", **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.repo_path = repo_path
+    class Clicked(Message):
+        """Posted when the user clicks the title area."""
 
-    def on_click(self) -> None:
-        self.post_message(self.Clicked(self.repo_path))
+        def __init__(self, repo_path: str) -> None:
+            super().__init__()
+            self.repo_path = repo_path
+
+    class _Toggle(Static):
+        def on_click(self) -> None:
+            self.post_message(RepoHeader.ToggleClicked(self.parent.repo_path))
+
+    class _Title(Static):
+        def on_click(self) -> None:
+            self.post_message(RepoHeader.Clicked(self.parent.repo_path))
+
+    def __init__(self, repo_path: str, toggle: str, title: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.repo_path = repo_path
+        self._toggle_text = toggle
+        self._title_text = title
+
+    def compose(self) -> ComposeResult:
+        yield self._Toggle(self._toggle_text, classes="toggle")
+        yield self._Title(self._title_text, classes="title")
+
+    def update(self, toggle: str, title: str) -> None:
+        """Replace the arrow and title text."""
+        self.query_one(".toggle", Static).update(toggle)
+        self.query_one(".title", Static).update(title)

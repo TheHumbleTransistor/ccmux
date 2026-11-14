@@ -339,6 +339,18 @@ RepoHeader {
     padding: 0 1;
     color: #d7af5f;
     text-style: bold;
+}
+
+RepoHeader .toggle {
+    width: 2;
+}
+
+RepoHeader .toggle:hover {
+    color: #ffd787;
+}
+
+RepoHeader .title {
+    width: 1fr;
     text-wrap: nowrap;
     text-overflow: clip;
 }

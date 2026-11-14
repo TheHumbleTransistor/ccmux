@@ -57,16 +57,19 @@ class RepoSessionsList(Vertical):
             return "[#9e9e9e]\u25cb[/]"
         return "[#9e9e9e]\u25cf[/]"
 
-    def _header_text(self) -> str:
+    def _toggle_text(self) -> str:
+        return "\u25b8" if self.collapsed else "\u25be"
+
+    def _title_text(self) -> str:
         if not self.collapsed:
-            return f"\u25be [#9e9e9e]\u25cf[/] {self.repo_name}"
+            return f"[#9e9e9e]\u25cf[/] {self.repo_name}"
         return (
-            f"\u25b8 {self._status_indicator()} {self.repo_name} "
+            f"{self._status_indicator()} {self.repo_name} "
             f"[#666666 not bold]({len(self.sessions)})[/]"
         )
 
     def compose(self) -> ComposeResult:
-        yield RepoHeader(self._header_text(), repo_path=self.repo_path)
+        yield RepoHeader(self.repo_path, self._toggle_text(), self._title_text())
         last_idx = len(self.sessions) - 1
         for i, derived in enumerate(self.sessions):
             entry = derived.snapshot
@@ -114,7 +117,7 @@ class RepoSessionsList(Vertical):
     def refresh_header(self) -> None:
         """Sync the header text, status dot, and alert highlight with the row states."""
         self._update_breathing()
-        self.query_one(RepoHeader).update(self._header_text())
+        self.query_one(RepoHeader).update(self._toggle_text(), self._title_text())
         alert = self.collapsed and any(row.has_blocker_alert for row in self.query(SessionRow))
         self.set_class(alert, "blocker-alert")
 
@@ -140,4 +143,4 @@ class RepoSessionsList(Vertical):
 
     def _advance_breath(self) -> None:
         self._breath_frame = (self._breath_frame + 1) % len(BREATH_COLORS)
-        self.query_one(RepoHeader).update(self._header_text())
+        self.query_one(RepoHeader).update(self._toggle_text(), self._title_text())
