@@ -24,6 +24,7 @@ from ccmux.ui import (
     SessionRow,
     RepoHeader,
     RepoSessionsList,
+    AddButton,
     NewSessionPanel,
     write_pid_file,
     remove_pid_file,
@@ -1781,6 +1782,8 @@ class TestNewSessionPanel:
         return self._make_app(ws, runner)
 
     async def _open(self, pilot):
+        await pilot.click(offset=(40, 50))
+        await pilot.pause(0.5)
         await pilot.click("#add-button")
         await pilot.pause()
 
@@ -1790,14 +1793,14 @@ class TestNewSessionPanel:
             await self._open(pilot)
             assert pilot.app.query_one("#new-session-panel").display
             assert not pilot.app.query_one("#instance-list").display
-            assert not pilot.app.query_one("#add-button").display
+            assert not pilot.app.query_one(AddButton).shown
             assert pilot.app.query_one(NewSessionPanel).mode is None
 
             await pilot.click("#new-back")
             await pilot.pause()
             assert not pilot.app.query_one("#new-session-panel").display
             assert pilot.app.query_one("#instance-list").display
-            assert pilot.app.query_one("#add-button").display
+            assert not pilot.app.query_one(AddButton).shown
 
     @pytest.mark.asyncio
     async def test_existing_repo_filters_and_submits(self, app, runner, ws):
@@ -1905,11 +1908,31 @@ class TestNewSessionPanel:
             assert pilot.app.query_one("#instance-list").display
 
     @pytest.mark.asyncio
-    async def test_about_panel_hides_button(self, app):
+    async def test_add_bar_reveals_on_empty_click_and_hides_elsewhere(self, app):
         async with app.run_test(size=(80, 60)) as pilot:
+            button = pilot.app.query_one(AddButton)
+            assert not button.shown
+
+            await pilot.click(offset=(40, 50))
+            await pilot.pause(0.5)
+            assert button.shown
+            assert button.region.height == 3
+            assert button.region.bottom == pilot.app.screen.region.bottom
+
+            await pilot.click("#sess-fox")
+            await pilot.pause()
+            assert not button.shown
+
+            await pilot.click(offset=(40, 50))
+            await pilot.pause(0.5)
+            assert button.shown
+
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not button.shown
+
+            await pilot.click(offset=(40, 50))
+            await pilot.pause(0.5)
             await pilot.click("#title")
             await pilot.pause()
-            assert not pilot.app.query_one("#add-button").display
-            await pilot.click("#title")
-            await pilot.pause()
-            assert pilot.app.query_one("#add-button").display
+            assert not button.shown

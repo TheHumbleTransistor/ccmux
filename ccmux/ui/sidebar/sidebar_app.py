@@ -127,7 +127,7 @@ class SidebarApp(App):
         self._view = view
         self._about_visible = view == "about"
         self.query_one("#instance-list").display = view == "list"
-        self.query_one("#add-button").display = view == "list"
+        self.query_one(AddButton).hide()
         self.query_one("#about-panel").display = view == "about"
         self.query_one("#new-session-panel").display = view == "new"
         if view == "list":
@@ -151,9 +151,10 @@ class SidebarApp(App):
         self._close_about()
 
     def action_escape(self) -> None:
-        """Close any open panel and clear any repo group selection."""
+        """Close any open panel, hide the Add bar, and clear any repo group selection."""
         if self._view != "list":
             self._show_view("list")
+        self.query_one(AddButton).hide()
         self._select_group(None)
 
     async def on_add_button_clicked(self) -> None:
@@ -520,6 +521,12 @@ class SidebarApp(App):
         inside_header = any(isinstance(node, RepoHeader) for node in event.widget.ancestors_with_self)
         if self._selected_repo is not None and not inside_header:
             self._select_group(None)
+        clicked_empty = event.widget is self.screen or event.widget.id == "instance-list"
+        add_button = self.query_one(AddButton)
+        if clicked_empty and self._view == "list":
+            add_button.show()
+        else:
+            add_button.hide()
 
     async def on_session_row_selected(self, message: SessionRow.Selected) -> None:
         """Switch to the clicked session's tmux window and clear blocker alert."""

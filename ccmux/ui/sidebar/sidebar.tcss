@@ -2,6 +2,7 @@ Screen {
     background: #1e1e1e;
     layout: vertical;
     scrollbar-size: 0 0;
+    layers: base overlay;
 }
 
 #title {
@@ -46,17 +47,19 @@ Screen {
 }
 
 #add-button {
+    layer: overlay;
     dock: bottom;
     width: 100%;
-    height: 1;
-    text-align: center;
+    height: 3;
+    background: #d7af5f;
+    color: #1e1e1e;
     text-style: bold;
-    color: #9e9e9e;
+    text-align: center;
+    content-align: center middle;
 }
 
 #add-button:hover {
-    background: #d7af5f;
-    color: #1e1e1e;
+    background: #ffd787;
 }
 
 #new-session-panel {
