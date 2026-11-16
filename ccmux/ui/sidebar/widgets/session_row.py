@@ -6,18 +6,15 @@ from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.css.scalar import Scalar, ScalarOffset, Unit
 from textual.message import Message
 from textual.widgets import Static, TextArea
+
+from ccmux.ui.sidebar.widgets.offsets import cells_offset
 
 EDIT_INACTIVITY_TIMEOUT = 10  # seconds before auto-saving an open note editor
 REMOVE_SLIDE_DURATION = 0.2  # seconds for the Remove box to slide in or out
 REMOVE_BOX_WIDTH = 10
 REMOVE_CONFIRM_WIDTH = 28
-
-
-def _cells_offset(x: int) -> ScalarOffset:
-    return ScalarOffset(Scalar(x, Unit.CELLS, Unit.CELLS), Scalar(0, Unit.CELLS, Unit.CELLS))
 
 # Breathing animation: dot color steps for one full cycle (grey→green→grey).
 # Uses exact 256-color palette entries to avoid rounding artifacts in tmux.
@@ -254,10 +251,10 @@ class SessionRow(Vertical):
         self._remove_shown = removable
         box = self.query_one(".remove", Static)
         if removable:
-            box.styles.animate("offset", value=_cells_offset(0), duration=REMOVE_SLIDE_DURATION)
+            box.styles.animate("offset", value=cells_offset(0), duration=REMOVE_SLIDE_DURATION)
         else:
             self.hide_remove_confirmation()
-            box.styles.animate("offset", value=_cells_offset(REMOVE_CONFIRM_WIDTH), duration=REMOVE_SLIDE_DURATION)
+            box.styles.animate("offset", value=cells_offset(REMOVE_CONFIRM_WIDTH), duration=REMOVE_SLIDE_DURATION)
 
     def show_remove_confirmation(self, text: str) -> None:
         """Widen the Remove box with the reason removal needs confirming; the next click confirms."""
