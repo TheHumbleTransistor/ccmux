@@ -1959,7 +1959,9 @@ class TestSessionRemoval:
             assert self._row(pilot, "fox").size.height == 4
             box = self._row(pilot, "fox").query_one(".remove")
             assert box.region.height == 4
-            assert box.region.right == self._row(pilot, "fox").content_region.right
+            assert box.region.right == self._row(pilot, "fox").region.right
+            name_line = self._row(pilot, "fox").query_one(".line2")
+            assert name_line.region.right == self._row(pilot, "fox").region.right - 1
 
             await pilot.press("escape")
             await pilot.pause(0.5)
