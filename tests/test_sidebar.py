@@ -1938,6 +1938,47 @@ class TestNewSessionPanel:
             await pilot.pause()
             assert not button.shown
 
+    @pytest.mark.asyncio
+    async def test_add_bar_ignores_gaps_above_and_between_groups(self, runner, ws):
+        async def provider():
+            return [
+                SessionSnapshot("alpha", str(ws / "alpha"), "fox", "main", True, False, None, session_id=1),
+                SessionSnapshot("beta", str(ws / "beta"), "hawk", "main", True, False, None, session_id=2),
+            ]
+
+        app = SidebarApp(
+            snapshot_fn=provider, poll_interval=60.0, on_select=lambda name: None,
+            cli_runner=runner, workspace_dirs_fn=lambda: [ws],
+        )
+        async with app.run_test(size=(80, 60)) as pilot:
+            button = pilot.app.query_one(AddButton)
+            alpha = _group(pilot.app, str(ws / "alpha"))
+            listing = pilot.app.query_one("#instance-list")
+
+            await pilot.click(offset=(40, listing.region.y - 1))
+            await pilot.pause(0.5)
+            assert not button.shown
+
+            await pilot.click(offset=(40, alpha.region.bottom))
+            await pilot.pause(0.5)
+            assert not button.shown
+
+            await pilot.click(offset=(40, listing.region.bottom + 1))
+            await pilot.pause(0.5)
+            assert button.shown
+
+    @pytest.mark.asyncio
+    async def test_add_bar_hides_when_sidebar_loses_focus(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            button = pilot.app.query_one(AddButton)
+            await pilot.click(offset=(40, 50))
+            await pilot.pause(0.5)
+            assert button.shown
+
+            pilot.app.post_message(events.AppBlur())
+            await pilot.pause()
+            assert not button.shown
+
 
 class TestCountUncommittedChanges:
     @mock.patch("ccmux.ui.sidebar.snapshot.subprocess.run")
