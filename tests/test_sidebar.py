@@ -1936,3 +1936,15 @@ class TestNewSessionPanel:
             await pilot.click("#title")
             await pilot.pause()
             assert not button.shown
+
+    @pytest.mark.asyncio
+    async def test_add_bar_hides_when_sidebar_loses_focus(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            button = pilot.app.query_one(AddButton)
+            await pilot.click(offset=(40, 50))
+            await pilot.pause(0.5)
+            assert button.shown
+
+            pilot.app.post_message(events.AppBlur())
+            await pilot.pause()
+            assert not button.shown

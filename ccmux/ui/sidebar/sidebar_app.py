@@ -188,8 +188,9 @@ class SidebarApp(App):
         return result.returncode, f"{result.stdout}\n{result.stderr}".strip()
 
     def on_app_blur(self) -> None:
-        """Clear the repo group selection when the sidebar pane loses focus."""
+        """Clear the repo group selection and hide the Add bar when the sidebar pane loses focus."""
         self._select_group(None)
+        self.query_one(AddButton).hide()
 
     async def _load_prefs(self) -> None:
         if not self._persist_prefs:
