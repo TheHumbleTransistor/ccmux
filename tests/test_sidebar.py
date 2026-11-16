@@ -1441,6 +1441,21 @@ class TestRepoGroupCollapse:
             assert pilot.app._selection_timer is not None
 
     @pytest.mark.asyncio
+    async def test_second_title_click_deselects(self, app):
+        async with app.run_test(size=(80, 60)) as pilot:
+            group = _group(pilot.app, "/fake/alpha")
+            await pilot.click(group.query_one(".title"))
+            await pilot.pause()
+            assert group.selected
+
+            await pilot.click(group.query_one(".title"))
+            await pilot.pause()
+            assert not group.selected
+            assert not group.collapsed
+            assert group._blink_timer is None
+            assert pilot.app._selection_timer is None
+
+    @pytest.mark.asyncio
     async def test_left_right_collapse_and_expand_selected(self, app):
         async with app.run_test(size=(80, 60)) as pilot:
             group = _group(pilot.app, "/fake/alpha")
