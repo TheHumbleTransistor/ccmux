@@ -522,9 +522,9 @@ class SidebarApp(App):
         inside_header = any(isinstance(node, RepoHeader) for node in event.widget.ancestors_with_self)
         if self._selected_repo is not None and not inside_header:
             self._select_group(None)
-        clicked_empty = event.widget is self.screen or event.widget.id == "instance-list"
+        below_list = event.screen_y >= self.query_one("#instance-list").region.bottom
         add_button = self.query_one(AddButton)
-        if clicked_empty and self._view == "list":
+        if event.widget is self.screen and below_list and self._view == "list":
             add_button.show()
         else:
             add_button.hide()
