@@ -240,9 +240,12 @@ class SidebarApp(App):
         await self._save_prefs()
 
     def on_repo_header_clicked(self, message: RepoHeader.Clicked) -> None:
-        """Select the repo group whose title was clicked."""
+        """Select the repo group whose title was clicked, or deselect it when already selected."""
         self.set_focus(None)
-        self._select_group(message.repo_path)
+        if self._selected_repo == message.repo_path:
+            self._select_group(None)
+        else:
+            self._select_group(message.repo_path)
 
     async def on_repo_header_toggle_clicked(self, message: RepoHeader.ToggleClicked) -> None:
         """Toggle the collapsed state of the repo group whose arrow was clicked."""
